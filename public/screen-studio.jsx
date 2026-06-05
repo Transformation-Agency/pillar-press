@@ -140,7 +140,12 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
   React.useEffect(() => {
     const list = window.STUDIO.modelsByType(type);
     if (!list.length) return;
-    if (!list.some((m) => m.id === modelId)) setModelId(list[0].id);
+    if (!list.some((m) => m.id === modelId)) {
+      // Prefer a prompt-only model (no required start frame) as the default, so
+      // a fresh Generate works without extra inputs. The dropdown still lists all.
+      const def = list.find((m) => !(m.requires && m.requires.startFrame)) || list[0];
+      setModelId(def.id);
+    }
   }, [type, catalogVersion]);
   React.useEffect(() => {
     if (!model) return;
@@ -231,22 +236,17 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
               <Segmented value={type} onChange={setType} options={window.STUDIO.TYPES.map((t) => ({ v: t.id, l: t.label }))} />
             </div>
 
-            {/* model selector */}
+            {/* model selector (dropdown) */}
             <StField label="Model">
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {models.map((m) => {
-                  const on = m.id === modelId;
-                  return (
-                    <button key={m.id} onClick={() => setModelId(m.id)} style={{ textAlign: "left", border: "1px solid " + (on ? "var(--accent)" : "var(--hair)"), background: on ? "var(--accent-soft)" : "var(--paper-2)", borderRadius: "var(--radius)", padding: "10px 12px", cursor: "pointer" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
-                        <span style={{ fontFamily: "var(--font-display)", fontSize: 16 }}>{m.name}</span>
-                        <span className="mono muted" style={{ fontSize: 10.5 }}>{m.credits} cr</span>
-                      </div>
-                      <div className="muted" style={{ fontSize: 12.5, lineHeight: 1.4, marginTop: 2 }}>{m.description}</div>
-                    </button>
-                  );
-                })}
-              </div>
+              <select className="field" value={modelId || ""} onChange={(e) => setModelId(e.target.value)}
+                style={{ width: "100%", fontSize: 15, padding: "10px 12px", borderRadius: "var(--radius)" }}>
+                {models.length === 0 && <option value="">No models available</option>}
+                {models.map((m) => (
+                  <option key={m.id} value={m.id}>{m.name}{m.credits ? " · " + m.credits + " cr" : ""}</option>
+                ))}
+              </select>
+              {model && model.description &&
+                <div className="muted" style={{ fontSize: 12.5, lineHeight: 1.4, marginTop: 6 }}>{model.description}</div>}
             </StField>
 
             {/* prompt / script */}

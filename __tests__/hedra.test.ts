@@ -54,9 +54,9 @@ describe("hedra client", () => {
 
   it("maps 402 to insufficient_credits and 429 to rate_limit", async () => {
     global.fetch = mockFetch(402, {}) as any;
-    await expect(hedra.generateAsset({ type: "image", model_id: "m1" })).rejects.toMatchObject({ code: "insufficient_credits" });
+    await expect(hedra.generateAsset({ type: "image", modelId: "m1" })).rejects.toMatchObject({ code: "insufficient_credits" });
     global.fetch = mockFetch(429, {}) as any;
-    await expect(hedra.generateAsset({ type: "image", model_id: "m1" })).rejects.toMatchObject({ code: "rate_limit" });
+    await expect(hedra.generateAsset({ type: "image", modelId: "m1" })).rejects.toMatchObject({ code: "rate_limit" });
   });
 
   it("getGenerationStatus hits the status path", async () => {

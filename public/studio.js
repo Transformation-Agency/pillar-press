@@ -83,17 +83,27 @@
 
   function normModel(m) {
     if (!m || !m.id) return null;
+    const ar = m.aspect_ratios || m.aspectRatios;
+    const res = m.resolutions;
+    const dur = m.durations;
+    const req = m.requires || {
+      startFrame: !!m.requires_start_frame,
+      endFrame: !!m.requires_end_frame,
+      audio: !!m.requires_audio,
+    };
     return {
       id: m.id,
       name: m.name || m.label || m.id,
       type: API_TYPE_TO_KIND[m.type] || m.type || "image",
       credits: typeof m.credits === "number" ? m.credits : (m.cost || 0),
       description: m.description || "",
-      aspectRatios: Array.isArray(m.aspectRatios) ? m.aspectRatios : [],
-      resolutions: Array.isArray(m.resolutions) ? m.resolutions : [],
-      durations: Array.isArray(m.durations) ? m.durations : [],
-      maxDuration: m.maxDuration,
-      requires: m.requires || {},
+      aspectRatios: Array.isArray(ar) ? ar : [],
+      // "fixed" / empty mean the model has no chooseable resolution — keep it
+      // out of the picker so we never send an unsupported value.
+      resolutions: Array.isArray(res) ? res.filter((r) => r && r !== "fixed") : [],
+      durations: Array.isArray(dur) ? dur : [],
+      maxDuration: m.max_duration || m.maxDuration,
+      requires: req,
     };
   }
 
@@ -125,6 +135,13 @@
           if (m && !seen[m.id]) { seen[m.id] = true; merged.push(m); }
         });
       });
+      // Hedra serves only image/video models; audio (TTS) is ElevenLabs, so it
+      // never appears in the live list. Keep a synthetic audio model so the
+      // Voice composer always has something to select.
+      if (merged.length && !merged.some((m) => m.type === "audio")) {
+        const fallbackAudio = MODELS.find((m) => m.type === "audio");
+        if (fallbackAudio) merged.push(fallbackAudio);
+      }
       if (merged.length) _catalog = merged;
       return currentModels();
     }).catch(() => currentModels());
