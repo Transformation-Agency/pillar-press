@@ -57,6 +57,24 @@ export interface RevisionPacket {
 export interface RevisionPieceInput {
   original?: string;
   packet?: RevisionPacket | null;
+  // The author's explicit guidance — overrides findings where they conflict (as
+  // long as voice is preserved). gateNotes is keyed by gate id (all seven), so it
+  // can carry intent for strategy/identity gates the firewall excludes from findings.
+  gateNotes?: Record<string, string> | null;
+  direction?: string | null;
+}
+
+const GATE_LABELS: Record<string, string> = {
+  strategy: "Strategy alignment", audience: "Audience", tone: "Tone & register",
+  rigor: "Rigor", stress: "Stress test", clarity: "Clarity", self: "Self-alignment",
+};
+
+/** Build the author-guidance blocks (creative direction + per-gate commentary). */
+export function buildGuidance(piece: RevisionPieceInput): { direction: string; notesBlock: string; hasGuidance: boolean } {
+  const noteEntries = Object.entries(piece.gateNotes ?? {}).filter(([, v]) => (v || "").trim());
+  const notesBlock = noteEntries.map(([id, v]) => `• ${GATE_LABELS[id] ?? id}: ${(v as string).trim()}`).join("\n");
+  const direction = (piece.direction ?? "").trim();
+  return { direction, notesBlock, hasGuidance: !!direction || !!notesBlock };
 }
 
 export interface ChangelogEntry {
@@ -197,15 +215,21 @@ export function buildFindingsBlock(packet: RevisionPacket | null | undefined): s
  * System prompt — byte-identical to generators.js (refCtx interpolated).
  * ------------------------------------------------------------------ */
 
-export function REVISION_SYSTEM(refCtx: string): string {
+export function REVISION_SYSTEM(refCtx: string, guidance?: { direction: string; notesBlock: string; hasGuidance: boolean }): string {
+  const g = guidance ?? { direction: "", notesBlock: "", hasGuidance: false };
+  const eClause = g.hasGuidance
+    ? `\n(e) HONOR THE AUTHOR'S DIRECTION & SECTION COMMENTARY below — they govern the approach, emphasis, and tone of the rewrite and take precedence over the findings where they conflict, as long as you stay in the author's voice. When a change is driven by author guidance (not a finding), tag its changelog line [DIR].`
+    : "";
+  const directionBlock = g.direction ? `\n\nAUTHOR'S CREATIVE DIRECTION (apply throughout):\n${g.direction}` : "";
+  const notesBlock = g.notesBlock ? `\n\nAUTHOR COMMENTARY BY REVIEW SECTION (the author's specific notes on each gate — apply where relevant to this passage):\n${g.notesBlock}` : "";
   return `You are the reviser in an editorial system for a single author. You revise ONE PASSAGE of a longer piece at a time. For the passage you are given:
 (a) PRESERVE the author's structure and register;
 (b) apply ONLY the clarity, tone, and inoculation findings that are relevant to THIS passage — do NOT act on strategy, audience, rigor, or identity concerns;
 (c) obey absolutely: where a clarity rule would flatten a line that sounds like the author, the AUTHOR'S LINE WINS — keep it verbatim;
-(d) make the smallest changes that satisfy the findings; if the passage needs no change, return it unchanged with an empty changelog.
+(d) make the smallest changes that satisfy the findings; if the passage needs no change, return it unchanged with an empty changelog.${eClause}
 
 AUTHOR REFERENCES:
-${refCtx}
+${refCtx}${directionBlock}${notesBlock}
 
 Return EXACTLY this format and NOTHING else (no JSON, no preamble):
 @@REVISION@@
@@ -230,7 +254,7 @@ export async function generateRevision(
 ): Promise<RevisionResult> {
   const packet = piece.packet || {};
   const findingsBlock = buildFindingsBlock(packet);
-  const system = REVISION_SYSTEM(refCtx);
+  const system = REVISION_SYSTEM(refCtx, buildGuidance(piece));
 
   const chunks = chunkText(piece.original || "", 260);
   const revisions: string[] = [];

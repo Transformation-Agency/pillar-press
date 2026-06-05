@@ -61,6 +61,8 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     const input: RevisionPieceInput = {
       original: piece.original,
       packet: (piece.packet ?? null) as RevisionPacket | null,
+      gateNotes: (piece.gateNotes ?? null) as Record<string, string> | null,
+      direction: piece.direction ?? null,
     };
 
     const result = await generateRevision(input, refCtx, ai);

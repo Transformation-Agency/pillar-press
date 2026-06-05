@@ -15,15 +15,22 @@ export const createPieceSchema = z.object({
 });
 export type CreatePieceInput = z.infer<typeof createPieceSchema>;
 
-/** PATCH /api/pieces/:id — update title / original / status. */
+export const GATE_IDS = ["strategy", "audience", "tone", "rigor", "stress", "clarity", "self"] as const;
+
+/** PATCH /api/pieces/:id — update title / original / status / author guidance. */
 export const updatePieceSchema = z
   .object({
     title: z.string().trim().min(1).max(300).optional(),
     original: z.string().max(200_000).optional(),
     status: z.enum(pieceStatus).optional(),
+    direction: z.string().max(4000).optional(),
+    // per-gate commentary; keys must be valid gate ids. Shallow-merged server-side.
+    gateNotes: z.record(z.enum(GATE_IDS), z.string().max(2000)).optional(),
   })
   .refine(
-    (v) => v.title !== undefined || v.original !== undefined || v.status !== undefined,
-    { message: "Provide at least one of title, original, or status." },
+    (v) =>
+      v.title !== undefined || v.original !== undefined || v.status !== undefined ||
+      v.direction !== undefined || v.gateNotes !== undefined,
+    { message: "Provide at least one updatable field." },
   );
 export type UpdatePieceInput = z.infer<typeof updatePieceSchema>;

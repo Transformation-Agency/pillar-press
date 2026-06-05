@@ -174,6 +174,10 @@ export const pieces = pgTable(
     outputs: jsonb("outputs"),
     // outputOrder = string[] platform ids in generation order
     outputOrder: jsonb("output_order"),
+    // author guidance for the revision: overall creative direction + per-gate
+    // commentary ({ [gateId]: note }), both fed into the reviser prompt.
+    direction: text("direction"),
+    gateNotes: jsonb("gate_notes").notNull().default({}),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

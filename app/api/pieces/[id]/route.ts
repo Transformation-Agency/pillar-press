@@ -57,12 +57,26 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
     const body = updatePieceSchema.parse(await req.json());
 
+    // gateNotes is shallow-merged into the stored map (so notes on different
+    // gates accumulate); empty-string values clear that gate's note.
+    let mergedNotes: Record<string, string> | undefined;
+    if (body.gateNotes !== undefined) {
+      const current = (existing.gateNotes as Record<string, string> | null) ?? {};
+      mergedNotes = { ...current };
+      for (const [k, v] of Object.entries(body.gateNotes)) {
+        if ((v ?? "").trim()) mergedNotes[k] = v;
+        else delete mergedNotes[k];
+      }
+    }
+
     const [piece] = await db
       .update(pieces)
       .set({
         ...(body.title !== undefined ? { title: body.title } : {}),
         ...(body.original !== undefined ? { original: body.original } : {}),
         ...(body.status !== undefined ? { status: body.status } : {}),
+        ...(body.direction !== undefined ? { direction: body.direction } : {}),
+        ...(mergedNotes !== undefined ? { gateNotes: mergedNotes } : {}),
         updatedAt: new Date(),
       })
       .where(and(eq(pieces.id, existing.id), eq(pieces.userId, user.id)))

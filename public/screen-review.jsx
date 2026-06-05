@@ -170,6 +170,107 @@ function OriginalPane({ text, anchor, bump }) {
   );
 }
 
+function MicButton({ listening, onClick, title }) {
+  return (
+    <button className="btn ghost sm" onClick={onClick} title={title || "Dictate"}
+      style={listening ? { borderColor: "var(--sev-must)", color: "var(--sev-must)" } : undefined}>
+      <Icon name="mic" size={13} /> {listening ? "Listening…" : "Dictate"}
+    </button>
+  );
+}
+
+// Web Speech dictation helper shared by the commentary + direction boxes.
+function useDictation(getBase, onText, onDone) {
+  const recRef = React.useRef(null);
+  const [listening, setListening] = React.useState(false);
+  const [msg, setMsg] = React.useState(null);
+  React.useEffect(() => () => { try { recRef.current && recRef.current.stop(); } catch (e) {} }, []);
+  const toggle = () => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { setMsg("Voice dictation isn't supported in this browser."); return; }
+    if (listening) { try { recRef.current && recRef.current.stop(); } catch (e) {} return; }
+    const rec = new SR();
+    rec.continuous = true; rec.interimResults = true; rec.lang = "en-US";
+    let base = getBase() ? getBase() + " " : "";
+    rec.onresult = (e) => {
+      let interim = "", finalAdd = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) finalAdd += t; else interim += t;
+      }
+      if (finalAdd) base += finalAdd;
+      onText((base + interim).replace(/\s+/g, " ").trim());
+    };
+    rec.onerror = () => { setMsg("Dictation error."); setListening(false); };
+    rec.onend = () => { setListening(false); recRef.current = null; onDone && onDone(); };
+    recRef.current = rec; setMsg(null); setListening(true);
+    try { rec.start(); } catch (e) { setListening(false); }
+  };
+  return { listening, msg, toggle };
+}
+
+function CommentaryBox({ piece, gateId }) {
+  const noteOf = (p) => (p.gateNotes && p.gateNotes[gateId]) || "";
+  const [open, setOpen] = React.useState(!!noteOf(piece));
+  const valRef = React.useRef(noteOf(piece));
+  const [val, setValState] = React.useState(noteOf(piece));
+  const setVal = (v) => { valRef.current = v; setValState(v); };
+  React.useEffect(() => { setVal(noteOf(piece)); /* resync on piece switch */ }, [piece.id]);
+  const persist = () => {
+    const v = valRef.current.trim();
+    if (v === noteOf(piece).trim()) return;
+    window.Store.updatePiece(piece.id, { gateNotes: Object.assign({}, piece.gateNotes || {}, { [gateId]: v }) });
+  };
+  const dict = useDictation(() => valRef.current, (t) => setVal(t), () => persist());
+  const openAnd = (fn) => { setOpen(true); fn(); };
+
+  if (!open) {
+    return (
+      <div style={{ marginTop: 10, display: "flex", gap: 6, alignItems: "center" }}>
+        <button className="btn ghost sm" onClick={() => setOpen(true)}><Icon name="book" size={13} /> Add commentary</button>
+        <MicButton listening={dict.listening} onClick={() => openAnd(dict.toggle)} title="Dictate commentary" />
+        {dict.msg && <span className="muted" style={{ fontSize: 12 }}>{dict.msg}</span>}
+      </div>
+    );
+  }
+  return (
+    <div style={{ marginTop: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+        <span className="eyebrow">Your commentary</span>
+        <MicButton listening={dict.listening} onClick={dict.toggle} title="Dictate commentary" />
+      </div>
+      <textarea className="field" value={val} onChange={(e) => setVal(e.target.value)} onBlur={persist}
+        placeholder="Notes for the revision on this section — typed, pasted, or dictated…"
+        style={{ width: "100%", minHeight: 60, fontSize: 14, lineHeight: 1.5, resize: "vertical" }} />
+      {dict.msg && <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>{dict.msg}</div>}
+    </div>
+  );
+}
+
+function DirectionBox({ piece }) {
+  const [val, setVal] = React.useState(piece.direction || "");
+  const valRef = React.useRef(piece.direction || "");
+  const set = (v) => { valRef.current = v; setVal(v); };
+  React.useEffect(() => { set(piece.direction || ""); }, [piece.id]);
+  const persist = () => {
+    if (valRef.current.trim() === (piece.direction || "").trim()) return;
+    window.Store.updatePiece(piece.id, { direction: valRef.current.trim() });
+  };
+  const dict = useDictation(() => valRef.current, (t) => set(t), () => persist());
+  return (
+    <div style={{ marginBottom: 18, padding: "12px 14px", border: "1px solid var(--hair)", borderRadius: "var(--radius)", background: "var(--paper-sunk)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+        <span className="eyebrow">Creative direction · applies throughout</span>
+        <MicButton listening={dict.listening} onClick={dict.toggle} title="Dictate direction" />
+      </div>
+      <textarea className="field" value={val} onChange={(e) => set(e.target.value)} onBlur={persist}
+        placeholder="Overall direction for the rewrite — emphasis, angle, tone. Takes precedence over findings (in your voice)."
+        style={{ width: "100%", minHeight: 54, fontSize: 14, lineHeight: 1.5, resize: "vertical" }} />
+      {dict.msg && <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>{dict.msg}</div>}
+    </div>
+  );
+}
+
 function ReviewTab({ piece }) {
   const [sel, setSel] = React.useState({ key: null, anchor: null, bump: 0 });
   const [sevFilter, setSevFilter] = React.useState({ must: true, consider: true, note: true });
@@ -206,6 +307,8 @@ function ReviewTab({ piece }) {
             })}
           </div>
 
+          <DirectionBox piece={piece} />
+
           {window.GATES.map((g) => {
             const r = packet[g.id]; if (!r) return null;
             const filtered = { ...r, findings: r.findings.filter((f) => sevFilter[f.severity]) };
@@ -217,6 +320,7 @@ function ReviewTab({ piece }) {
                 </div>
                 {r.summary && <p style={{ fontSize: 15, color: "var(--ink-2)", marginBottom: 12 }}>{r.summary}</p>}
                 <GateBody g={g} r={filtered} onSelect={onSelect} selKey={sel.key} />
+                <CommentaryBox piece={piece} gateId={g.id} />
               </div>
             );
           })}

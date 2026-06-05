@@ -5,10 +5,33 @@ import {
   collectFirewallFindings,
   buildFindingsBlock,
   REVISION_SYSTEM,
+  buildGuidance,
   generateRevision,
   type RevisionPacket,
 } from "@/lib/revision";
 import type { AI } from "@/lib/anthropic";
+
+describe("author guidance (direction + gate commentary)", () => {
+  it("builds a labelled commentary block and skips empty notes", () => {
+    const g = buildGuidance({ direction: "  Lead with stakes ", gateNotes: { clarity: "punchy", tone: "  ", self: "sound like me" } });
+    expect(g.hasGuidance).toBe(true);
+    expect(g.direction).toBe("Lead with stakes");
+    expect(g.notesBlock).toContain("• Clarity: punchy");
+    expect(g.notesBlock).toContain("• Self-alignment: sound like me");
+    expect(g.notesBlock).not.toContain("Tone & register"); // empty note skipped
+  });
+
+  it("injects the (e) clause + blocks only when guidance is present", () => {
+    const withG = REVISION_SYSTEM("REF", buildGuidance({ direction: "D", gateNotes: { clarity: "c" } }));
+    expect(withG).toContain("(e)");
+    expect(withG).toContain("[DIR]");
+    expect(withG).toContain("AUTHOR'S CREATIVE DIRECTION");
+    expect(withG).toContain("AUTHOR COMMENTARY BY REVIEW SECTION");
+    const without = REVISION_SYSTEM("REF", buildGuidance({}));
+    expect(without).not.toContain("(e)");
+    expect(without).not.toContain("AUTHOR COMMENTARY BY REVIEW SECTION");
+  });
+});
 
 /* ------------------------------------------------------------------ *
  * chunkText
