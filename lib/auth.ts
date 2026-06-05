@@ -20,6 +20,14 @@ import { supabaseFromToken } from "@/lib/supabase";
 
 export type Role = (typeof import("@/db/schema").membershipRole)[number];
 
+// Skip-login phase: when AUTH_DISABLED is not explicitly "false", the app runs
+// without authentication — every request resolves to a single default local
+// user whose workspace is auto-provisioned, and role checks are not enforced
+// (assistant has the same access as author). Set AUTH_DISABLED=false to require
+// real Supabase sessions again.
+const DEFAULT_USER_ID = process.env.DEFAULT_USER_ID ?? "dev-user";
+const authDisabled = () => process.env.AUTH_DISABLED !== "false";
+
 export interface SessionUser {
   id: string;
   workspaceId?: string;
@@ -106,6 +114,13 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
     }
   }
 
+  // Skip-login phase: resolve a single default local user, auto-provisioning
+  // (and seeding) their workspace on first access. No session required.
+  if (authDisabled()) {
+    const workspaceId = await getOrCreateWorkspace(DEFAULT_USER_ID);
+    return { id: DEFAULT_USER_ID, workspaceId, role: "author" };
+  }
+
   const token = await readAccessToken();
   if (!token) return null;
 
@@ -137,6 +152,8 @@ export async function requireUser(): Promise<SessionUser> {
  */
 export async function requireRole(role: Role): Promise<SessionUser> {
   const u = await requireUser();
+  // Skip-login phase: roles not enforced — assistant has the same access.
+  if (authDisabled()) return u;
   if (u.role !== role) throw forbidden(`Requires ${role} role.`);
   return u;
 }
