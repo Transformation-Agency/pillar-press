@@ -25,12 +25,12 @@ async function resolveCampaign(cid: string, workspaceId: string | undefined) {
 // GET /api/campaigns/[cid]/pieces
 // Library list: every piece in the campaign, newest first. Scoped to the
 // caller's workspace; an unknown/other-workspace campaign → 404.
-export async function GET(_req: Request, { params }: { params: Promise<{ cid: string }> }) {
+export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const user = await requireUser();
-    const { cid } = await params;
+    const { id } = await params;
 
-    const campaign = await resolveCampaign(cid, user.workspaceId);
+    const campaign = await resolveCampaign(id, user.workspaceId);
     if (!campaign) return notFound();
 
     const list = await db
@@ -47,12 +47,12 @@ export async function GET(_req: Request, { params }: { params: Promise<{ cid: st
 
 // POST /api/campaigns/[cid]/pieces
 // Create a piece in the campaign (status Draft). Body: { title, original? }.
-export async function POST(req: Request, { params }: { params: Promise<{ cid: string }> }) {
+export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const user = await requireUser();
-    const { cid } = await params;
+    const { id } = await params;
 
-    const campaign = await resolveCampaign(cid, user.workspaceId);
+    const campaign = await resolveCampaign(id, user.workspaceId);
     if (!campaign) return notFound();
 
     const body = createPieceSchema.parse(await req.json());
