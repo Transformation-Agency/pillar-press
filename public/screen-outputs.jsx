@@ -128,21 +128,28 @@ function OutputCard({ o, derivation, pieceId, platform, onCondensed, onDrive, on
   const [condensing, setCondensing] = React.useState(false);
   const [cerr, setCerr] = React.useState(null);
   const [ratio, setRatio] = React.useState(0.4);
-  const [prevPost, setPrevPost] = React.useState(null);
+  const [hist, setHist] = React.useState([]); // stack of prior draftPost versions (multi-level undo)
   const pct = Math.round(ratio * 100);
-  const wordCount = (o.draftPost || "").trim().split(/\s+/).filter(Boolean).length;
+  const wc = (s) => (s || "").trim().split(/\s+/).filter(Boolean).length;
+  const wordCount = wc(o.draftPost);
+  const prevWords = hist.length ? wc(hist[hist.length - 1]) : null;
   const condense = async () => {
     if (!pieceId || condensing) return;
     const before = o.draftPost || "";
     setCondensing(true); setCerr(null);
     try {
       const r = await window.GEN.condenseOutput(pieceId, platform, ratio);
-      setPrevPost(before);
+      setHist((h) => h.concat([before]));
       if (onCondensed) onCondensed(platform, r.draftPost);
     } catch (e) { setCerr((e && e.message) || "Couldn't condense."); }
     setCondensing(false);
   };
-  const undo = () => { if (prevPost == null) return; if (onCondensed) onCondensed(platform, prevPost); setPrevPost(null); };
+  const undo = () => {
+    if (!hist.length) return;
+    const last = hist[hist.length - 1];
+    setHist((h) => h.slice(0, -1));
+    if (onCondensed) onCondensed(platform, last);
+  };
   return (
     <div className="card fade-in" style={{ padding: "24px 26px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
@@ -176,9 +183,9 @@ function OutputCard({ o, derivation, pieceId, platform, onCondensed, onDrive, on
         <input type="range" min="20" max="60" step="5" value={pct} disabled={condensing}
           onChange={(e) => setRatio(Number(e.target.value) / 100)}
           aria-label="Reduction amount" title={"Reduce by " + pct + "%"} style={{ width: 110, accentColor: "var(--accent)" }} />
-        <span className="mono" style={{ fontSize: 11, color: "var(--ink-3)" }}>{pct}% · {wordCount} words</span>
-        {prevPost != null && !condensing &&
-          <button className="btn ghost sm" onClick={undo} title="Restore the previous version of this post">Undo</button>}
+        <span className="mono" style={{ fontSize: 11, color: "var(--ink-3)" }}>{pct}% · {wordCount} words{prevWords != null ? " (was " + prevWords + ")" : ""}</span>
+        {hist.length > 0 && !condensing &&
+          <button className="btn ghost sm" onClick={undo} title="Restore the previous version of this post">Undo{hist.length > 1 ? " (" + hist.length + ")" : ""}</button>}
         {cerr && <span style={{ fontSize: 13, color: "var(--sev-must)" }}>{cerr}</span>}
       </div>
 
