@@ -190,6 +190,12 @@ function MediaCard({ media, pieces, onAttach, onRegen, onDuplicate, onDelete, on
           <span className="mono muted" style={{ fontSize: 10.5, marginLeft: "auto" }}>{model ? model.name.split("·").pop().trim() : ""}</span>
         </div>
         <div style={{ fontSize: 14, lineHeight: 1.45, color: "var(--ink-2)", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{media.prompt || media.title || "—"}</div>
+        {media.kind === "image" && media.enhancedPrompt && (
+          <details style={{ fontSize: 12.5 }}>
+            <summary style={{ cursor: "pointer", color: "var(--accent-ink)" }}>Art-directed prompt</summary>
+            <div className="muted" style={{ marginTop: 4, lineHeight: 1.45 }}>{media.enhancedPrompt}</div>
+          </details>
+        )}
         {attached && <div className="mono" style={{ fontSize: 10.5, color: "var(--accent-ink)" }}>↳ {attached.title}</div>}
         {media.status === "completed" && (
           <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 2, position: "relative" }}>

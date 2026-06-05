@@ -187,6 +187,7 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
   const [style, setStyle] = React.useState({ knobs: { palette: "warm", mood: "neutral", finish: "photographic", detail: "balanced" }, directive: "", rounds: 0 });
   const [styleOpen, setStyleOpen] = React.useState(false);
   const [styleSeedJob, setStyleSeedJob] = React.useState(null);
+  const [enhance, setEnhance] = React.useState(true); // art-direct image prompts
   React.useEffect(() => {
     let alive = true;
     window.STUDIO.getStyle(campaignId).then((s) => { if (alive && s) setStyle(s); }).catch(() => {});
@@ -254,6 +255,7 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
       startImage: (type === "video" || type === "avatar") ? startImage : null,
       estDuration, creditsEst: cost, status: "queued", progress: 0,
       pieceId: prefillPiece || null,
+      enhance: type === "image" ? enhance : undefined,
     });
     window.STUDIO.runJob(media, (patch) => window.Store.updateMedia(media.id, patch));
   };
@@ -336,6 +338,14 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
                 placeholder={isVoiceModel ? "What should the voice say?" : type === "image" ? "Describe the image…" : "Describe the shot / character…"}
                 style={{ minHeight: 84, fontSize: 15, lineHeight: 1.55, resize: "vertical" }} />
             </StField>
+
+            {type === "image" && (
+              <div style={{ marginBottom: 16, display: "flex", alignItems: "flex-start", gap: 10 }}>
+                <StToggle on={enhance} onChange={() => setEnhance((o) => !o)} />
+                <span style={{ fontSize: 14, lineHeight: 1.4 }}>Art-direct the prompt
+                  <span className="muted"> — compose a cover-quality image from the article, brand, and learned style</span></span>
+              </div>
+            )}
 
             {/* dynamic controls */}
             {model && model.aspectRatios.length > 0 && <StField label="Aspect ratio"><Segmented value={aspect} onChange={setAspect} options={model.aspectRatios} /></StField>}

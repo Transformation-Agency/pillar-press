@@ -270,6 +270,7 @@
     const type = KIND_TO_API_TYPE[media.kind] || "image";
     const body = { type, modelId: media.modelId };
     if (media.campaignId) body.campaignId = media.campaignId;
+    if (media.enhance !== undefined) body.enhance = media.enhance;
     if (media.aspect) body.aspectRatio = media.aspect;
     if (media.resolution) body.resolution = media.resolution;
     if (media.duration) body.duration = media.duration;
@@ -297,6 +298,7 @@
     if (job.outputUrl) out.outputUrl = job.outputUrl;
     if (job.downloadUrl) out.downloadUrl = job.downloadUrl;
     if (job.thumbnailUrl) { out.thumbnailUrl = job.thumbnailUrl; out.posterUrl = job.thumbnailUrl; }
+    if (job.meta && job.meta.enhancedPrompt) out.enhancedPrompt = job.meta.enhancedPrompt;
     if (job.error) out.error = job.error;
     return out;
   }

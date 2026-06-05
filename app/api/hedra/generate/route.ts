@@ -1,14 +1,24 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { requireUser } from "@/lib/auth";
-import { db, mediaJobs } from "@/lib/db";
+import { db, mediaJobs, references, pieces } from "@/lib/db";
 import { styleProfiles } from "@/db/style-schema";
 import {
   listModels, generateAsset, createAsset, uploadAsset, type GenerateInput, type GenerationType,
 } from "@/lib/hedra";
 import { textToSpeech } from "@/lib/elevenlabs";
+import { buildRefContext, type ReferencesDoc } from "@/lib/refContext";
+import { craftImagePrompt } from "@/lib/ai/imagePrompt";
 import { generateBodySchema, validateAgainstModel, sanitizeText } from "@/lib/validation";
 import { toErrorResponse } from "@/lib/errors";
+
+/** Trim a piece down to a prompt-sized excerpt for image grounding. */
+function pieceExcerpt(p: { original?: string | null; revision?: unknown } | undefined): string {
+  if (!p) return "";
+  const rev = p.revision as { text?: string } | null | undefined;
+  const text = (rev?.text || p.original || "").replace(/\s+/g, " ").trim();
+  return text.slice(0, 700);
+}
 
 const pct = (p: number | undefined) => (p == null ? 0 : Math.round(p <= 1 ? p * 100 : p));
 
@@ -82,18 +92,41 @@ export async function POST(req: Request) {
       audioAssetId,
       durationMs: body.duration ? body.duration * 1000 : undefined,
     };
-    // Per-campaign learned image style: prepend the evolving directive to the
-    // prompt (so video/avatar start frames inherit the look too) + record
-    // provenance on the job.
-    let styleMeta: { styleRound: number; styleKnobs: unknown } | undefined;
-    if (body.campaignId) {
-      const prof = await db.query.styleProfiles.findFirst({ where: eq(styleProfiles.campaignId, body.campaignId) });
-      if (prof) {
-        if (prof.directive) input.textPrompt = input.textPrompt ? `${prof.directive}\n\n${input.textPrompt}` : prof.directive;
-        styleMeta = { styleRound: prof.rounds, styleKnobs: prof.knobs };
+    // Load the campaign's learned style (record provenance regardless of path).
+    const prof = body.campaignId
+      ? await db.query.styleProfiles.findFirst({ where: eq(styleProfiles.campaignId, body.campaignId) })
+      : null;
+    const meta: Record<string, unknown> = {};
+    if (prof) { meta.styleRound = prof.rounds; meta.styleKnobs = prof.knobs; }
+
+    if (body.type === "image" && body.enhance !== false) {
+      // Art-direct the prompt: weave the seed + the article + brand + learned
+      // style into a vivid, specifically-composed cover-image prompt.
+      let refCtx = "";
+      if (body.campaignId) {
+        const ref = await db.query.references.findFirst({ where: eq(references.campaignId, body.campaignId) });
+        refCtx = buildRefContext((ref?.doc as ReferencesDoc | undefined) ?? null);
       }
+      let article: { title?: string; excerpt?: string } | undefined;
+      if (body.pieceId) {
+        const pc = await db.query.pieces.findFirst({ where: eq(pieces.id, body.pieceId) });
+        if (pc) article = { title: pc.title, excerpt: pieceExcerpt(pc) };
+      }
+      const enhanced = await craftImagePrompt({
+        seed: sanitizeText(body.prompt, 2000),
+        styleDirective: prof?.directive || "",
+        refContext: refCtx,
+        article,
+      });
+      input.textPrompt = enhanced || input.textPrompt;
+      meta.enhancedPrompt = enhanced;
+    } else if (prof?.directive) {
+      // Non-enhanced path (video/avatar, or image with enhance off): keep the
+      // learned directive prepended so the look still carries.
+      input.textPrompt = input.textPrompt ? `${prof.directive}\n\n${input.textPrompt}` : prof.directive;
     }
 
+    const styleMeta = Object.keys(meta).length ? meta : undefined;
     const gen = await generateAsset(input);
 
     const [job] = await db

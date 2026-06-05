@@ -23,6 +23,8 @@ export const generateBodySchema = z.object({
   pieceId: z.string().optional(),
   // campaign scope (drives per-campaign style profile + media scoping)
   campaignId: z.string().optional(),
+  // image only: art-direct the prompt before generating (default true)
+  enhance: z.boolean().optional(),
 });
 export type GenerateBody = z.infer<typeof generateBodySchema>;
 
