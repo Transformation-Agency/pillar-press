@@ -41,6 +41,23 @@
     return L.join("\n");
   }
 
+  // Assemble a whole campaign (= book) from its chapters (= pieces), in order.
+  // Canonical chapter text = the saved draft (`original`); fall back to an
+  // un-accepted proposed revision only when the draft is empty. Mirrors the
+  // server port in lib/exporters.ts#bookMarkdown (byte-identical output).
+  function bookMarkdown(campaign, chapters) {
+    const title = (campaign && campaign.name) || "Untitled book";
+    const L = [`# ${title}`, ""];
+    (chapters || []).forEach((c, i) => {
+      const text = (c.original && c.original.trim())
+        ? c.original
+        : ((c.revision && c.revision.text) || "");
+      if (i > 0) L.push("", "---", "");
+      L.push(`## ${c.title || ("Chapter " + (i + 1))}`, "", text, "");
+    });
+    return L.join("\n");
+  }
+
   function safeName(s) { return (s || "untitled").replace(/[^a-z0-9\-_ ]/gi, "").replace(/\s+/g, "-").slice(0, 60) || "untitled"; }
 
   function blobFor(text, mime) { return new Blob([text], { type: mime || "text/markdown;charset=utf-8" }); }
@@ -103,5 +120,5 @@
     return new Blob([...chunks, ...central, end], { type: "application/zip" });
   }
 
-  window.EXPORT = { outputMarkdown, pieceOutputsMarkdown, safeName, downloadText, downloadBlob, blobFor, zipBlob };
+  window.EXPORT = { outputMarkdown, pieceOutputsMarkdown, bookMarkdown, safeName, downloadText, downloadBlob, blobFor, zipBlob };
 })();
