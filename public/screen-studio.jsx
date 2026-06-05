@@ -270,7 +270,7 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
       duration: model.durations.length ? duration : null,
       voiceId: (isVoiceModel || showVoiceover) ? voiceId : null,
       audioScript: isVoiceModel ? prompt : (showVoiceover ? script : null),
-      startImage: (type === "video" || type === "avatar") ? startImage : null,
+      startImage: (type === "video" || type === "avatar" || (type === "image" && req.startFrame)) ? startImage : null,
       estDuration, creditsEst: cost, status: "queued", progress: 0,
       pieceId: prefillPiece || null,
       enhance: type === "image" ? (usingDirected ? false : enhance) : undefined,
@@ -399,7 +399,7 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
             {model && model.durations.length > 0 && <StField label="Duration"><Segmented value={duration} onChange={setDuration} options={model.durations.map((d) => ({ v: d, l: d + "s" }))} /></StField>}
             {type === "image" && <StField label="Batch"><Segmented value={batch} onChange={setBatch} options={[{ v: 1, l: "1" }, { v: 2, l: "2" }, { v: 4, l: "4" }]} /></StField>}
 
-            {(type === "video" || type === "avatar") && (
+            {(type === "video" || type === "avatar" || (type === "image" && req.startFrame)) && (
               <StField label={type === "avatar" ? "Portrait image (start frame)" : "Start image"}>
                 <StartImageField value={startImage} aspect={aspect} prompt={prompt} libraryImages={libImages} onChange={setStartImage} />
               </StField>

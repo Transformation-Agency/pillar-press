@@ -22,6 +22,25 @@ function pieceExcerpt(p: { original?: string | null; revision?: unknown } | unde
 
 const pct = (p: number | undefined) => (p == null ? 0 : Math.round(p <= 1 ? p * 100 : p));
 
+/**
+ * A start image can arrive as a raw Hedra asset id, an http(s) URL (a library
+ * image), or a data: URL (an uploaded file). Hedra's start_keyframe_id needs an
+ * asset id, so anything URL-shaped is fetched and uploaded first.
+ */
+async function resolveStartAsset(ref: string | undefined): Promise<string | undefined> {
+  if (!ref) return undefined;
+  const isUrl = ref.startsWith("http://") || ref.startsWith("https://") || ref.startsWith("data:");
+  if (!isUrl) return ref; // already an asset id
+  const resp = await fetch(ref);
+  if (!resp.ok) throw new Error("Could not load the start image.");
+  const blob = await resp.blob();
+  const ext = (blob.type && blob.type.split("/")[1]) || "png";
+  const name = `start-frame-${Date.now()}.${ext}`;
+  const asset = await createAsset({ name, type: "image" });
+  await uploadAsset(asset.id, blob, name);
+  return asset.id;
+}
+
 // POST /api/hedra/generate
 // - audio: ElevenLabs TTS rendered to an inline data URL (no Hedra), persisted
 //   as a completed job.
@@ -88,7 +107,7 @@ export async function POST(req: Request) {
       textPrompt: sanitizeText(body.prompt, 2000) || sanitizeText(body.script, 2000) || undefined,
       aspectRatio: body.aspectRatio,
       resolution: body.resolution,
-      startAssetId: body.startAssetId,
+      startAssetId: await resolveStartAsset(body.startAssetId),
       audioAssetId,
       durationMs: body.duration ? body.duration * 1000 : undefined,
     };
