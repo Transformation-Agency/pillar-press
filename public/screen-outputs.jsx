@@ -127,16 +127,22 @@ function OutputCard({ o, derivation, pieceId, platform, onCondensed, onDrive, on
   const clear = /clear|none|no concern|pass/i.test(o.riskCheck || "");
   const [condensing, setCondensing] = React.useState(false);
   const [cerr, setCerr] = React.useState(null);
+  const [ratio, setRatio] = React.useState(0.4);
+  const [prevPost, setPrevPost] = React.useState(null);
+  const pct = Math.round(ratio * 100);
   const wordCount = (o.draftPost || "").trim().split(/\s+/).filter(Boolean).length;
   const condense = async () => {
     if (!pieceId || condensing) return;
+    const before = o.draftPost || "";
     setCondensing(true); setCerr(null);
     try {
-      const r = await window.GEN.condenseOutput(pieceId, platform, 0.4);
+      const r = await window.GEN.condenseOutput(pieceId, platform, ratio);
+      setPrevPost(before);
       if (onCondensed) onCondensed(platform, r.draftPost);
     } catch (e) { setCerr((e && e.message) || "Couldn't condense."); }
     setCondensing(false);
   };
+  const undo = () => { if (prevPost == null) return; if (onCondensed) onCondensed(platform, prevPost); setPrevPost(null); };
   return (
     <div className="card fade-in" style={{ padding: "24px 26px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
@@ -164,10 +170,15 @@ function OutputCard({ o, derivation, pieceId, platform, onCondensed, onDrive, on
       <div style={{ whiteSpace: "pre-wrap", fontSize: 16.5, lineHeight: 1.7, padding: "18px 20px", background: "var(--paper-sunk)", borderRadius: "var(--radius)", marginBottom: 12 }}>{o.draftPost}</div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 18, flexWrap: "wrap" }}>
-        <button className="btn ghost sm" onClick={condense} disabled={condensing} title="Rewrite this post ~40% shorter (post only — hooks, CTAs and metadata untouched)">
-          {condensing ? <><Spinner size={13} /> Condensing…</> : "Make 40% shorter"}
+        <button className="btn ghost sm" onClick={condense} disabled={condensing} title="Rewrite this post shorter (post only — hooks, CTAs and metadata untouched)">
+          {condensing ? <><Spinner size={13} /> Condensing…</> : "Make " + pct + "% shorter"}
         </button>
-        <span className="mono" style={{ fontSize: 11, color: "var(--ink-3)" }}>{wordCount} words</span>
+        <input type="range" min="20" max="60" step="5" value={pct} disabled={condensing}
+          onChange={(e) => setRatio(Number(e.target.value) / 100)}
+          aria-label="Reduction amount" title={"Reduce by " + pct + "%"} style={{ width: 110, accentColor: "var(--accent)" }} />
+        <span className="mono" style={{ fontSize: 11, color: "var(--ink-3)" }}>{pct}% · {wordCount} words</span>
+        {prevPost != null && !condensing &&
+          <button className="btn ghost sm" onClick={undo} title="Restore the previous version of this post">Undo</button>}
         {cerr && <span style={{ fontSize: 13, color: "var(--sev-must)" }}>{cerr}</span>}
       </div>
 
