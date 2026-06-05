@@ -123,8 +123,20 @@ function GoogleIcon({ size = 14 }) {
   return <svg width={size} height={size} viewBox="0 0 20 20" aria-hidden="true"><path fill="currentColor" d="M19.6 10.2c0-.7-.1-1.3-.2-2H10v3.8h5.4a4.6 4.6 0 0 1-2 3v2.5h3.2c1.9-1.7 3-4.3 3-7.3z" opacity=".9"/><path fill="currentColor" d="M10 20c2.7 0 5-.9 6.6-2.5l-3.2-2.5c-.9.6-2 1-3.4 1-2.6 0-4.8-1.7-5.6-4.1H1.1v2.6A10 10 0 0 0 10 20z" opacity=".7"/><path fill="currentColor" d="M4.4 11.9a6 6 0 0 1 0-3.8V5.5H1.1a10 10 0 0 0 0 9z" opacity=".5"/><path fill="currentColor" d="M10 4c1.5 0 2.8.5 3.8 1.5l2.8-2.8A10 10 0 0 0 1.1 5.5l3.3 2.6C5.2 5.7 7.4 4 10 4z" opacity=".8"/></svg>;
 }
 
-function OutputCard({ o, derivation, onDrive, onVideo, onImage }) {
+function OutputCard({ o, derivation, pieceId, platform, onCondensed, onDrive, onVideo, onImage }) {
   const clear = /clear|none|no concern|pass/i.test(o.riskCheck || "");
+  const [condensing, setCondensing] = React.useState(false);
+  const [cerr, setCerr] = React.useState(null);
+  const wordCount = (o.draftPost || "").trim().split(/\s+/).filter(Boolean).length;
+  const condense = async () => {
+    if (!pieceId || condensing) return;
+    setCondensing(true); setCerr(null);
+    try {
+      const r = await window.GEN.condenseOutput(pieceId, platform, 0.4);
+      if (onCondensed) onCondensed(platform, r.draftPost);
+    } catch (e) { setCerr((e && e.message) || "Couldn't condense."); }
+    setCondensing(false);
+  };
   return (
     <div className="card fade-in" style={{ padding: "24px 26px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
@@ -149,7 +161,15 @@ function OutputCard({ o, derivation, onDrive, onVideo, onImage }) {
 
       <p style={{ fontSize: 14, color: "var(--ink-2)", marginBottom: 16 }}><span className="eyebrow">Purpose · </span>{o.strategicPurpose}</p>
 
-      <div style={{ whiteSpace: "pre-wrap", fontSize: 16.5, lineHeight: 1.7, padding: "18px 20px", background: "var(--paper-sunk)", borderRadius: "var(--radius)", marginBottom: 18 }}>{o.draftPost}</div>
+      <div style={{ whiteSpace: "pre-wrap", fontSize: 16.5, lineHeight: 1.7, padding: "18px 20px", background: "var(--paper-sunk)", borderRadius: "var(--radius)", marginBottom: 12 }}>{o.draftPost}</div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 18, flexWrap: "wrap" }}>
+        <button className="btn ghost sm" onClick={condense} disabled={condensing} title="Rewrite this post ~40% shorter (post only — hooks, CTAs and metadata untouched)">
+          {condensing ? <><Spinner size={13} /> Condensing…</> : "Make 40% shorter"}
+        </button>
+        <span className="mono" style={{ fontSize: 11, color: "var(--ink-3)" }}>{wordCount} words</span>
+        {cerr && <span style={{ fontSize: 13, color: "var(--sev-must)" }}>{cerr}</span>}
+      </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, marginBottom: 16 }}>
         <Field label="Hook options" items={o.hooks} />
@@ -202,6 +222,10 @@ function OutputsTab({ piece, onUpdate, refCtx, onGoStudio }) {
   const onDriveOne = (o) => { if (!window.DRIVE.isConfigured()) { setDriveOpen(true); return; } driveSave([{ name: outputFilename(o), content: window.EXPORT.outputMarkdown(o), mime: "text/markdown" }], setMsg); };
   const onVideo = (o) => { window.__studioPrefill = { type: "avatar", pieceId: piece.id, prompt: o.platform + " — " + (o.strategicPurpose || ""), script: o.draftPost || "" }; onGoStudio && onGoStudio(); };
   const onImage = (o) => { window.__studioPrefill = { type: "image", pieceId: piece.id, prompt: o.mediaRec || o.strategicPurpose || (o.platform + " post art") }; onGoStudio && onGoStudio(); };
+  const onCondensed = (platform, draftPost) => {
+    const outputs = Object.assign({}, piece.outputs, { [platform]: Object.assign({}, piece.outputs[platform], { draftPost }) });
+    onUpdate({ outputs });
+  };
 
   const orderedActive = window.GEN.PLATFORMS.filter((p) => active.includes(p.id)).map((p) => p.id);
 
@@ -301,7 +325,7 @@ function OutputsTab({ piece, onUpdate, refCtx, onGoStudio }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
           {(piece.outputOrder || []).map((pid) => {
             const o = piece.outputs[pid]; if (!o) return null;
-            return <OutputCard key={pid} o={o} derivation={derivationLabel(pid, piece.outputOrder)} onDrive={onDriveOne} onVideo={onVideo} onImage={onImage} />;
+            return <OutputCard key={pid} o={o} derivation={derivationLabel(pid, piece.outputOrder)} pieceId={piece.id} platform={pid} onCondensed={onCondensed} onDrive={onDriveOne} onVideo={onVideo} onImage={onImage} />;
           })}
         </div>
         {driveOpen && <DriveDialog onClose={() => setDriveOpen(false)} />}

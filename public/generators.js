@@ -237,10 +237,17 @@ Return the metadata JSON now.`;
     return { outputs, order };
   }
 
+  // Condense ONE output's post to ~(1-ratio) length, server-side. Returns
+  // { platform, draftPost }. Does not touch hooks/CTAs/metadata.
+  async function condenseOutput(pieceId, platform, ratio) {
+    return apiSend("POST", "/pieces/" + pieceId + "/outputs/" + encodeURIComponent(platform) + "/condense", { ratio: ratio || 0.4 });
+  }
+
   window.GEN = {
     generateRevision,
     generateOutputs,
     generatePlatform,
+    condenseOutput,
     resolveSources,
     canonicalSource,
     AUDIENCE_PRESETS,
