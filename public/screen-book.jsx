@@ -85,8 +85,63 @@ function notesToSources(notes) {
 
 const BOOK_PLAT_AUD = { substack: "builders", facebook: "relational", instagram: "women-ai", x: "builders", threads: "general" };
 
+/* ---------- book selector: a book IS a campaign (its own library) ---------- */
+function BookPicker({ campaigns, bookId, onPick, onNew, role }) {
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef(null);
+  React.useEffect(() => {
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, []);
+  const active = (campaigns || []).find((c) => c.id === bookId);
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <div className="eyebrow" style={{ marginBottom: 6 }}>Book</div>
+      <button onClick={() => setOpen((o) => !o)} title="Switch book"
+        style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", cursor: "pointer",
+          border: "1px solid var(--hair-2)", background: "var(--paper-2)", color: "var(--ink)",
+          borderRadius: "var(--radius)", padding: "8px 10px", textAlign: "left" }}>
+        <Icon name="book" size={14} style={{ color: "var(--accent)", flexShrink: 0 }} />
+        <span style={{ fontFamily: "var(--font-display)", fontSize: 15, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{active ? active.name : "Choose a book…"}</span>
+        <Icon name="chevD" size={13} style={{ color: "var(--ink-3)", flexShrink: 0 }} />
+      </button>
+      {open && (
+        <div className="card" style={{ position: "absolute", top: 64, left: 0, right: 0, padding: 6, zIndex: 60, boxShadow: "var(--shadow-lg)", maxHeight: "60vh", overflowY: "auto" }}>
+          <div className="eyebrow" style={{ padding: "6px 10px 4px" }}>Each book is its own campaign</div>
+          {(campaigns || []).map((c) => {
+            const on = c.id === bookId;
+            return (
+              <button key={c.id} onClick={() => { onPick(c.id); setOpen(false); }}
+                style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
+                  border: "none", background: on ? "var(--accent-soft)" : "transparent", cursor: "pointer",
+                  borderRadius: "var(--radius)", padding: "9px 10px", color: on ? "var(--accent-ink)" : "var(--ink)",
+                  fontFamily: "var(--font-body)", fontSize: 15, textAlign: "left" }}>
+                <span style={{ display: "flex", alignItems: "center", gap: 9, overflow: "hidden" }}>
+                  <span style={{ width: 6, height: 6, borderRadius: 99, background: on ? "var(--accent)" : "var(--hair-2)", flexShrink: 0 }} />
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</span>
+                </span>
+                {on && <Icon name="check" size={15} />}
+              </button>
+            );
+          })}
+          {role !== "assistant" && (
+            <>
+              <hr className="rule" style={{ margin: "5px 4px" }} />
+              <button onClick={() => { onNew(); setOpen(false); }} className="mono"
+                style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, border: "none", background: "transparent", cursor: "pointer", borderRadius: "var(--radius)", padding: "9px 10px", color: "var(--ink-3)", fontSize: 12, letterSpacing: "0.04em" }}>
+                <Icon name="plus" size={13} /> NEW BOOK
+              </button>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ---------- left: chapter list ---------- */
-function ChapterList({ chapters, selectedId, onSelect, onAdd, role }) {
+function ChapterList({ chapters, selectedId, onSelect, onAdd, role, campaigns, bookId, onPickBook, onNewBook }) {
   const [adding, setAdding] = React.useState(false);
   const [title, setTitle] = React.useState("");
   const commit = () => {
@@ -96,9 +151,9 @@ function ChapterList({ chapters, selectedId, onSelect, onAdd, role }) {
   };
   return (
     <div style={{ width: 248, flexShrink: 0, borderRight: "1px solid var(--hair)", display: "flex", flexDirection: "column", minHeight: 0, background: "var(--paper)" }}>
-      <div style={{ padding: "20px 20px 12px" }}>
-        <div className="eyebrow" style={{ marginBottom: 4 }}>The Book</div>
-        <div className="muted mono" style={{ fontSize: 11 }}>{chapters.length} chapter{chapters.length !== 1 ? "s" : ""}</div>
+      <div style={{ padding: "16px 16px 12px", borderBottom: "1px solid var(--hair)" }}>
+        <BookPicker campaigns={campaigns} bookId={bookId} onPick={onPickBook} onNew={onNewBook} role={role} />
+        <div className="muted mono" style={{ fontSize: 11, marginTop: 8 }}>{chapters.length} chapter{chapters.length !== 1 ? "s" : ""}</div>
       </div>
       <div className="scroll-y" style={{ flex: 1, padding: "0 10px" }}>
         {chapters.map((c, i) => {
@@ -123,7 +178,7 @@ function ChapterList({ chapters, selectedId, onSelect, onAdd, role }) {
         })}
         {chapters.length === 0 && <p className="muted" style={{ fontSize: 13, padding: "8px 12px", fontStyle: "italic" }}>No chapters yet.</p>}
       </div>
-      {role !== "assistant" && (
+      {role !== "assistant" && bookId && (
         <div style={{ padding: 12, borderTop: "1px solid var(--hair)" }}>
           {adding ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -346,9 +401,11 @@ function Collapsible({ label, children }) {
 }
 
 /* ---------- main ---------- */
-function BookWriter({ campaign, pieces, refCtx, role, onOpenPiece }) {
-  const chapters = React.useMemo(() => sortChapters(pieces), [pieces]);
-  const [selectedId, setSelectedId] = React.useState(chapters[0] ? chapters[0].id : null);
+function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaign }) {
+  // A book IS a campaign, chosen here independently of the globally-active
+  // campaign so a book has its own library separate from "Me". Remembered in prefs.
+  const [bookId, setBookId] = React.useState(() => window.Store.getPref("bookCampaignId", null));
+  const [selectedId, setSelectedId] = React.useState(null);
   const [panel, setPanel] = React.useState("sources");
   const [busy, setBusy] = React.useState(null);          // 'review'|'revise'|'outputs'|'weave'|'export'
   const [prog, setProg] = React.useState(null);
@@ -357,7 +414,29 @@ function BookWriter({ campaign, pieces, refCtx, role, onOpenPiece }) {
   const [title, setTitle] = React.useState("");
   const [draft, setDraft] = React.useState("");
 
+  // Drop a stale book selection if the campaign no longer exists; load the
+  // book's pieces/references on demand (without making it the active campaign).
+  React.useEffect(() => {
+    if (bookId && !(campaigns || []).find((c) => c.id === bookId)) { setBookId(null); return; }
+    if (bookId) window.Store.loadCampaign(bookId);
+  }, [bookId, (campaigns || []).map((c) => c.id).join(",")]);
+
+  const bookCampaign = (campaigns || []).find((c) => c.id === bookId) || null;
+  const refs = (bookCampaign && bookCampaign.references) || {};
+  const refCtx = window.AI.refContext(refs);
+  const pieces = bookId ? (allPieces || []).filter((p) => p.campaignId === bookId) : [];
+  const chapters = React.useMemo(() => sortChapters(pieces), [pieces]);
+
   const piece = selectedId ? window.Store.getPiece(selectedId) : null;
+
+  const pickBook = (id) => { setBookId(id); window.Store.setPref("bookCampaignId", id); setSelectedId(null); setErr(null); setNote(null); };
+  const newBook = () => {
+    const n = window.prompt("Name your book");
+    if (!n || !n.trim()) return;
+    const id = window.Store.addCampaign(n.trim(), { activate: false }); // don't hijack the active campaign
+    window.Store.loadCampaign(id);
+    pickBook(id);
+  };
 
   // keep a valid selection as chapters change
   React.useEffect(() => {
@@ -388,7 +467,7 @@ function BookWriter({ campaign, pieces, refCtx, role, onOpenPiece }) {
   const flash = (m) => { setNote(m); setTimeout(() => setNote(null), 2200); };
 
   const selectChapter = (id) => { saveNow(); setSelectedId(id); };
-  const addChapter = (t) => { const p = window.Store.createPiece(t); setSelectedId(p.id); setPanel("sources"); };
+  const addChapter = (t) => { if (!bookId) return; const p = window.Store.createPiece(t, bookId); setSelectedId(p.id); setPanel("sources"); };
 
   const runReview = async () => {
     if (!selectedId || !(draft || "").trim()) { setErr("Add some chapter text first."); return; }
@@ -466,8 +545,8 @@ function BookWriter({ campaign, pieces, refCtx, role, onOpenPiece }) {
     setBusy("export"); setErr(null);
     try {
       await persistChapter();
-      const res = await bookApi("GET", "/api/campaigns/" + campaign.id + "/book/export");
-      window.EXPORT.downloadText(res.markdown || "", window.EXPORT.safeName(res.title || campaign.name) + "-book.md");
+      const res = await bookApi("GET", "/api/campaigns/" + bookCampaign.id + "/book/export");
+      window.EXPORT.downloadText(res.markdown || "", window.EXPORT.safeName(res.title || bookCampaign.name) + "-book.md");
       flash("Book Markdown downloaded");
     } catch (e) { setErr(e.message || "Export failed."); }
     setBusy(null);
@@ -476,8 +555,8 @@ function BookWriter({ campaign, pieces, refCtx, role, onOpenPiece }) {
     setBusy("export"); setErr(null);
     try {
       await persistChapter();
-      const res = await bookApi("GET", "/api/campaigns/" + campaign.id + "/book/export");
-      const up = await window.DRIVE.uploadFile(window.EXPORT.safeName(res.title || campaign.name) + "-book.md", res.markdown || "", "text/markdown");
+      const res = await bookApi("GET", "/api/campaigns/" + bookCampaign.id + "/book/export");
+      const up = await window.DRIVE.uploadFile(window.EXPORT.safeName(res.title || bookCampaign.name) + "-book.md", res.markdown || "", "text/markdown");
       flash("Uploaded to Drive" + (up && up.name ? " · " + up.name : ""));
     } catch (e) { setErr(e.message || "Drive upload failed."); }
     setBusy(null);
@@ -494,12 +573,22 @@ function BookWriter({ campaign, pieces, refCtx, role, onOpenPiece }) {
 
   return (
     <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
-      <ChapterList chapters={chapters} selectedId={selectedId} onSelect={selectChapter} onAdd={addChapter} role={role} />
+      <ChapterList chapters={chapters} selectedId={selectedId} onSelect={selectChapter} onAdd={addChapter} role={role}
+        campaigns={campaigns} bookId={bookId} onPickBook={pickBook} onNewBook={newBook} />
 
-      {!piece ? (
+      {!bookCampaign ? (
+        <div style={{ flex: 1, display: "grid", placeItems: "center", padding: 40 }}>
+          <div style={{ textAlign: "center", maxWidth: 440 }}>
+            <div className="eyebrow" style={{ marginBottom: 10 }}>Book Writer</div>
+            <h2 style={{ fontSize: 28, marginBottom: 10 }}>Pick a book, or start a new one</h2>
+            <p className="muted" style={{ fontSize: 15.5, marginBottom: 18 }}>A book is its own campaign with its own library of chapters — separate from your article campaigns. Choose an existing book from the list on the left, or create a new one.</p>
+            {role !== "assistant" && <button className="btn primary" onClick={newBook}><Icon name="plus" size={15} /> New book</button>}
+          </div>
+        </div>
+      ) : !piece ? (
         <div style={{ flex: 1, display: "grid", placeItems: "center", padding: 40 }}>
           <div style={{ textAlign: "center", maxWidth: 420 }}>
-            <div className="eyebrow" style={{ marginBottom: 10 }}>Book Writer · {campaign && campaign.name}</div>
+            <div className="eyebrow" style={{ marginBottom: 10 }}>Book Writer · {bookCampaign.name}</div>
             <h2 style={{ fontSize: 28, marginBottom: 10 }}>Write a book, one chapter at a time</h2>
             <p className="muted" style={{ fontSize: 15.5, marginBottom: 18 }}>This campaign is your book; each chapter is a piece that runs through the same editorial engine — weave, the seven gates, revision, and platform outputs. Add your first chapter to begin.</p>
             {role !== "assistant" && <button className="btn primary" onClick={() => addChapter("Chapter 1")}><Icon name="plus" size={15} /> Add chapter 1</button>}
@@ -521,7 +610,7 @@ function BookWriter({ campaign, pieces, refCtx, role, onOpenPiece }) {
                   <select className="field" value={piece.status} onChange={(e) => setStatus(e.target.value)} style={{ width: "auto", fontSize: 12, padding: "5px 8px" }}>
                     {window.Store.STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>
-                  <button className="btn ghost sm" onClick={() => { saveNow(); onOpenPiece(piece.id); }} title="Open in the full editorial desk">Desk ↗</button>
+                  <button className="btn ghost sm" onClick={() => { saveNow(); if (onActivateCampaign) onActivateCampaign(bookId); onOpenPiece(piece.id); }} title="Open in the full editorial desk">Desk ↗</button>
                 </div>
               </div>
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>

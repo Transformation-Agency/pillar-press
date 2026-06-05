@@ -223,17 +223,25 @@
       persistPrefs();
       if (!loadedCampaigns.has(id)) bg(hydrateCampaign(id), "hydrateCampaign");
     },
-    addCampaign(name) {
+    // opts.activate (default true): make the new campaign the globally-active
+    // one. The Book Writer creates book campaigns with { activate:false } so a
+    // new book never hijacks the active article campaign ("Me").
+    addCampaign(name, opts) {
+      const activate = !opts || opts.activate !== false;
       const id = uid();
       state.campaigns.push({ id, name: name || "New campaign", references: {} });
       loadedCampaigns.add(id); // brand-new, nothing to fetch
-      state.activeCampaignId = id;
-      state.activePieceId = null;
+      if (activate) { state.activeCampaignId = id; state.activePieceId = null; }
       emit();
       bg(apiSend("POST", "/campaigns", { id, name: name || "New campaign" }), "POST /campaigns");
       persistPrefs();
       return id;
     },
+    // Hydrate a campaign's references + pieces (+ gather/media) on demand WITHOUT
+    // making it the active campaign — used by the Book Writer to load a book
+    // campaign that differs from the globally-active one. Self-guards on the
+    // loadedCampaigns set, so repeated calls are cheap.
+    loadCampaign(id) { if (id) bg(hydrateCampaign(id), "loadCampaign"); },
     renameCampaign(id, name) {
       const c = api.getCampaign(id);
       if (!c) return;
@@ -353,17 +361,20 @@
     getPiece(id) { return (state.pieces || []).find((p) => p.id === id) || null; },
     setActive(id) { state.activePieceId = id; emit(); },
 
-    createPiece(title) {
+    // campaignId (optional) targets a specific campaign — the Book Writer passes
+    // the book's campaign so chapters land in the book, not the active campaign.
+    createPiece(title, campaignId) {
+      const cid = campaignId || state.activeCampaignId;
       const id = uid();
       const p = {
-        id, campaignId: state.activeCampaignId, title: title || "Untitled piece", status: "Draft",
+        id, campaignId: cid, title: title || "Untitled piece", status: "Draft",
         createdAt: now(), updatedAt: now(),
         original: "", packet: null, revision: null, outputs: {}, outputOrder: [],
       };
       state.pieces.unshift(p);
       state.activePieceId = p.id;
       emit();
-      bg(apiSend("POST", "/campaigns/" + state.activeCampaignId + "/pieces", { id, title: p.title, original: "" }), "POST pieces");
+      bg(apiSend("POST", "/campaigns/" + cid + "/pieces", { id, title: p.title, original: "" }), "POST pieces");
       return p;
     },
     updatePiece(id, patch) {

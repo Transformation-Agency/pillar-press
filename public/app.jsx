@@ -334,7 +334,8 @@ function App() {
         <Studio campaignId={state.activeCampaignId} pieces={campaignPieces} onOpenPiece={openPiece} />
       )}
       {view === "book" && (
-        <BookWriter campaign={activeCampaign} pieces={campaignPieces} refCtx={refCtx} role={role} onOpenPiece={openPiece} />
+        <BookWriter campaigns={campaigns} allPieces={state.pieces} role={role}
+          onOpenPiece={openPiece} onActivateCampaign={(id) => window.Store.setActiveCampaign(id)} />
       )}
       {view === "library" && (
         <Library pieces={campaignPieces} campaignName={activeCampaign && activeCampaign.name} onOpen={openPiece}
