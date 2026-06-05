@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
+import { eq } from "drizzle-orm";
 import { requireUser } from "@/lib/auth";
 import { db, mediaJobs } from "@/lib/db";
+import { styleProfiles } from "@/db/style-schema";
 import {
   listModels, generateAsset, createAsset, uploadAsset, type GenerateInput, type GenerationType,
 } from "@/lib/hedra";
@@ -36,6 +38,7 @@ export async function POST(req: Request) {
         .values({
           userId: user.id,
           workspaceId: user.workspaceId,
+          campaignId: body.campaignId,
           sourceContentId: body.pieceId,
           type: "audio",
           prompt: script.slice(0, 2000),
@@ -79,6 +82,18 @@ export async function POST(req: Request) {
       audioAssetId,
       durationMs: body.duration ? body.duration * 1000 : undefined,
     };
+    // Per-campaign learned image style: prepend the evolving directive to the
+    // prompt (so video/avatar start frames inherit the look too) + record
+    // provenance on the job.
+    let styleMeta: { styleRound: number; styleKnobs: unknown } | undefined;
+    if (body.campaignId) {
+      const prof = await db.query.styleProfiles.findFirst({ where: eq(styleProfiles.campaignId, body.campaignId) });
+      if (prof) {
+        if (prof.directive) input.textPrompt = input.textPrompt ? `${prof.directive}\n\n${input.textPrompt}` : prof.directive;
+        styleMeta = { styleRound: prof.rounds, styleKnobs: prof.knobs };
+      }
+    }
+
     const gen = await generateAsset(input);
 
     const [job] = await db
@@ -86,7 +101,9 @@ export async function POST(req: Request) {
       .values({
         userId: user.id,
         workspaceId: user.workspaceId,
+        campaignId: body.campaignId,
         sourceContentId: body.pieceId,
+        meta: styleMeta,
         hedraGenerationId: gen.id,
         hedraAssetId: gen.asset_id,
         elevenAudioAssetId: audioAssetId,

@@ -99,6 +99,50 @@ function StToggle({ on, onChange }) {
   );
 }
 
+function StyleSurveyModal({ campaignId, profile, mediaJobId, onClose, onSaved }) {
+  const K = window.STUDIO.STYLE_KNOBS;
+  const base = (profile && profile.knobs) || {};
+  const [rating, setRating] = React.useState(4);
+  const [knobs, setKnobs] = React.useState({ palette: base.palette || "warm", mood: base.mood || "neutral", finish: base.finish || "photographic", detail: base.detail || "balanced" });
+  const [working, setWorking] = React.useState("");
+  const [notes, setNotes] = React.useState("");
+  const [saving, setSaving] = React.useState(false);
+  const [err, setErr] = React.useState(null);
+  const setKnob = (k, v) => setKnobs((o) => Object.assign({}, o, { [k]: v }));
+  const save = async () => {
+    setSaving(true); setErr(null);
+    try {
+      const p = await window.STUDIO.sendStyleFeedback(campaignId, { rating, knobs, working, notes, mediaJobId: mediaJobId || undefined });
+      onSaved(p);
+    } catch (e) { setErr((e && e.message) || "Couldn't save."); setSaving(false); }
+  };
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 20 }}>
+      <div onClick={(e) => e.stopPropagation()} className="card" style={{ width: "min(560px, 100%)", maxHeight: "88vh", overflowY: "auto", padding: "24px 26px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+          <h3 style={{ fontSize: 22 }}>Tune image style</h3>
+          <span className="mono muted" style={{ fontSize: 11 }}>round {profile ? profile.rounds : 0} → {(profile ? profile.rounds : 0) + 1}</span>
+        </div>
+        <p className="muted" style={{ fontSize: 13.5, marginTop: 4, marginBottom: 14 }}>Rate the latest image and nudge the knobs. Your taste folds into an evolving directive that steers future images for this campaign.</p>
+        <StField label="Rating"><Segmented value={rating} onChange={setRating} options={[1, 2, 3, 4, 5].map((n) => ({ v: n, l: String(n) }))} /></StField>
+        <StField label="Palette"><Segmented value={knobs.palette} onChange={(v) => setKnob("palette", v)} options={K.palette} /></StField>
+        <StField label="Mood"><Segmented value={knobs.mood} onChange={(v) => setKnob("mood", v)} options={K.mood} /></StField>
+        <StField label="Finish"><Segmented value={knobs.finish} onChange={(v) => setKnob("finish", v)} options={K.finish} /></StField>
+        <StField label="Detail"><Segmented value={knobs.detail} onChange={(v) => setKnob("detail", v)} options={K.detail} /></StField>
+        <StField label="What's working"><textarea className="field" value={working} onChange={(e) => setWorking(e.target.value)} placeholder="Keep this…" style={{ minHeight: 54, fontSize: 14, resize: "vertical" }} /></StField>
+        <StField label="What's off / want more of"><textarea className="field" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Change this…" style={{ minHeight: 54, fontSize: 14, resize: "vertical" }} /></StField>
+        {profile && profile.directive &&
+          <div style={{ marginBottom: 14 }}><div className="eyebrow" style={{ marginBottom: 4 }}>Current directive</div><div className="muted" style={{ fontSize: 12.5, lineHeight: 1.45 }}>{profile.directive}</div></div>}
+        {err && <p style={{ color: "var(--sev-must)", fontSize: 13 }}>{err}</p>}
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 8 }}>
+          <button className="btn ghost" onClick={onClose} disabled={saving}>Cancel</button>
+          <button className="btn primary" onClick={save} disabled={saving}>{saving ? <><Spinner size={14} /> Saving…</> : "Save & update style"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Studio({ campaignId, pieces, onOpenPiece }) {
   const settings = window.Store.getSettings();
   const allMedia = window.Store.mediaForCampaign(campaignId);
@@ -139,6 +183,15 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
   const [keysOpen, setKeysOpen] = React.useState(false);
   const [error, setError] = React.useState(null);
   const [prefillPiece, setPrefillPiece] = React.useState(null);
+  // per-campaign learned image style
+  const [style, setStyle] = React.useState({ knobs: { palette: "warm", mood: "neutral", finish: "photographic", detail: "balanced" }, directive: "", rounds: 0 });
+  const [styleOpen, setStyleOpen] = React.useState(false);
+  const [styleSeedJob, setStyleSeedJob] = React.useState(null);
+  React.useEffect(() => {
+    let alive = true;
+    window.STUDIO.getStyle(campaignId).then((s) => { if (alive && s) setStyle(s); }).catch(() => {});
+    return () => { alive = false; };
+  }, [campaignId]);
 
   // reset model-dependent fields when type/model changes (or when the
   // live catalog arrives and replaces the static fallback)
@@ -241,6 +294,19 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
               <Segmented value={type} onChange={setType} options={window.STUDIO.TYPES.map((t) => ({ v: t.id, l: t.label }))} />
             </div>
 
+            {/* learned image-style strip */}
+            {type === "image" && (
+              <div style={{ marginBottom: 16, padding: "10px 12px", background: "var(--paper-sunk)", borderRadius: "var(--radius)", border: "1px solid var(--hair)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                  <span className="eyebrow">Image style · round {style.rounds}</span>
+                  <button className="btn ghost sm" onClick={() => { setStyleSeedJob(null); setStyleOpen(true); }}>Update preferences</button>
+                </div>
+                <div className="muted" style={{ fontSize: 12.5, lineHeight: 1.45, marginTop: 6 }}>
+                  {style.directive || "No learned style yet — rate a generation to start teaching the look."}
+                </div>
+              </div>
+            )}
+
             {/* model selector (dropdown) */}
             <StField label="Model">
               <select className="field" value={modelId || ""} onChange={(e) => setModelId(e.target.value)}
@@ -317,10 +383,13 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
             <MediaLibrary items={allMedia} pieces={pieces}
               empty="Nothing generated yet. Make an image or a voiced video on the left."
               onAttach={(id, pid) => window.Store.attachMediaToPiece(id, pid)}
-              onRegen={regen} onDuplicate={duplicate} onDelete={(m) => window.Store.removeMedia(m.id)} onAnimate={animate} />
+              onRegen={regen} onDuplicate={duplicate} onDelete={(m) => window.Store.removeMedia(m.id)} onAnimate={animate}
+              onTuneStyle={(m) => { setStyleSeedJob(m.id); setStyleOpen(true); }} />
           </div>
         </div>
         {keysOpen && <KeysDialog onClose={() => setKeysOpen(false)} />}
+        {styleOpen && <StyleSurveyModal campaignId={campaignId} profile={style} mediaJobId={styleSeedJob}
+          onClose={() => setStyleOpen(false)} onSaved={(p) => { setStyle(p); setStyleOpen(false); }} />}
       </div>
     </div>
   );

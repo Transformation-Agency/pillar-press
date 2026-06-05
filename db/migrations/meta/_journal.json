@@ -22,6 +22,13 @@
       "when": 1780631756098,
       "tag": "0002_gather",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1780642909840,
+      "tag": "0003_style",
+      "breakpoints": true
     }
   ]
 }

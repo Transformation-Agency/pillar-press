@@ -11,6 +11,8 @@ import { pgTable, uuid, text, integer, real, timestamp, jsonb, index, unique } f
 // Gather (research connectors) tables live in their own file; re-export them so
 // the Drizzle schema barrel (and drizzle-kit migrations) include them.
 export * from "./gather-schema";
+// Per-campaign image-style profiles + feedback history.
+export * from "./style-schema";
 
 export const mediaJobStatus = ["queued", "processing", "completed", "failed", "canceled"] as const;
 export const mediaJobType = ["image", "video", "avatar_video", "audio"] as const;

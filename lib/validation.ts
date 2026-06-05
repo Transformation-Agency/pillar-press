@@ -21,6 +21,8 @@ export const generateBodySchema = z.object({
   duration: z.number().int().positive().max(600).optional(),
   // link to a Pillar Press content item
   pieceId: z.string().optional(),
+  // campaign scope (drives per-campaign style profile + media scoping)
+  campaignId: z.string().optional(),
 });
 export type GenerateBody = z.infer<typeof generateBodySchema>;
 

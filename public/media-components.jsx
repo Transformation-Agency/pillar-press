@@ -162,7 +162,7 @@ function MediaPreview({ media }) {
   return <VideoPreview media={media} />;
 }
 
-function MediaCard({ media, pieces, onAttach, onRegen, onDuplicate, onDelete, onAnimate }) {
+function MediaCard({ media, pieces, onAttach, onRegen, onDuplicate, onDelete, onAnimate, onTuneStyle }) {
   const [attachOpen, setAttachOpen] = React.useState(false);
   const st = MEDIA_STATUS[media.status] || MEDIA_STATUS.queued;
   const model = window.STUDIO.getModel(media.modelId);
@@ -194,6 +194,7 @@ function MediaCard({ media, pieces, onAttach, onRegen, onDuplicate, onDelete, on
         {media.status === "completed" && (
           <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 2, position: "relative" }}>
             {onAnimate && media.kind === "image" && <button className="btn ghost sm" onClick={() => onAnimate(media)} title="Animate into video"><Icon name="play" size={13} /> Animate</button>}
+            {onTuneStyle && media.kind === "image" && <button className="btn ghost sm" onClick={() => onTuneStyle(media)} title="Teach this campaign's image style from this result"><Icon name="sparkle" size={13} /> Tune style</button>}
             {onAttach && <button className="btn ghost sm" onClick={() => setAttachOpen((o) => !o)}><Icon name="book" size={13} /> Attach</button>}
             {onRegen && <button className="btn ghost sm" onClick={() => onRegen(media)} title="Regenerate"><Icon name="play" size={13} /></button>}
             {onDuplicate && <button className="btn ghost sm" onClick={() => onDuplicate(media)} title="Duplicate prompt"><Icon name="copy" size={13} /></button>}

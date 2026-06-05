@@ -256,9 +256,20 @@
   // onUpdate until a terminal status. Returns a cancel function.
   const TERMINAL = { completed: 1, failed: 1, canceled: 1, cancelled: 1 };
 
+  // ---- per-campaign learned image style ----
+  const STYLE_KNOBS = {
+    palette: ["warm", "cool", "muted", "vivid", "mono"],
+    mood: ["bright", "neutral", "moody"],
+    finish: ["photographic", "illustrated", "painterly", "graphic"],
+    detail: ["minimal", "balanced", "detailed"],
+  };
+  function getStyle(campaignId) { return apiGet("/campaigns/" + encodeURIComponent(campaignId) + "/style"); }
+  function sendStyleFeedback(campaignId, body) { return apiPost("/campaigns/" + encodeURIComponent(campaignId) + "/style/feedback", body); }
+
   function buildGenerateBody(media) {
     const type = KIND_TO_API_TYPE[media.kind] || "image";
     const body = { type, modelId: media.modelId };
+    if (media.campaignId) body.campaignId = media.campaignId;
     if (media.aspect) body.aspectRatio = media.aspect;
     if (media.resolution) body.resolution = media.resolution;
     if (media.duration) body.duration = media.duration;
@@ -372,5 +383,6 @@
     refreshModels, refreshVoices, refreshCredits,
     makeImagePlaceholder, estimateAudioDuration, creditsCost, validate,
     runJob, speak, stopSpeak,
+    STYLE_KNOBS, getStyle, sendStyleFeedback,
   };
 })();
