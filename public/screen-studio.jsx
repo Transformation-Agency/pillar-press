@@ -188,6 +188,8 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
   const [styleOpen, setStyleOpen] = React.useState(false);
   const [styleSeedJob, setStyleSeedJob] = React.useState(null);
   const [enhance, setEnhance] = React.useState(true); // art-direct image prompts
+  const [directed, setDirected] = React.useState(""); // previewed/edited directed prompt
+  const [directing, setDirecting] = React.useState(false);
   React.useEffect(() => {
     let alive = true;
     window.STUDIO.getStyle(campaignId).then((s) => { if (alive && s) setStyle(s); }).catch(() => {});
@@ -239,14 +241,28 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
     : showVoiceover ? window.STUDIO.estimateAudioDuration(script) : duration;
   const cost = window.STUDIO.creditsCost(model, { resolution, duration, batch, estDuration, prompt });
 
+  // Preview / regenerate the art-directed prompt without generating an image.
+  const regenPrompt = async () => {
+    setDirecting(true); setError(null);
+    try {
+      const r = await window.STUDIO.craftPrompt({ prompt, campaignId, pieceId: prefillPiece || undefined });
+      if (r && r.prompt) setDirected(r.prompt);
+    } catch (e) { setError((e && e.message) || "Couldn't draft the prompt."); }
+    setDirecting(false);
+  };
+
   const generate = () => {
-    const params = { prompt, aspect, resolution, duration, batch, voiceId, startImage, estDuration,
+    const usingDirected = type === "image" && directed.trim().length > 0;
+    const effective = usingDirected ? directed.trim() : prompt;
+    const params = { prompt: effective, aspect, resolution, duration, batch, voiceId, startImage, estDuration,
       audioRef: (type === "avatar" || (type === "video" && voiceOn)) ? "inline" : null };
     const err = window.STUDIO.validate(model, params);
     if (err) { setError(err); return; }
     setError(null);
     const media = window.Store.addMedia({
-      kind: type, prompt: prompt || (isVoiceModel ? script : ""), modelId: model.id, modelName: model.name,
+      // a staged/edited directed prompt is sent verbatim (enhance off); otherwise
+      // the seed is art-directed server-side (enhance on).
+      kind: type, prompt: usingDirected ? directed.trim() : (prompt || (isVoiceModel ? script : "")), modelId: model.id, modelName: model.name,
       aspect: model.aspectRatios.length ? aspect : (type === "audio" ? null : aspect),
       resolution: model.resolutions.length ? resolution : null,
       duration: model.durations.length ? duration : null,
@@ -255,7 +271,8 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
       startImage: (type === "video" || type === "avatar") ? startImage : null,
       estDuration, creditsEst: cost, status: "queued", progress: 0,
       pieceId: prefillPiece || null,
-      enhance: type === "image" ? enhance : undefined,
+      enhance: type === "image" ? (usingDirected ? false : enhance) : undefined,
+      directed: usingDirected || undefined,
     });
     window.STUDIO.runJob(media, (patch) => window.Store.updateMedia(media.id, patch));
   };
@@ -340,10 +357,30 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
             </StField>
 
             {type === "image" && (
-              <div style={{ marginBottom: 16, display: "flex", alignItems: "flex-start", gap: 10 }}>
-                <StToggle on={enhance} onChange={() => setEnhance((o) => !o)} />
-                <span style={{ fontSize: 14, lineHeight: 1.4 }}>Art-direct the prompt
-                  <span className="muted"> — compose a cover-quality image from the article, brand, and learned style</span></span>
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                  <StToggle on={enhance} onChange={() => setEnhance((o) => !o)} />
+                  <span style={{ fontSize: 14, lineHeight: 1.4 }}>Art-direct the prompt
+                    <span className="muted"> — compose a cover-quality image from the article, brand, and learned style</span></span>
+                </div>
+                {enhance && (!directed ? (
+                  <button className="btn ghost sm" style={{ marginTop: 10 }} onClick={regenPrompt} disabled={directing}>
+                    {directing ? <><Spinner size={13} /> Drafting…</> : <><Icon name="sparkle" size={13} /> Preview / regenerate prompt</>}
+                  </button>
+                ) : (
+                  <div style={{ marginTop: 10 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                      <span className="eyebrow">Art-directed prompt · editable</span>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button className="btn ghost sm" onClick={regenPrompt} disabled={directing} title="Draft a fresh variation">{directing ? <Spinner size={12} /> : <Icon name="play" size={12} />} Regenerate</button>
+                        <button className="btn ghost sm" onClick={() => setDirected("")} title="Drop back to art-directing from your seed">Clear</button>
+                      </div>
+                    </div>
+                    <textarea className="field" value={directed} onChange={(e) => setDirected(e.target.value)}
+                      style={{ width: "100%", minHeight: 92, fontSize: 13.5, lineHeight: 1.5, resize: "vertical" }} />
+                    <div className="muted" style={{ fontSize: 11.5, marginTop: 3 }}>Generate will use this exact prompt.</div>
+                  </div>
+                ))}
               </div>
             )}
 

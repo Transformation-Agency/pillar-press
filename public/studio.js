@@ -263,6 +263,8 @@
     finish: ["photographic", "illustrated", "painterly", "graphic"],
     detail: ["minimal", "balanced", "detailed"],
   };
+  // Preview/regenerate the art-directed image prompt (no image generated).
+  function craftPrompt(body) { return apiPost("/hedra/prompt", body || {}); }
   function getStyle(campaignId) { return apiGet("/campaigns/" + encodeURIComponent(campaignId) + "/style"); }
   function sendStyleFeedback(campaignId, body) { return apiPost("/campaigns/" + encodeURIComponent(campaignId) + "/style/feedback", body); }
 
@@ -271,6 +273,7 @@
     const body = { type, modelId: media.modelId };
     if (media.campaignId) body.campaignId = media.campaignId;
     if (media.enhance !== undefined) body.enhance = media.enhance;
+    if (media.directed) body.directed = true;
     if (media.aspect) body.aspectRatio = media.aspect;
     if (media.resolution) body.resolution = media.resolution;
     if (media.duration) body.duration = media.duration;
@@ -385,6 +388,6 @@
     refreshModels, refreshVoices, refreshCredits,
     makeImagePlaceholder, estimateAudioDuration, creditsCost, validate,
     runJob, speak, stopSpeak,
-    STYLE_KNOBS, getStyle, sendStyleFeedback,
+    STYLE_KNOBS, getStyle, sendStyleFeedback, craftPrompt,
   };
 })();

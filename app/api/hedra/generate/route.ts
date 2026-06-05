@@ -120,9 +120,10 @@ export async function POST(req: Request) {
       });
       input.textPrompt = enhanced || input.textPrompt;
       meta.enhancedPrompt = enhanced;
-    } else if (prof?.directive) {
+    } else if (prof?.directive && !body.directed) {
       // Non-enhanced path (video/avatar, or image with enhance off): keep the
-      // learned directive prepended so the look still carries.
+      // learned directive prepended so the look still carries. Skipped when the
+      // prompt is already an art-directed one sent verbatim (it has the style).
       input.textPrompt = input.textPrompt ? `${prof.directive}\n\n${input.textPrompt}` : prof.directive;
     }
 

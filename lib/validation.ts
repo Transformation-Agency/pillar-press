@@ -25,6 +25,9 @@ export const generateBodySchema = z.object({
   campaignId: z.string().optional(),
   // image only: art-direct the prompt before generating (default true)
   enhance: z.boolean().optional(),
+  // true when `prompt` is an already art-directed prompt sent verbatim (skip
+  // both enhancement and the style-directive prepend).
+  directed: z.boolean().optional(),
 });
 export type GenerateBody = z.infer<typeof generateBodySchema>;
 
