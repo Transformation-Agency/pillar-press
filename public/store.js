@@ -196,6 +196,14 @@
 
     setRole(r) { state.role = r; emit(); persistPrefs(); },
 
+    /* ---- Generic UI prefs (persisted to settings.prefs) ---- */
+    getPref(key, fallback) { const p = state.settings && state.settings.prefs; return (p && p[key] != null) ? p[key] : fallback; },
+    setPref(key, value) {
+      if (!state.settings) state.settings = {};
+      state.settings.prefs = Object.assign({}, state.settings.prefs || {}, { [key]: value });
+      emit(); persistPrefs({ [key]: value });
+    },
+
     /* ---- Campaigns ---- */
     getCampaigns() { return state.campaigns || []; },
     getCampaign(id) { return (state.campaigns || []).find((c) => c.id === id) || null; },

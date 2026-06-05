@@ -164,9 +164,10 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
   const [type, setType] = React.useState("image");
   const models = window.STUDIO.modelsByType(type);
   const [modelId, setModelId] = React.useState(() => {
-    // Default to a prompt-only model (no required start frame) so Generate works
-    // out of the box, even when the live catalog is already loaded at mount.
-    const m = models.find((x) => !(x.requires && x.requires.startFrame)) || models[0];
+    // Prefer the user's saved default image model; else a prompt-only model so
+    // Generate works out of the box even when the live catalog is already loaded.
+    const pref = type === "image" ? window.Store.getPref("defaultImageModelId") : null;
+    const m = (pref && models.find((x) => x.id === pref)) || models.find((x) => !(x.requires && x.requires.startFrame)) || models[0];
     return m && m.id;
   });
   const model = window.STUDIO.getModel(modelId) || models[0];
@@ -202,9 +203,10 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
     const list = window.STUDIO.modelsByType(type);
     if (!list.length) return;
     if (!list.some((m) => m.id === modelId)) {
-      // Prefer a prompt-only model (no required start frame) as the default, so
+      // Prefer the user's saved default image model, then a prompt-only model, so
       // a fresh Generate works without extra inputs. The dropdown still lists all.
-      const def = list.find((m) => !(m.requires && m.requires.startFrame)) || list[0];
+      const pref = type === "image" ? window.Store.getPref("defaultImageModelId") : null;
+      const def = (pref && list.find((m) => m.id === pref)) || list.find((m) => !(m.requires && m.requires.startFrame)) || list[0];
       setModelId(def.id);
     }
   }, [type, catalogVersion]);
@@ -347,6 +349,13 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
               </select>
               {model && model.description &&
                 <div className="muted" style={{ fontSize: 12.5, lineHeight: 1.4, marginTop: 6 }}>{model.description}</div>}
+              {type === "image" && model && (
+                <div style={{ marginTop: 8 }}>
+                  {window.Store.getPref("defaultImageModelId") === model.id
+                    ? <span className="mono" style={{ fontSize: 11, color: "var(--st-approved)" }}>★ Default image model</span>
+                    : <button className="btn ghost sm" onClick={() => { window.Store.setPref("defaultImageModelId", model.id); setCatalogVersion((v) => v + 1); }} title="Use this model by default for new image generations">★ Set as default</button>}
+                </div>
+              )}
             </StField>
 
             {/* prompt / script */}
