@@ -3,6 +3,7 @@
 import { NextResponse } from "next/server";
 import { HedraError } from "./hedra";
 import { ElevenError } from "./elevenlabs";
+import { DriveError } from "./drive";
 import { ZodError } from "zod";
 
 export function toErrorResponse(err: unknown, requestId?: string) {
@@ -14,10 +15,22 @@ export function toErrorResponse(err: unknown, requestId?: string) {
     log(400, "bad_request", "validation failed", err.flatten());
     return NextResponse.json({ error: "Invalid request.", code: "bad_request", issues: err.flatten().fieldErrors }, { status: 400 });
   }
-  if (err instanceof HedraError || err instanceof ElevenError) {
+  if (err instanceof HedraError || err instanceof ElevenError || err instanceof DriveError) {
     log(err.status, err.code, err.message);
     // err.message is already safe/generic; details kept server-side only
     return NextResponse.json({ error: err.message, code: err.code }, { status: clientStatus(err.status) });
+  }
+  // Auth-layer errors (lib/auth.ts requireUser/requireRole/assertAuthor): plain
+  // Error tagged with a numeric .status (401/403). Pass these 4xx codes through
+  // as-is — do NOT collapse 403→401 the way provider key errors do, since the
+  // distinction (unauthenticated vs forbidden role) is meaningful here.
+  const authStatus = (err as { status?: unknown })?.status;
+  if (typeof authStatus === "number" && authStatus >= 400 && authStatus < 500) {
+    const rawCode = (err as { code?: unknown })?.code;
+    const code = typeof rawCode === "string" ? rawCode : authStatus === 401 ? "unauthorized" : authStatus === 403 ? "forbidden" : "error";
+    const msg = authStatus === 401 ? "Unauthorized." : authStatus === 403 ? "Forbidden." : "Request error.";
+    log(authStatus, code, msg);
+    return NextResponse.json({ error: msg, code }, { status: authStatus });
   }
   log(500, "internal", (err as Error)?.message ?? "unknown");
   return NextResponse.json({ error: "Something went wrong.", code: "internal" }, { status: 500 });

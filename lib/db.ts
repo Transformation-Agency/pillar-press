@@ -6,5 +6,28 @@ import * as schema from "@/db/schema";
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 export const db = drizzle(pool, { schema });
-export { mediaJobs } from "@/db/schema";
-export type { MediaJob, NewMediaJob } from "@/db/schema";
+export {
+  mediaJobs,
+  workspaces,
+  memberships,
+  campaigns,
+  references,
+  pieces,
+  settings,
+} from "@/db/schema";
+export type {
+  MediaJob,
+  NewMediaJob,
+  Workspace,
+  NewWorkspace,
+  Membership,
+  NewMembership,
+  Campaign,
+  NewCampaign,
+  Reference,
+  NewReference,
+  Piece,
+  NewPiece,
+  Setting,
+  NewSetting,
+} from "@/db/schema";
