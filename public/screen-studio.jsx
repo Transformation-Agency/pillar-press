@@ -119,7 +119,12 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
   const voices = window.STUDIO.listVoices();
   const [type, setType] = React.useState("image");
   const models = window.STUDIO.modelsByType(type);
-  const [modelId, setModelId] = React.useState(models[0] && models[0].id);
+  const [modelId, setModelId] = React.useState(() => {
+    // Default to a prompt-only model (no required start frame) so Generate works
+    // out of the box, even when the live catalog is already loaded at mount.
+    const m = models.find((x) => !(x.requires && x.requires.startFrame)) || models[0];
+    return m && m.id;
+  });
   const model = window.STUDIO.getModel(modelId) || models[0];
 
   const [prompt, setPrompt] = React.useState("");
@@ -241,9 +246,19 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
               <select className="field" value={modelId || ""} onChange={(e) => setModelId(e.target.value)}
                 style={{ width: "100%", fontSize: 15, padding: "10px 12px", borderRadius: "var(--radius)" }}>
                 {models.length === 0 && <option value="">No models available</option>}
-                {models.map((m) => (
-                  <option key={m.id} value={m.id}>{m.name}{m.credits ? " · " + m.credits + " cr" : ""}</option>
-                ))}
+                {(() => {
+                  const opt = (m) => <option key={m.id} value={m.id}>{m.name}{m.credits ? " · " + m.credits + " cr" : ""}</option>;
+                  const fromPrompt = models.filter((m) => !(m.requires && m.requires.startFrame));
+                  const needStart = models.filter((m) => m.requires && m.requires.startFrame);
+                  if (!fromPrompt.length || !needStart.length) return models.map(opt);
+                  const labA = type === "image" ? "Text-to-image" : type === "video" ? "Text-to-video" : "From a prompt";
+                  const labB = type === "image" ? "Image-to-image · needs a start image"
+                    : type === "video" ? "Image-to-video · needs a start image" : "Needs a start image";
+                  return [
+                    <optgroup key="a" label={labA}>{fromPrompt.map(opt)}</optgroup>,
+                    <optgroup key="b" label={labB}>{needStart.map(opt)}</optgroup>,
+                  ];
+                })()}
               </select>
               {model && model.description &&
                 <div className="muted" style={{ fontSize: 12.5, lineHeight: 1.4, marginTop: 6 }}>{model.description}</div>}
