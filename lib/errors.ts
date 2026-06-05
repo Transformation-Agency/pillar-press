@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { HedraError } from "./hedra";
 import { ElevenError } from "./elevenlabs";
 import { DriveError } from "./drive";
+import { GatherError } from "./gather";
 import { ZodError } from "zod";
 
 export function toErrorResponse(err: unknown, requestId?: string) {
@@ -15,7 +16,7 @@ export function toErrorResponse(err: unknown, requestId?: string) {
     log(400, "bad_request", "validation failed", err.flatten());
     return NextResponse.json({ error: "Invalid request.", code: "bad_request", issues: err.flatten().fieldErrors }, { status: 400 });
   }
-  if (err instanceof HedraError || err instanceof ElevenError || err instanceof DriveError) {
+  if (err instanceof HedraError || err instanceof ElevenError || err instanceof DriveError || err instanceof GatherError) {
     log(err.status, err.code, err.message);
     // err.message is already safe/generic; details kept server-side only
     return NextResponse.json({ error: err.message, code: err.code }, { status: clientStatus(err.status) });
