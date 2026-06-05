@@ -50,7 +50,7 @@ export interface HedraModel {
   credits?: number;
 }
 
-export interface HedraCredits { credits: number; [k: string]: unknown }
+export interface HedraCredits { remaining?: number; expiring?: number; used?: number; workspace_credits?: Record<string, number>; [k: string]: unknown }
 export interface HedraVoice { id: string; name?: string; [k: string]: unknown }
 export interface HedraAsset { id: string; type: string; url?: string; name?: string; [k: string]: unknown }
 
@@ -138,7 +138,9 @@ export function listModels(types?: GenerationType[]): Promise<HedraModel[]> {
 }
 
 export function getCredits(): Promise<HedraCredits> {
-  return hedra<HedraCredits>("/credits");
+  // Hedra exposes the balance at /billing/credits ({ remaining, expiring, used,
+  // workspace_credits }), not /credits.
+  return hedra<HedraCredits>("/billing/credits");
 }
 
 export function listVoices(): Promise<HedraVoice[]> {
