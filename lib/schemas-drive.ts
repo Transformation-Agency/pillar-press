@@ -24,3 +24,25 @@ export const driveUploadSchema = z
   });
 
 export type DriveUploadInput = z.infer<typeof driveUploadSchema>;
+
+/**
+ * POST /api/drive/upload body — prebuilt-files mode.
+ *   { files: [{ name, content, mime? }] } → upload the given files as-is to the
+ *   linked Drive folder. Used by the front-end's export path which builds the
+ *   file contents client-side.
+ */
+export const driveUploadFilesSchema = z
+  .object({
+    files: z
+      .array(
+        z.object({
+          name: z.string().min(1).max(255),
+          content: z.string().max(5_000_000),
+          mime: z.string().min(1).max(255).optional(),
+        }),
+      )
+      .min(1, "Provide at least one file."),
+  })
+  .strict();
+
+export type DriveUploadFilesInput = z.infer<typeof driveUploadFilesSchema>;

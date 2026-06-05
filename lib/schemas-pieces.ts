@@ -9,6 +9,7 @@ import { pieceStatus } from "@/db/schema";
 
 /** POST /api/campaigns/:cid/pieces — create a piece (status defaults to Draft). */
 export const createPieceSchema = z.object({
+  id: z.string().uuid().optional(),
   title: z.string().trim().min(1, "Title is required.").max(300),
   original: z.string().max(200_000).optional(),
 });

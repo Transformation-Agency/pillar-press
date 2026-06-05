@@ -1,0 +1,314 @@
+/* Studio — Hedra + ElevenLabs media generation surface.
+   Generation is simulated in-app (see studio.js); the production
+   server-side build lives in /handoff. */
+
+function KeysDialog({ onClose }) {
+  const s = window.Store.getSettings();
+  const [hedra, setHedra] = React.useState(s.hedra.apiKey || "");
+  const [eleven, setEleven] = React.useState(s.eleven.apiKey || "");
+  const save = () => { window.Store.setHedraConfig({ apiKey: hedra.trim() }); window.Store.setElevenConfig({ apiKey: eleven.trim() }); onClose(); };
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "oklch(0 0 0 / 0.4)", display: "grid", placeItems: "center", zIndex: 80 }}>
+      <div className="card" onClick={(e) => e.stopPropagation()} style={{ width: 560, maxWidth: "92vw", padding: "26px 28px" }}>
+        <div className="eyebrow" style={{ marginBottom: 6 }}>Connect</div>
+        <h2 style={{ fontSize: 24, marginBottom: 10 }}>API keys</h2>
+        <p className="muted" style={{ fontSize: 13.5, marginBottom: 18 }}>
+          This prototype simulates generation locally, so keys aren't required to try the flow. In the production build (see the <span className="mono">handoff</span> package) these live <strong>server-side only</strong> as <span className="mono">HEDRA_API_KEY</span> / <span className="mono">ELEVENLABS_API_KEY</span> and are never sent to the browser.
+        </p>
+        <label className="eyebrow" style={{ display: "block", marginBottom: 5 }}>Hedra API key</label>
+        <input className="field" value={hedra} onChange={(e) => setHedra(e.target.value)} placeholder="hedra_xxx" style={{ marginBottom: 14, fontFamily: "var(--font-mono)", fontSize: 13 }} />
+        <label className="eyebrow" style={{ display: "block", marginBottom: 5 }}>ElevenLabs API key</label>
+        <input className="field" value={eleven} onChange={(e) => setEleven(e.target.value)} placeholder="sk_xxx" style={{ marginBottom: 22, fontFamily: "var(--font-mono)", fontSize: 13 }} />
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+          <button className="btn ghost" onClick={onClose}>Cancel</button>
+          <button className="btn primary" onClick={save}>Save</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatusChipMini({ ok, label }) {
+  return (
+    <span className="chip" style={{ color: ok ? "var(--st-approved)" : "var(--ink-3)", borderColor: ok ? "var(--st-approved)" : "var(--hair)" }}>
+      <span className="dot" style={{ background: ok ? "var(--st-approved)" : "var(--hair-2)" }} />{label}
+    </span>
+  );
+}
+
+function StartImageField({ value, aspect, prompt, libraryImages, onChange }) {
+  const fileRef = React.useRef(null);
+  const [pick, setPick] = React.useState(false);
+  const upload = (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    const r = new FileReader(); r.onload = () => onChange(r.result); r.readAsDataURL(f); e.target.value = "";
+  };
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
+        <div style={{ width: 84, flexShrink: 0 }}>
+          <AspectBox aspect={aspect}>
+            {value ? <img src={value} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              : <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", color: "var(--ink-3)" }}><Icon name="image" size={20} /></div>}
+          </AspectBox>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, flex: 1, position: "relative" }}>
+          <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={upload} />
+          <button className="btn sm" onClick={() => fileRef.current.click()}><Icon name="upload" size={13} /> Upload image</button>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button className="btn ghost sm" onClick={() => setPick((o) => !o)} disabled={!libraryImages.length}><Icon name="image" size={13} /> From library</button>
+            <button className="btn ghost sm" onClick={() => onChange(window.STUDIO.makeImagePlaceholder(prompt || "frame", aspect, "FRAME"))} title="Generate a start frame from the prompt"><Icon name="sparkle" size={13} /> AI frame</button>
+          </div>
+          {value && <button className="btn ghost sm" onClick={() => onChange(null)} style={{ alignSelf: "flex-start", color: "var(--ink-3)" }}>Clear</button>}
+          {pick && (
+            <div className="card" style={{ position: "absolute", top: 64, left: 0, zIndex: 30, width: 260, maxHeight: 220, overflowY: "auto", padding: 8, boxShadow: "var(--shadow-lg)", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              {libraryImages.map((m) => (
+                <button key={m.id} onClick={() => { onChange(m.outputUrl); setPick(false); }} style={{ border: "1px solid var(--hair)", borderRadius: 6, overflow: "hidden", cursor: "pointer", padding: 0, background: "none" }}>
+                  <img src={m.outputUrl} alt="" style={{ width: "100%", display: "block", aspectRatio: "1", objectFit: "cover" }} />
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Segmented({ options, value, onChange }) {
+  return (
+    <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+      {options.map((o) => {
+        const v = typeof o === "object" ? o.v : o, l = typeof o === "object" ? o.l : o;
+        const on = v === value;
+        return <button key={v} onClick={() => onChange(v)} className="mono" style={{ fontSize: 12, padding: "6px 11px", borderRadius: 999, cursor: "pointer", border: "1px solid " + (on ? "var(--accent)" : "var(--hair)"), background: on ? "var(--accent-soft)" : "transparent", color: on ? "var(--accent-ink)" : "var(--ink-2)" }}>{l}</button>;
+      })}
+    </div>
+  );
+}
+
+function StField({ label, children }) {
+  return <div style={{ marginBottom: 16 }}><div className="eyebrow" style={{ marginBottom: 7 }}>{label}</div>{children}</div>;
+}
+
+function StToggle({ on, onChange }) {
+  return (
+    <button onClick={onChange} style={{ width: 40, height: 23, borderRadius: 999, border: "none", cursor: "pointer", padding: 2, background: on ? "var(--accent)" : "var(--hair-2)", flexShrink: 0 }}>
+      <span style={{ display: "block", width: 19, height: 19, borderRadius: 999, background: "var(--paper-2)", transform: on ? "translateX(17px)" : "translateX(0)", transition: "transform 0.2s", boxShadow: "var(--shadow-sm)" }} />
+    </button>
+  );
+}
+
+function Studio({ campaignId, pieces, onOpenPiece }) {
+  const settings = window.Store.getSettings();
+  const allMedia = window.Store.mediaForCampaign(campaignId);
+  const libImages = allMedia.filter((m) => m.kind === "image" && m.status === "completed");
+
+  // live catalog / voices / credits are fetched async; bump this to re-render
+  // the composer once each lands (the STUDIO getters read from cache).
+  const [catalogVersion, setCatalogVersion] = React.useState(0);
+  React.useEffect(() => {
+    let alive = true;
+    const bump = () => { if (alive) setCatalogVersion((v) => v + 1); };
+    Promise.resolve(window.STUDIO.refreshModels()).then(bump);
+    Promise.resolve(window.STUDIO.refreshVoices()).then(bump);
+    Promise.resolve(window.STUDIO.refreshCredits()).then(bump);
+    return () => { alive = false; };
+  }, []);
+
+  const voices = window.STUDIO.listVoices();
+  const [type, setType] = React.useState("image");
+  const models = window.STUDIO.modelsByType(type);
+  const [modelId, setModelId] = React.useState(models[0] && models[0].id);
+  const model = window.STUDIO.getModel(modelId) || models[0];
+
+  const [prompt, setPrompt] = React.useState("");
+  const [aspect, setAspect] = React.useState((model && model.aspectRatios[0]) || "1:1");
+  const [resolution, setResolution] = React.useState((model && model.resolutions[0]) || "720p");
+  const [duration, setDuration] = React.useState((model && model.durations[0]) || 5);
+  const [batch, setBatch] = React.useState(1);
+  const [voiceId, setVoiceId] = React.useState((window.STUDIO.listVoices()[0] || {}).id || "rachel");
+  const [script, setScript] = React.useState("");
+  const [voiceOn, setVoiceOn] = React.useState(false);
+  const [startImage, setStartImage] = React.useState(null);
+  const [keysOpen, setKeysOpen] = React.useState(false);
+  const [error, setError] = React.useState(null);
+  const [prefillPiece, setPrefillPiece] = React.useState(null);
+
+  // reset model-dependent fields when type/model changes (or when the
+  // live catalog arrives and replaces the static fallback)
+  React.useEffect(() => {
+    const list = window.STUDIO.modelsByType(type);
+    if (!list.length) return;
+    if (!list.some((m) => m.id === modelId)) setModelId(list[0].id);
+  }, [type, catalogVersion]);
+  React.useEffect(() => {
+    if (!model) return;
+    if (model.aspectRatios.length && !model.aspectRatios.includes(aspect)) setAspect(model.aspectRatios[0]);
+    if (model.resolutions.length && !model.resolutions.includes(resolution)) setResolution(model.resolutions[0]);
+    if (model.durations.length && !model.durations.includes(duration)) setDuration(model.durations[0]);
+    if (type === "avatar") setVoiceOn(true);
+  }, [modelId]);
+
+  // keep the selected voice valid once the live voice list arrives
+  React.useEffect(() => {
+    const vs = window.STUDIO.listVoices();
+    if (vs.length && !vs.some((v) => v.id === voiceId)) setVoiceId(vs[0].id);
+  }, [catalogVersion]);
+
+  // prefill from "→ Video" on an Outputs card
+  React.useEffect(() => {
+    const pf = window.__studioPrefill;
+    if (pf) {
+      window.__studioPrefill = null;
+      setType(pf.type || "video");
+      if (pf.prompt) setPrompt(pf.prompt);
+      if (pf.script) { setScript(pf.script); setVoiceOn(true); }
+      if (pf.pieceId) setPrefillPiece(pf.pieceId);
+    }
+  }, []);
+
+  const req = (model && model.requires) || {};
+  const isVoiceModel = type === "audio";
+  const showVoiceover = type === "avatar" || (type === "video" && voiceOn);
+  const estDuration = isVoiceModel ? window.STUDIO.estimateAudioDuration(prompt)
+    : showVoiceover ? window.STUDIO.estimateAudioDuration(script) : duration;
+  const cost = window.STUDIO.creditsCost(model, { resolution, duration, batch, estDuration, prompt });
+
+  const generate = () => {
+    const params = { prompt, aspect, resolution, duration, batch, voiceId, startImage, estDuration,
+      audioRef: (type === "avatar" || (type === "video" && voiceOn)) ? "inline" : null };
+    const err = window.STUDIO.validate(model, params);
+    if (err) { setError(err); return; }
+    setError(null);
+    const media = window.Store.addMedia({
+      kind: type, prompt: prompt || (isVoiceModel ? script : ""), modelId: model.id, modelName: model.name,
+      aspect: model.aspectRatios.length ? aspect : (type === "audio" ? null : aspect),
+      resolution: model.resolutions.length ? resolution : null,
+      duration: model.durations.length ? duration : null,
+      voiceId: (isVoiceModel || showVoiceover) ? voiceId : null,
+      audioScript: isVoiceModel ? prompt : (showVoiceover ? script : null),
+      startImage: (type === "video" || type === "avatar") ? startImage : null,
+      estDuration, creditsEst: cost, status: "queued", progress: 0,
+      pieceId: prefillPiece || null,
+    });
+    window.STUDIO.runJob(media, (patch) => window.Store.updateMedia(media.id, patch));
+  };
+
+  const regen = (m) => {
+    const copy = window.Store.addMedia({ ...m, id: undefined, jobId: null, status: "queued", progress: 0, outputUrl: null, downloadUrl: null, thumbnailUrl: null, posterUrl: null, completedAt: null });
+    window.STUDIO.runJob(copy, (patch) => window.Store.updateMedia(copy.id, patch));
+  };
+  const duplicate = (m) => { setType(m.kind); setPrompt(m.prompt || ""); if (m.audioScript) { setScript(m.audioScript); setVoiceOn(true); } if (m.voiceId) setVoiceId(m.voiceId); if (m.aspect) setAspect(m.aspect); window.scrollTo && window.scrollTo(0, 0); };
+  const animate = (m) => { setType("video"); setStartImage(m.outputUrl); setPrompt(m.prompt || ""); };
+
+  const hedraOn = !!settings.hedra.apiKey, elevenOn = !!settings.eleven.apiKey;
+
+  return (
+    <div className="scroll-y" style={{ flex: 1 }}>
+      <div style={{ maxWidth: 1200, margin: "0 auto", padding: "40px 32px 90px" }}>
+        {/* header */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 6, flexWrap: "wrap", gap: 12 }}>
+          <div>
+            <div className="eyebrow" style={{ marginBottom: 8 }}>Hedra · ElevenLabs</div>
+            <h1 style={{ fontSize: 42, letterSpacing: "-0.02em" }}>Studio</h1>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <StatusChipMini ok={hedraOn} label={hedraOn ? "Hedra connected" : "Hedra: demo mode"} />
+            <StatusChipMini ok={elevenOn} label={elevenOn ? "ElevenLabs connected" : "ElevenLabs: demo mode"} />
+            <span className="chip" title="Available credits"><Icon name="sparkle" size={12} /> {window.STUDIO.getCredits().toLocaleString()} credits</span>
+            <button className="btn sm" onClick={() => setKeysOpen(true)}><Icon name="key" size={13} /> Keys</button>
+          </div>
+        </div>
+        <p className="muted" style={{ fontSize: 16, marginTop: 12, maxWidth: "60ch" }}>
+          Generate imagery, animation, and voiced video for this campaign. Make a voiceover with ElevenLabs, then sync a Hedra avatar or animation to it — and attach the result to any piece.
+        </p>
+
+        <div style={{ display: "grid", gridTemplateColumns: "420px 1fr", gap: 32, alignItems: "start", marginTop: 26 }}>
+          {/* composer */}
+          <div className="card" style={{ padding: "20px 22px", position: "sticky", top: 20 }}>
+            <div style={{ marginBottom: 18 }}>
+              <Segmented value={type} onChange={setType} options={window.STUDIO.TYPES.map((t) => ({ v: t.id, l: t.label }))} />
+            </div>
+
+            {/* model selector */}
+            <StField label="Model">
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {models.map((m) => {
+                  const on = m.id === modelId;
+                  return (
+                    <button key={m.id} onClick={() => setModelId(m.id)} style={{ textAlign: "left", border: "1px solid " + (on ? "var(--accent)" : "var(--hair)"), background: on ? "var(--accent-soft)" : "var(--paper-2)", borderRadius: "var(--radius)", padding: "10px 12px", cursor: "pointer" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+                        <span style={{ fontFamily: "var(--font-display)", fontSize: 16 }}>{m.name}</span>
+                        <span className="mono muted" style={{ fontSize: 10.5 }}>{m.credits} cr</span>
+                      </div>
+                      <div className="muted" style={{ fontSize: 12.5, lineHeight: 1.4, marginTop: 2 }}>{m.description}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </StField>
+
+            {/* prompt / script */}
+            <StField label={isVoiceModel ? "Script" : type === "avatar" ? "Scene prompt" : "Prompt"}>
+              <textarea className="field" value={prompt} onChange={(e) => setPrompt(e.target.value)}
+                placeholder={isVoiceModel ? "What should the voice say?" : type === "image" ? "Describe the image…" : "Describe the shot / character…"}
+                style={{ minHeight: 84, fontSize: 15, lineHeight: 1.55, resize: "vertical" }} />
+            </StField>
+
+            {/* dynamic controls */}
+            {model && model.aspectRatios.length > 0 && <StField label="Aspect ratio"><Segmented value={aspect} onChange={setAspect} options={model.aspectRatios} /></StField>}
+            {model && model.resolutions.length > 0 && <StField label="Resolution"><Segmented value={resolution} onChange={setResolution} options={model.resolutions} /></StField>}
+            {model && model.durations.length > 0 && <StField label="Duration"><Segmented value={duration} onChange={setDuration} options={model.durations.map((d) => ({ v: d, l: d + "s" }))} /></StField>}
+            {type === "image" && <StField label="Batch"><Segmented value={batch} onChange={setBatch} options={[{ v: 1, l: "1" }, { v: 2, l: "2" }, { v: 4, l: "4" }]} /></StField>}
+
+            {(type === "video" || type === "avatar") && (
+              <StField label={type === "avatar" ? "Portrait image (start frame)" : "Start image"}>
+                <StartImageField value={startImage} aspect={aspect} prompt={prompt} libraryImages={libImages} onChange={setStartImage} />
+              </StField>
+            )}
+
+            {type === "video" && (
+              <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}>
+                <StToggle on={voiceOn} onChange={() => setVoiceOn((o) => !o)} />
+                <span style={{ fontSize: 14 }}>Add ElevenLabs voiceover &amp; sync</span>
+              </div>
+            )}
+
+            {showVoiceover && (
+              <>
+                <StField label="Voice"><Segmented value={voiceId} onChange={setVoiceId} options={voices.map((v) => ({ v: v.id, l: v.name }))} /></StField>
+                <StField label="Voiceover script">
+                  <textarea className="field" value={script} onChange={(e) => setScript(e.target.value)} placeholder="What the voice says, synced to the video…" style={{ minHeight: 70, fontSize: 15, resize: "vertical" }} />
+                </StField>
+              </>
+            )}
+            {isVoiceModel && <StField label="Voice"><Segmented value={voiceId} onChange={setVoiceId} options={voices.map((v) => ({ v: v.id, l: v.name }))} /></StField>}
+
+            {prefillPiece && <div className="mono" style={{ fontSize: 11, color: "var(--accent-ink)", marginBottom: 10 }}>↳ will attach to: {(pieces.find((p) => p.id === prefillPiece) || {}).title}</div>}
+
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 6 }}>
+              <button className="btn primary" onClick={generate}><Icon name="sparkle" size={15} /> Generate</button>
+              <span className="mono muted" style={{ fontSize: 12 }}>~{cost} credits</span>
+            </div>
+            {error && <p style={{ color: "var(--sev-must)", fontSize: 13.5, marginTop: 12 }}>{error}</p>}
+          </div>
+
+          {/* library */}
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <div className="eyebrow">Media library · {allMedia.length}</div>
+            </div>
+            <MediaLibrary items={allMedia} pieces={pieces}
+              empty="Nothing generated yet. Make an image or a voiced video on the left."
+              onAttach={(id, pid) => window.Store.attachMediaToPiece(id, pid)}
+              onRegen={regen} onDuplicate={duplicate} onDelete={(m) => window.Store.removeMedia(m.id)} onAnimate={animate} />
+          </div>
+        </div>
+        {keysOpen && <KeysDialog onClose={() => setKeysOpen(false)} />}
+      </div>
+    </div>
+  );
+}
+
+Object.assign(window, { Studio, KeysDialog });

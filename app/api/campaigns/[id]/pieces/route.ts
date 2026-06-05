@@ -60,6 +60,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const [piece] = await db
       .insert(pieces)
       .values({
+        ...(body.id ? { id: body.id } : {}),
         campaignId: campaign.id,
         userId: user.id,
         title: body.title,

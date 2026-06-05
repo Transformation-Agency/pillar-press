@@ -10,7 +10,7 @@ import {
   type PieceForExport,
 } from "@/lib/exporters";
 import { uploadMany, DriveError } from "@/lib/drive";
-import { driveUploadSchema } from "@/lib/schemas-drive";
+import { driveUploadSchema, driveUploadFilesSchema } from "@/lib/schemas-drive";
 import { toErrorResponse } from "@/lib/errors";
 
 /**
@@ -59,13 +59,27 @@ async function resolvePiece(id: string, user: SessionUser): Promise<Piece | null
 export async function POST(req: Request) {
   try {
     const user = await requireUser();
-    const body = driveUploadSchema.parse(await req.json());
+    const raw: unknown = await req.json();
 
-    // 1) Ensure Drive is linked for this caller.
+    // 1) Ensure Drive is linked for this caller. (Shared by both modes.)
     const [setting] = await db.select().from(settings).where(settingsScope(user)).limit(1);
     if (!setting?.driveRefreshToken) {
       throw new DriveError("Google Drive is not linked.", 400, "drive_not_linked");
     }
+
+    // Mode A — prebuilt files: { files:[{name,content,mime?}] } uploaded as-is.
+    if (raw && typeof raw === "object" && "files" in raw) {
+      const { files } = driveUploadFilesSchema.parse(raw);
+      const uploaded = await uploadMany(
+        setting.driveRefreshToken,
+        setting.driveFolderId,
+        files,
+      );
+      return NextResponse.json({ files: uploaded }, { status: 201 });
+    }
+
+    // Mode B — piece export: build markdown server-side from a piece's outputs.
+    const body = driveUploadSchema.parse(raw);
 
     // 2) Load the piece (ownership-scoped → 404 on miss).
     const piece = await resolvePiece(body.pieceId, user);

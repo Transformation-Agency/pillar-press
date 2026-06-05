@@ -41,7 +41,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const { name } = createCampaignSchema.parse(await req.json());
+    const { id: providedId, name } = createCampaignSchema.parse(await req.json());
 
     // Unique slug within the workspace (base, base-2, base-3, ...).
     const base = slug(name) || "campaign";
@@ -65,7 +65,12 @@ export async function POST(req: Request) {
 
     const [campaign] = await db
       .insert(campaigns)
-      .values({ workspaceId: user.workspaceId, slug: candidate, name })
+      .values({
+        ...(providedId ? { id: providedId } : {}),
+        workspaceId: user.workspaceId,
+        slug: candidate,
+        name,
+      })
       .returning();
 
     await db.insert(references).values({

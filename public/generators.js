@@ -1,0 +1,249 @@
+/* ============================================================
+   Generators — Proposed Revision + platform-native versions.
+   Plain JS. Exposes window.GEN.
+   ============================================================ */
+(function () {
+
+  /* ---- minimal REST helper (same-origin, no auth headers) ---- */
+  async function apiSend(method, path, body) {
+    const r = await fetch("/api" + path, {
+      method,
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: body == null ? undefined : JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error(method + " " + path + " -> " + r.status);
+    const ct = r.headers.get("content-type") || "";
+    return ct.indexOf("application/json") >= 0 ? r.json() : null;
+  }
+
+  /* ---------- Proposed Revision ----------
+     Applies ONLY clarity, tone, and inoculation (screenshot-test) findings.
+     Strategy / audience / rigor / identity findings stay in the report.
+     Rule: where a clarity rule would flatten a line that sounds like the
+     author, the author's line wins. Ends with a changelog.
+
+     Uses a DELIMITER format (not JSON) so long revised text with line
+     breaks never breaks parsing, and processes the draft in passages so
+     no single call exceeds the output budget — this scales to any length. */
+
+  function chunkText(text, maxWords = 260) {
+    const paras = (text || "").split(/\n{2,}/);
+    const chunks = []; let cur = []; let curW = 0;
+    const flush = () => { if (cur.length) { chunks.push(cur.join("\n\n")); cur = []; curW = 0; } };
+    const wc = (s) => s.trim().split(/\s+/).filter(Boolean).length;
+    for (const p of paras) {
+      const w = wc(p);
+      if (w > maxWords) {
+        flush();
+        const sents = p.match(/[^.!?]+[.!?]+[\s"”’)]*|[^.!?]+$/g) || [p];
+        let sc = [], scw = 0;
+        for (const s of sents) {
+          const sw = wc(s);
+          if (scw + sw > maxWords && sc.length) { chunks.push(sc.join("").trim()); sc = []; scw = 0; }
+          sc.push(s); scw += sw;
+        }
+        if (sc.length) chunks.push(sc.join("").trim());
+      } else if (curW + w > maxWords && cur.length) {
+        flush(); cur.push(p); curW = w;
+      } else { cur.push(p); curW += w; }
+    }
+    flush();
+    return chunks.length ? chunks : [text || ""];
+  }
+
+  function parseDelimited(out) {
+    let body = out || "", changelog = [];
+    const rev = out.split(/@@\s*REVISION\s*@@/i);
+    if (rev.length > 1) {
+      const after = rev[1].split(/@@\s*CHANGELOG\s*@@/i);
+      body = after[0];
+      let cl = (after[1] || "").split(/@@\s*END\s*@@/i)[0];
+      changelog = cl.split(/\n/).map((l) => l.trim())
+        .filter((l) => /^[-•]/.test(l))
+        .map((l) => {
+          l = l.replace(/^[-•]\s*/, "");
+          let finding = "—";
+          const idm = l.match(/^\[?\s*([CTI]\s*\d+)\s*\]?/i);
+          if (idm) { finding = idm[1].replace(/\s+/g, "").toUpperCase(); l = l.slice(idm[0].length); }
+          l = l.replace(/^\s*\[[^\]]*\]\s*/, ""); // drop an optional [severity] tag
+          const parts = l.split(/\s*::\s*/);
+          return { finding, change: (parts[0] || "").replace(/^[—:\-\s]+/, "").trim(), note: (parts[1] || "").trim() };
+        }).filter((c) => c.change);
+    }
+    body = body.replace(/@@\s*END\s*@@[\s\S]*$/i, "").replace(/@@\s*CHANGELOG\s*@@[\s\S]*$/i, "").trim();
+    return { revision: body, changelog };
+  }
+
+  async function generateRevision(piece, refCtx, onProgress) {
+    // Revision is produced server-side: POST /api/pieces/:id/revision
+    // returns { piece } with piece.revision = { text, changelog }.
+    const res = await apiSend("POST", "/pieces/" + piece.id + "/revision");
+    const rev = (res && res.piece && res.piece.revision) || {};
+    if (onProgress) onProgress(1, 1);
+    return {
+      revision: rev.text || "",
+      changelog: Array.isArray(rev.changelog) ? rev.changelog : [],
+    };
+  }
+
+  /* ---------- Platform generation ---------- */
+
+  const AUDIENCE_PRESETS = [
+    { id: "leaders", name: "Leaders in personal spheres" },
+    { id: "builders", name: "Builders & founders" },
+    { id: "women-ai", name: "Women curious about AI" },
+    { id: "governance", name: "Governance & coordination thinkers" },
+    { id: "relational", name: "Existing relational audience" },
+    { id: "general", name: "General public bridge" },
+  ];
+
+  // Fixed generation order. Each platform names which prior outputs it
+  // prefers to derive from; falls back to canonical source if absent.
+  const PLATFORMS = [
+    { id: "substack", name: "Substack", order: 1, register: "essay",
+      derivesFrom: [], role: "Canonical source. The fullest expression — long-form essay register." },
+    { id: "facebook", name: "Facebook", order: 2, register: "field",
+      derivesFrom: ["substack"], role: "Relational adaptation of the canonical source. Warm, personal, field register." },
+    { id: "instagram", name: "Instagram", order: 3, register: "field",
+      derivesFrom: ["facebook"], role: "Visual adaptation of the Facebook version. Include image/carousel/Reel recommendation." },
+    { id: "x", name: "X", order: 4, register: "field",
+      derivesFrom: ["substack", "facebook"], role: "Strongest theses and distinctions from the Substack + Facebook versions. Thread-friendly." },
+    { id: "threads", name: "Threads", order: 5, register: "field",
+      derivesFrom: ["facebook", "x"], role: "Conversational register, built from the Facebook + X versions." },
+  ];
+
+  function canonicalSource(piece) {
+    if (piece.revision && piece.revision.text) return piece.revision.text;
+    if (piece.revision && piece.revision.revision) return piece.revision.revision;
+    return piece.original || "";
+  }
+
+  // Resolve, given the set of ON platforms, the actual source for each.
+  // If a platform's preferred derivesFrom isn't ON, fall back up the chain
+  // to canonical source.
+  function resolveSources(activeIds) {
+    const map = {};
+    PLATFORMS.forEach((p) => {
+      if (!activeIds.includes(p.id)) return;
+      const present = p.derivesFrom.filter((d) => activeIds.includes(d));
+      map[p.id] = present.length ? present : ["__source__"];
+    });
+    return map;
+  }
+
+  async function generatePlatform(platform, { sourceText, priorOutputs, sourceIds, audienceId, refCtx }) {
+    const aud = AUDIENCE_PRESETS.find((a) => a.id === audienceId) || AUDIENCE_PRESETS[0];
+
+    let derivationText;
+    if (sourceIds[0] === "__source__") {
+      derivationText = `Derive from the CANONICAL SOURCE below.`;
+    } else {
+      derivationText = `Derive from these already-generated versions (named): ${sourceIds.map((s) => s.toUpperCase()).join(" + ")}. Use their strongest material. Do NOT merely excerpt — this is an independent entry point that may point back to the longer work.`;
+    }
+
+    const priorBlock = sourceIds[0] === "__source__"
+      ? `CANONICAL SOURCE:\n"""${sourceText}"""`
+      : sourceIds.map((s) => `=== ${s.toUpperCase()} VERSION ===\n${(priorOutputs[s] && priorOutputs[s].draftPost) || sourceText}`).join("\n\n");
+
+    const igExtra = platform.id === "instagram"
+      ? ` For Instagram, the imagery recommendation MUST specify a format: single image, carousel (with slide breakdown), or Reel (with a short beat list).`
+      : "";
+
+    /* --- Call 1: the POST BODY (delimiter format, no JSON escaping) ---
+       Kept separate from the metadata so a long body can never truncate the
+       structured fields. Distill rather than reproduce. */
+    const bodySystem =
+`You write the BODY of a single platform-native post for an author. ${platform.role}
+Register to use: ${platform.register}. ${derivationText}
+This is an INDEPENDENT entry point, never a mere excerpt; it may point back to the longer work. If the source is long, DISTILL it to one sharp idea rather than reproducing it — aim for a complete, well-shaped post and do not exceed ~550 words.
+
+AUTHOR REFERENCES:
+${refCtx}
+
+Return EXACTLY this and nothing else (no JSON, no preamble):
+@@POST@@
+<the full post as plain prose; keep paragraph breaks as blank lines>
+@@END@@`;
+    const bodyPrompt =
+`TARGET PLATFORM: ${platform.name}
+SELECTED AUDIENCE: ${aud.name}
+
+${priorBlock}
+
+Write the post now in the delimited format.`;
+    const bodyOut = await window.AI.text(bodyPrompt, { system: bodySystem });
+    let draftPost = bodyOut || "";
+    const pm = bodyOut.split(/@@\s*POST\s*@@/i);
+    if (pm.length > 1) draftPost = pm[1].split(/@@\s*END\s*@@/i)[0];
+    draftPost = draftPost.replace(/@@\s*END\s*@@[\s\S]*$/i, "").trim();
+
+    /* --- Call 2: the METADATA (compact JSON, given the finished body) --- */
+    const metaSystem =
+`You produce publishing metadata for a FINISHED platform post written for an author. Base every field on the actual post text provided. Run a risk & boundary check against the author's RED LINES.
+
+AUTHOR REFERENCES:
+${refCtx}
+
+Return ONLY compact valid JSON (no prose, no code fences):
+{"throughlineTag":"<one throughline tag, no hash>","strategicPurpose":"1 sentence","hooks":["2-3 short alternative opening hooks"],"ctas":["2-3 call-to-action options"],"mediaRec":"<imagery/media recommendation${platform.id === "instagram" ? ", specify single image / carousel / Reel" : ""}>","riskCheck":"<'Clear' or the specific concern>","relatedOffering":"<related offering or destination>","followUp":"<one suggested follow-up post>"}`;
+    const metaPrompt =
+`PLATFORM: ${platform.name}
+SELECTED AUDIENCE: ${aud.name}${igExtra}
+
+THE POST:
+"""${draftPost}"""
+
+Return the metadata JSON now.`;
+    let meta = {};
+    try { meta = await window.AI.json(metaPrompt, { system: metaSystem }); }
+    catch (e) { console.warn("Platform metadata failed:", platform.id, e); }
+
+    return {
+      platform: platform.name,
+      selectedAudience: aud.name,
+      throughlineTag: (meta.throughlineTag || "").replace(/^#/, "") || "—",
+      strategicPurpose: meta.strategicPurpose || "—",
+      draftPost: draftPost || "—",
+      hooks: Array.isArray(meta.hooks) ? meta.hooks : [],
+      ctas: Array.isArray(meta.ctas) ? meta.ctas : [],
+      mediaRec: meta.mediaRec || "—",
+      riskCheck: meta.riskCheck || "Clear",
+      relatedOffering: meta.relatedOffering || "—",
+      followUp: meta.followUp || "—",
+      _platform: platform.id,
+      _audienceId: aud.id,
+    };
+  }
+
+  // Generate platform-native versions server-side in fixed order.
+  // POST /api/pieces/:id/outputs { active, audiences } -> { piece, outputs, outputOrder }.
+  async function generateOutputs(piece, activeIds, audienceMap, refCtx, onProgress) {
+    const ordered = PLATFORMS.filter((p) => activeIds.includes(p.id)).map((p) => p.id);
+    // Server does the whole batch in one call; flag each ordered platform as running.
+    if (onProgress) ordered.forEach((id) => onProgress(id, "running"));
+    let res;
+    try {
+      res = await apiSend("POST", "/pieces/" + piece.id + "/outputs", {
+        active: activeIds,
+        audiences: audienceMap,
+      });
+    } catch (e) {
+      if (onProgress) ordered.forEach((id) => onProgress(id, "error", null, e));
+      throw e;
+    }
+    const outputs = (res && res.outputs) || (res && res.piece && res.piece.outputs) || {};
+    const order = (res && res.outputOrder) || (res && res.piece && res.piece.outputOrder) || ordered.filter((id) => outputs[id]);
+    if (onProgress) order.forEach((id) => { if (outputs[id]) onProgress(id, "done", outputs[id]); });
+    return { outputs, order };
+  }
+
+  window.GEN = {
+    generateRevision,
+    generateOutputs,
+    generatePlatform,
+    resolveSources,
+    canonicalSource,
+    AUDIENCE_PRESETS,
+    PLATFORMS,
+  };
+})();
