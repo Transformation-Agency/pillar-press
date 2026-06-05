@@ -103,7 +103,12 @@
       const [refDoc, pieceRes, srcRes, itemRes, mediaRes] = results;
 
       const cc = ensureCampaign(id);
-      if (cc) cc.references = (refDoc && (refDoc.references || refDoc.doc)) || refDoc || {};
+      if (cc) {
+        // GET /campaigns/:id/references -> { references: { id, campaignId, doc } }.
+        // The actual document is the `doc` field of that row.
+        const row = refDoc && refDoc.references;
+        cc.references = (row && row.doc) || (refDoc && refDoc.doc) || {};
+      }
 
       const pieces = (pieceRes && pieceRes.pieces) || [];
       // replace this campaign's pieces with server truth, keep other campaigns' cache
@@ -195,7 +200,13 @@
     getCampaigns() { return state.campaigns || []; },
     getCampaign(id) { return (state.campaigns || []).find((c) => c.id === id) || null; },
     activeCampaign() { return api.getCampaign(state.activeCampaignId) || (state.campaigns || [])[0]; },
-    activeReferences() { const c = api.activeCampaign(); return (c && c.references) || {}; },
+    activeReferences() {
+      const c = api.activeCampaign();
+      // Default skeleton so screens (which read e.g. strategy.throughlines) never
+      // crash during the brief window before a campaign's references hydrate.
+      const SAFE = { strategy: { throughlines: [], body: "" }, audiences: { list: [] }, registers: { list: [], body: "" }, voiceRules: { rules: [] }, redLines: { rules: [] }, selfVision: { body: "" }, gateSpec: { body: "" } };
+      return Object.assign({}, SAFE, (c && c.references) || {});
+    },
     setActiveCampaign(id) {
       if (!api.getCampaign(id)) return;
       state.activeCampaignId = id;
