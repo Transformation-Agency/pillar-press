@@ -128,18 +128,27 @@ function RevisionTab({ piece, onUpdate, refCtx }) {
         {/* changelog */}
         <div className="card" style={{ padding: "20px 22px", position: "sticky", top: 24 }}>
           <div className="eyebrow" style={{ marginBottom: 6 }}>Changelog</div>
-          <p className="muted" style={{ fontSize: 13, marginBottom: 12 }}>Each change traces to the finding that prompted it.</p>
+          <p className="muted" style={{ fontSize: 13, marginBottom: 12 }}>Each change traces to its finding; <span style={{ color: "var(--st-approved)" }}>✎ author-directed</span> lines came from your direction or commentary.</p>
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {(rev.changelog || []).length === 0 && <span className="muted" style={{ fontSize: 14, fontStyle: "italic" }}>No changes were needed.</span>}
-            {(rev.changelog || []).map((c, i) => (
-              <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start", paddingBottom: 12, borderBottom: i < rev.changelog.length - 1 ? "1px solid var(--hair)" : "none" }}>
-                <span className="mono" style={{ fontSize: 10, padding: "2px 6px", borderRadius: 4, background: "var(--accent-soft)", color: "var(--accent-ink)", flexShrink: 0, marginTop: 2 }}>{c.finding}</span>
-                <div>
-                  <div style={{ fontSize: 14, lineHeight: 1.45 }}>{c.change}</div>
-                  {c.note && <div className="muted" style={{ fontSize: 12.5, fontStyle: "italic", marginTop: 2 }}>{c.note}</div>}
+            {(rev.changelog || []).map((c, i) => {
+              const dir = String(c.finding || "").toUpperCase() === "DIR";
+              return (
+                <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start", paddingBottom: 12, borderBottom: i < rev.changelog.length - 1 ? "1px solid var(--hair)" : "none" }}>
+                  <span className="mono" title={dir ? "Driven by your direction / commentary" : "Traces to finding " + c.finding}
+                    style={{
+                      fontSize: 10, padding: "2px 6px", borderRadius: 4, whiteSpace: "nowrap", flexShrink: 0, marginTop: 2,
+                      background: dir ? "var(--st-approved-bg, transparent)" : "var(--accent-soft)",
+                      color: dir ? "var(--st-approved)" : "var(--accent-ink)",
+                      border: "1px solid " + (dir ? "var(--st-approved)" : "transparent"),
+                    }}>{dir ? "✎ Author-directed" : c.finding}</span>
+                  <div>
+                    <div style={{ fontSize: 14, lineHeight: 1.45 }}>{c.change}</div>
+                    {c.note && <div className="muted" style={{ fontSize: 12.5, fontStyle: "italic", marginTop: 2 }}>{c.note}</div>}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>
