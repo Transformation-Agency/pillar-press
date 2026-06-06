@@ -320,43 +320,66 @@
     return out;
   }
 
-  function runJob(media, onUpdate) {
+  function runJob(media, onUpdate, opts) {
     let cancelled = false;
     let timer = null;
+    // One-shot auto-retry when a job FAILS MID-RENDER (status -> failed after a
+    // successful submit). The server already retries transient submit errors, so
+    // submit-level failures are surfaced as-is and not re-run here.
+    const maxRetries = (opts && typeof opts.retries === "number") ? opts.retries : 1;
+    let retried = 0;
     onUpdate({ status: "queued", progress: 0 });
 
-    apiPost("/hedra/generate", buildGenerateBody(media)).then((res) => {
+    const onMidRenderFail = (errMsg) => {
       if (cancelled) return;
-      const job = (res && res.job) || res || {};
-      const jobId = job.id;
-      // persist the server job id on the media row so it survives reloads
-      const first = normStatus(job);
-      first.jobId = jobId;
-      if (first.progress == null) first.progress = 2;
-      onUpdate(first);
-      if (TERMINAL[(job.status || "").toLowerCase()]) return;
-      if (!jobId) { onUpdate({ status: "failed", error: "No job id returned." }); return; }
+      if (retried < maxRetries) {
+        retried += 1;
+        onUpdate({ status: "queued", progress: 0, error: null }); // clear + re-run
+        timer = setTimeout(submit, 1500);
+      } else {
+        onUpdate({ status: "failed", error: errMsg || "Generation failed." });
+      }
+    };
 
-      const poll = () => {
+    const submit = () => {
+      if (cancelled) return;
+      apiPost("/hedra/generate", buildGenerateBody(media)).then((res) => {
         if (cancelled) return;
-        apiGet("/hedra/status/" + encodeURIComponent(jobId)).then((sres) => {
-          if (cancelled) return;
-          const sjob = (sres && sres.job) || sres || {};
-          const patch = normStatus(sjob);
-          onUpdate(patch);
-          if (TERMINAL[(sjob.status || "").toLowerCase()]) return; // stop polling
-          timer = setTimeout(poll, 3000);
-        }).catch(() => {
-          if (cancelled) return;
-          timer = setTimeout(poll, 3000); // transient error — keep polling
-        });
-      };
-      timer = setTimeout(poll, 3000);
-    }).catch((e) => {
-      if (cancelled) return;
-      onUpdate({ status: "failed", error: (e && e.message) || "Generation request failed." });
-    });
+        const job = (res && res.job) || res || {};
+        const jobId = job.id;
+        const st = (job.status || "").toLowerCase();
+        if (st === "failed") { onMidRenderFail(job.errorMessage || job.error || "Generation failed."); return; }
+        const first = normStatus(job);
+        first.jobId = jobId;
+        if (first.progress == null) first.progress = 2;
+        onUpdate(first);
+        if (TERMINAL[st]) return; // completed/canceled immediately
+        if (!jobId) { onUpdate({ status: "failed", error: "No job id returned." }); return; }
 
+        const poll = () => {
+          if (cancelled) return;
+          apiGet("/hedra/status/" + encodeURIComponent(jobId)).then((sres) => {
+            if (cancelled) return;
+            const sjob = (sres && sres.job) || sres || {};
+            const sst = (sjob.status || "").toLowerCase();
+            if (sst === "failed") { onMidRenderFail(sjob.errorMessage || sjob.error || "Generation failed."); return; }
+            onUpdate(normStatus(sjob));
+            if (TERMINAL[sst]) return; // completed / canceled — stop polling
+            timer = setTimeout(poll, 3000);
+          }).catch(() => {
+            if (cancelled) return;
+            timer = setTimeout(poll, 3000); // transient status-read error — keep polling
+          });
+        };
+        timer = setTimeout(poll, 3000);
+      }).catch((e) => {
+        if (cancelled) return;
+        // Submit failed even after the server's transient retries — surface it.
+        onUpdate({ status: "failed", error: (e && e.message) || "Generation request failed." });
+      });
+    };
+
+    submit();
     return function cancel() { cancelled = true; if (timer) clearTimeout(timer); };
   }
 
