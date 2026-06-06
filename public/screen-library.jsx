@@ -40,8 +40,8 @@ function PieceRow({ piece, onOpen, onDelete }) {
       <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
         <StatusChip status={piece.status} />
         <button className="icon-btn" title="Delete piece"
-          onClick={(e) => { e.stopPropagation(); if (confirm(`Delete "${piece.title}"?`)) onDelete(piece.id); }}
-          style={{ opacity: hover ? 1 : 0, transition: "opacity 0.15s" }}>
+          onClick={(e) => { e.stopPropagation(); if (confirm(`Delete "${piece.title}"? This can't be undone.`)) onDelete(piece.id); }}
+          style={{ opacity: hover ? 1 : 0.55, transition: "opacity 0.15s" }}>
           <Icon name="trash" size={15} />
         </button>
         <Icon name="chevR" size={18} style={{ color: "var(--ink-3)" }} />
