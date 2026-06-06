@@ -188,6 +188,29 @@ export function uploadAsset(assetId: string, file: Blob, filename: string): Prom
   return hedra<HedraAsset>(`/assets/${encodeURIComponent(assetId)}/upload`, { method: "POST", body: form, isForm: true });
 }
 
+// Hedra occasionally returns transient errors on submission (notably 422 for
+// some image models, plus 429/5xx/timeouts). Retry those a few times with
+// exponential backoff before giving up. A failed POST creates no generation, so
+// re-submitting is safe (no duplicate/extra credit charge).
+const TRANSIENT_STATUSES = new Set([408, 409, 422, 425, 429, 500, 502, 503, 504]);
+
+async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastErr = e;
+      const status = e instanceof HedraError ? e.status : 0;
+      if (i === attempts - 1 || !TRANSIENT_STATUSES.has(status)) throw e;
+      const delay = 500 * 2 ** i + Math.floor(Math.random() * 300);
+      console.warn(`[hedra] transient ${status} on submit; retry ${i + 1}/${attempts - 1} in ${delay}ms`);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  throw lastErr;
+}
+
 export async function generateAsset(input: GenerateInput): Promise<GenerationStatus> {
   let body: Record<string, unknown>;
   if (input.type === "image") {
@@ -207,7 +230,7 @@ export async function generateAsset(input: GenerateInput): Promise<GenerationSta
     if (input.startAssetId) body.start_keyframe_id = input.startAssetId;
     if (input.audioAssetId) body.audio_id = input.audioAssetId;
   }
-  const res = await hedra<GenerationStatus>("/generations", { method: "POST", body });
+  const res = await withRetry(() => hedra<GenerationStatus>("/generations", { method: "POST", body }));
   return normalizeStatus(res);
 }
 

@@ -59,6 +59,30 @@ describe("hedra client", () => {
     await expect(hedra.generateAsset({ type: "image", modelId: "m1" })).rejects.toMatchObject({ code: "rate_limit" });
   });
 
+  it("retries a transient 422 on submit, then succeeds", async () => {
+    let n = 0;
+    global.fetch = vi.fn(async () => {
+      n += 1;
+      const fail = n === 1;
+      return {
+        ok: !fail,
+        status: fail ? 422 : 200,
+        json: async () => (fail ? {} : { id: "g2", status: "queued", progress: 0 }),
+        text: async () => "{}",
+      } as Response;
+    }) as any;
+    const r = await hedra.generateAsset({ type: "image", modelId: "m1", textPrompt: "x" });
+    expect(r.id).toBe("g2");
+    expect(n).toBe(2); // failed once, retried once, succeeded
+  });
+
+  it("does NOT retry a non-transient error (402)", async () => {
+    let n = 0;
+    global.fetch = vi.fn(async () => { n += 1; return { ok: false, status: 402, json: async () => ({}), text: async () => "{}" } as Response; }) as any;
+    await expect(hedra.generateAsset({ type: "image", modelId: "m1" })).rejects.toMatchObject({ code: "insufficient_credits" });
+    expect(n).toBe(1); // single attempt, no retry
+  });
+
   it("getGenerationStatus hits the status path", async () => {
     let seenUrl = "";
     global.fetch = mockFetch(200, { id: "g1", status: "processing", progress: 40 }, (u) => { seenUrl = u; }) as any;
