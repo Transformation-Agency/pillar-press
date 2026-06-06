@@ -49,12 +49,18 @@ export interface TtsInput {
   stability?: number;
   similarityBoost?: number;
   format?: string;        // e.g. "mp3_44100_128"
+  previousText?: string;  // preceding chunk's tail — improves seam prosody
+  nextText?: string;      // following chunk's head — improves seam prosody
 }
+
+// Per-request cap. eleven_multilingual_v2 accepts up to ~10k chars; longer
+// scripts are split + stitched by textToSpeechLong().
+const TTS_MAX_CHARS = 9500;
 
 /** Returns the rendered audio as a Blob (audio/mpeg by default). */
 export async function textToSpeech(input: TtsInput): Promise<Blob> {
   if (!input.text?.trim()) throw new ElevenError(422, "validation", "TTS text is empty.");
-  if (input.text.length > 5000) throw new ElevenError(422, "validation", "TTS text exceeds 5000 characters.");
+  if (input.text.length > 10000) throw new ElevenError(422, "validation", "TTS text exceeds 10000 characters.");
   const res = await fetch(
     `${ELEVEN_BASE}/text-to-speech/${encodeURIComponent(input.voiceId)}?output_format=${input.format ?? "mp3_44100_128"}`,
     {
@@ -64,12 +70,67 @@ export async function textToSpeech(input: TtsInput): Promise<Blob> {
         text: input.text,
         model_id: input.modelId ?? "eleven_multilingual_v2",
         voice_settings: { stability: input.stability ?? 0.5, similarity_boost: input.similarityBoost ?? 0.75 },
+        ...(input.previousText ? { previous_text: input.previousText } : {}),
+        ...(input.nextText ? { next_text: input.nextText } : {}),
       }),
-      signal: AbortSignal.timeout(60_000),
+      signal: AbortSignal.timeout(120_000),
     },
   );
   if (!res.ok) throw mapError(res.status, await res.text().catch(() => ""));
   return await res.blob();
+}
+
+/** Split long text into TTS-sized chunks on paragraph, then sentence, boundaries. */
+function chunkForTTS(text: string, maxChars: number): string[] {
+  const paras = String(text || "").split(/\n{2,}/);
+  const chunks: string[] = [];
+  let cur = "";
+  const flush = () => { const t = cur.trim(); if (t) chunks.push(t); cur = ""; };
+  for (const p of paras) {
+    if (p.length > maxChars) {
+      flush();
+      const sents = p.match(/[^.!?]+[.!?]+[\s"'’”)]*|[^.!?]+$/g) || [p];
+      let s = "";
+      for (const sent of sents) {
+        if (sent.length > maxChars) {
+          if (s.trim()) { chunks.push(s.trim()); s = ""; }
+          for (let i = 0; i < sent.length; i += maxChars) chunks.push(sent.slice(i, i + maxChars));
+          continue;
+        }
+        if ((s + sent).length > maxChars && s) { chunks.push(s.trim()); s = ""; }
+        s += sent;
+      }
+      if (s.trim()) chunks.push(s.trim());
+    } else if ((cur + "\n\n" + p).length > maxChars && cur) {
+      flush(); cur = p;
+    } else {
+      cur = cur ? cur + "\n\n" + p : p;
+    }
+  }
+  flush();
+  return chunks.length ? chunks : [String(text || "")];
+}
+
+/**
+ * Synthesize text of any length: split into ≤maxChars chunks, render each with
+ * previous/next-text context for seam continuity, and concatenate the MP3 bytes
+ * into one Buffer.
+ */
+export async function textToSpeechLong(input: TtsInput, maxChars = TTS_MAX_CHARS): Promise<Buffer> {
+  const text = (input.text || "").trim();
+  if (!text) throw new ElevenError(422, "validation", "TTS text is empty.");
+  const chunks = chunkForTTS(text, maxChars);
+  const buffers: Buffer[] = [];
+  for (let i = 0; i < chunks.length; i++) {
+    const blob = await textToSpeech({
+      ...input,
+      text: chunks[i],
+      previousText: i > 0 ? chunks[i - 1].slice(-400) : undefined,
+      nextText: i < chunks.length - 1 ? chunks[i + 1].slice(0, 400) : undefined,
+    });
+    buffers.push(Buffer.from(await blob.arrayBuffer()));
+  }
+  return Buffer.concat(buffers);
 }
 
 function mapError(status: number, raw: string): ElevenError {

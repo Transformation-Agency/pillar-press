@@ -6,7 +6,8 @@ import { styleProfiles } from "@/db/style-schema";
 import {
   listModels, generateAsset, createAsset, uploadAsset, type GenerateInput, type GenerationType,
 } from "@/lib/hedra";
-import { textToSpeech } from "@/lib/elevenlabs";
+import { textToSpeechLong } from "@/lib/elevenlabs";
+import { uploadPublicAudio } from "@/lib/storage";
 import { buildRefContext, type ReferencesDoc } from "@/lib/refContext";
 import { craftImagePrompt } from "@/lib/ai/imagePrompt";
 import { generateBodySchema, validateAgainstModel, sanitizeText } from "@/lib/validation";
@@ -54,13 +55,21 @@ export async function POST(req: Request) {
 
     // ── Audio (ElevenLabs TTS) — no Hedra model involved ───────────────────
     if (body.type === "audio") {
-      const script = sanitizeText(body.script || body.prompt, 5000);
+      const script = sanitizeText(body.script || body.prompt, 100000);
       if (!script) return NextResponse.json({ error: "Provide a script to voice.", code: "validation" }, { status: 422 });
       if (!body.voiceId) return NextResponse.json({ error: "Pick a voice.", code: "validation" }, { status: 422 });
 
-      const audio = await textToSpeech({ text: script, voiceId: body.voiceId });
-      const buf = Buffer.from(await audio.arrayBuffer());
-      const dataUrl = `data:audio/mpeg;base64,${buf.toString("base64")}`;
+      // Long scripts are chunked + stitched, then stored (an inline data URL
+      // would exceed the serverless response limit). Fall back to inline only
+      // for small clips when storage isn't configured (e.g. local dev).
+      const buf = await textToSpeechLong({ text: script, voiceId: body.voiceId });
+      let audioUrl: string;
+      try {
+        audioUrl = await uploadPublicAudio(buf, `voiceover-${Date.now()}.mp3`);
+      } catch (e) {
+        if (buf.length <= 4_000_000) audioUrl = `data:audio/mpeg;base64,${buf.toString("base64")}`;
+        else throw e;
+      }
 
       const [job] = await db
         .insert(mediaJobs)
@@ -75,8 +84,8 @@ export async function POST(req: Request) {
           voiceId: body.voiceId,
           status: "completed",
           progress: 100,
-          outputUrl: dataUrl,
-          downloadUrl: dataUrl,
+          outputUrl: audioUrl,
+          downloadUrl: audioUrl,
           completedAt: new Date(),
         })
         .returning();
@@ -95,9 +104,9 @@ export async function POST(req: Request) {
     // Voiceover for avatar/synced video: render TTS and upload it to Hedra.
     let audioAssetId = body.audioAssetId;
     if (!audioAssetId && body.script && (body.type === "avatar_video" || body.type === "video")) {
-      const audio = await textToSpeech({ text: sanitizeText(body.script, 5000), voiceId: body.voiceId ?? "" });
+      const buf = await textToSpeechLong({ text: sanitizeText(body.script, 100000), voiceId: body.voiceId ?? "" });
       const asset = await createAsset({ name: `voiceover-${Date.now()}.mp3`, type: "audio" });
-      await uploadAsset(asset.id, audio, `voiceover-${Date.now()}.mp3`);
+      await uploadAsset(asset.id, new Blob([new Uint8Array(buf)], { type: "audio/mpeg" }), `voiceover-${Date.now()}.mp3`);
       audioAssetId = asset.id;
     }
 

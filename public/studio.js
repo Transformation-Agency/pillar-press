@@ -239,7 +239,10 @@
     if (!model) return "Pick a model first.";
     const r = model.requires || {};
     if (r.prompt && (!params.prompt || params.prompt.trim().length < 3)) return "Add a prompt of at least 3 characters.";
-    if ((params.prompt || "").length > 2000) return "Prompt is too long (max 2000 characters).";
+    // Voiceover scripts are chunked + stitched server-side, so they can be long;
+    // image/video prompts stay capped at 2000.
+    var maxLen = model.type === "audio" ? 100000 : 2000;
+    if ((params.prompt || "").length > maxLen) return "Prompt is too long (max " + maxLen + " characters).";
     if (r.startFrame && !params.startImage) return "This model needs a start image. Upload or pick one.";
     if (r.endFrame && !params.endImage) return "This model needs an end image.";
     if (r.audio && !params.audioRef) return "This avatar model needs an audio track. Generate or pick a voiceover first.";

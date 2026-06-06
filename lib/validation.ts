@@ -8,8 +8,8 @@ export const generateBodySchema = z.object({
   modelId: z.string().min(1),
   // prompt required for image/video/audio; optional for avatar (visual scene)
   prompt: z.string().trim().min(3, "Prompt must be at least 3 characters.").max(2000, "Prompt is too long (max 2000).").optional(),
-  // voiceover / TTS
-  script: z.string().trim().max(5000).optional(),
+  // voiceover / TTS — long scripts are chunked + stitched server-side
+  script: z.string().trim().max(100000).optional(),
   voiceId: z.string().optional(),
   // frames + audio refs (asset ids that belong to this user)
   startAssetId: z.string().optional(),
