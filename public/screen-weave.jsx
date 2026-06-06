@@ -135,6 +135,7 @@ function Weave({ weave, refCtx, onOpenPiece }) {
   const [err, setErr] = React.useState(null);
   const [view, setView] = React.useState(result ? "result" : "intake");
   const fileRef = React.useRef(null);
+  const isMobile = window.useIsMobile();
 
   React.useEffect(() => { if (result && !running) setView("result"); }, [result]);
   React.useEffect(() => { if (window.__weaveSourcesAdded) { window.__weaveSourcesAdded = false; setView("intake"); } }, []);
@@ -189,7 +190,7 @@ function Weave({ weave, refCtx, onOpenPiece }) {
         </p>
 
         {view === "intake" ? (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 32, alignItems: "start", marginTop: 30 }}>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 320px", gap: isMobile ? 18 : 32, alignItems: "start", marginTop: isMobile ? 18 : 30 }}>
             <div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
                 <div className="eyebrow">{sources.length} source{sources.length !== 1 ? "s" : ""}</div>
@@ -231,7 +232,7 @@ function Weave({ weave, refCtx, onOpenPiece }) {
             </div>
           </div>
         ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 28, alignItems: "start", marginTop: 28 }}>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0,1fr) minmax(0,1fr)", gap: isMobile ? 18 : 28, alignItems: "start", marginTop: isMobile ? 18 : 28 }}>
             <BriefView result={result} onCopyBrief={() => briefToText(result)} />
             <div className="card" style={{ padding: "30px 34px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>

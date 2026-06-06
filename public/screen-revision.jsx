@@ -44,6 +44,7 @@ function RevisionTab({ piece, onUpdate, refCtx }) {
   const [err, setErr] = React.useState(null);
   const [mode, setMode] = React.useState("clean"); // clean | diff
   const [full, setFull] = React.useState(false);   // full = restructure + polish
+  const isMobile = window.useIsMobile();
   const rev = piece.revision;
 
   const generate = async () => {
@@ -104,8 +105,8 @@ function RevisionTab({ piece, onUpdate, refCtx }) {
 
   return (
     <div className="scroll-y" style={{ flex: 1 }}>
-      <div style={{ maxWidth: 1080, margin: "0 auto", padding: "26px 32px 90px",
-        display: "grid", gridTemplateColumns: "1fr 320px", gap: 36, alignItems: "start" }}>
+      <div style={{ maxWidth: 1080, margin: "0 auto", padding: isMobile ? "20px 16px 80px" : "26px 32px 90px",
+        display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 320px", gap: isMobile ? 18 : 36, alignItems: "start" }}>
         <div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
             <div style={{ display: "flex", gap: 4, background: "var(--paper-sunk)", borderRadius: 999, padding: 3 }}>

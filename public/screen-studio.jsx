@@ -144,6 +144,7 @@ function StyleSurveyModal({ campaignId, profile, mediaJobId, onClose, onSaved })
 }
 
 function Studio({ campaignId, pieces, onOpenPiece }) {
+  const isMobile = window.useIsMobile();
   const settings = window.Store.getSettings();
   const allMedia = window.Store.mediaForCampaign(campaignId);
   const libImages = allMedia.filter((m) => m.kind === "image" && m.status === "completed");
@@ -323,9 +324,9 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
           Generate imagery, animation, and voiced video for this campaign. Make a voiceover with ElevenLabs, then sync a Hedra avatar or animation to it — and attach the result to any piece.
         </p>
 
-        <div style={{ display: "grid", gridTemplateColumns: "420px 1fr", gap: 32, alignItems: "start", marginTop: 26 }}>
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "420px 1fr", gap: isMobile ? 18 : 32, alignItems: "start", marginTop: isMobile ? 18 : 26 }}>
           {/* composer */}
-          <div className="card" style={{ padding: "20px 22px", position: "sticky", top: 20 }}>
+          <div className="card" style={{ padding: isMobile ? "16px 16px" : "20px 22px", position: isMobile ? "static" : "sticky", top: 20 }}>
             <div style={{ marginBottom: 18 }}>
               <Segmented value={type} onChange={setType} options={window.STUDIO.TYPES.map((t) => ({ v: t.id, l: t.label }))} />
             </div>

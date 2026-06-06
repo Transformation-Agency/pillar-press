@@ -272,6 +272,7 @@ function DirectionBox({ piece }) {
 }
 
 function ReviewTab({ piece }) {
+  const isMobile = window.useIsMobile();
   const [sel, setSel] = React.useState({ key: null, anchor: null, bump: 0 });
   const [sevFilter, setSevFilter] = React.useState({ must: true, consider: true, note: true });
   const packet = piece.packet || {};
@@ -284,9 +285,11 @@ function ReviewTab({ piece }) {
   window.GATES.forEach((g) => { const r = packet[g.id]; if (r) r.findings.forEach((f) => counts[f.severity]++); });
 
   return (
-    <div style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 1fr", minHeight: 0 }}>
+    <div style={isMobile
+      ? { flex: 1, display: "flex", flexDirection: "column", minHeight: 0, overflowY: "auto" }
+      : { flex: 1, display: "grid", gridTemplateColumns: "1fr 1fr", minHeight: 0 }}>
       {/* Packet */}
-      <div className="scroll-y" style={{ borderRight: "1px solid var(--hair)", height: "100%" }}>
+      <div className={isMobile ? "" : "scroll-y"} style={{ borderRight: isMobile ? "none" : "1px solid var(--hair)", borderBottom: isMobile ? "1px solid var(--hair)" : "none", height: isMobile ? "auto" : "100%" }}>
         <div style={{ padding: "26px 28px 80px", maxWidth: 640, margin: "0 auto" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
             <div className="eyebrow">Review Packet</div>
@@ -327,12 +330,12 @@ function ReviewTab({ piece }) {
         </div>
       </div>
       {/* Original */}
-      <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0, background: "var(--paper-2)" }}>
+      <div style={{ height: isMobile ? "auto" : "100%", display: "flex", flexDirection: "column", minHeight: 0, background: "var(--paper-2)" }}>
         <div style={{ padding: "16px 34px", borderBottom: "1px solid var(--hair)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div className="eyebrow">Your Original</div>
           {sel.anchor && <button className="btn ghost sm" onClick={() => setSel({ key: null, anchor: null, bump: sel.bump })}>Clear highlight</button>}
         </div>
-        <div style={{ flex: 1, minHeight: 0 }}>
+        <div style={{ flex: 1, minHeight: isMobile ? 320 : 0 }}>
           <OriginalPane text={piece.original} anchor={sel.anchor} bump={sel.bump} />
         </div>
       </div>

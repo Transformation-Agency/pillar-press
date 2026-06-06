@@ -106,13 +106,13 @@ function Spinner({ size = 16 }) {
 
 function Tabs({ tabs, active, onChange }) {
   return (
-    <div style={{ display: "flex", gap: 2, borderBottom: "1px solid var(--hair)" }}>
+    <div style={{ display: "flex", gap: 2, borderBottom: "1px solid var(--hair)", overflowX: "auto", maxWidth: "100%" }}>
       {tabs.map((t) => {
         const on = t.id === active;
         return (
           <button key={t.id} onClick={() => onChange(t.id)} disabled={t.disabled}
             style={{
-              fontFamily: "var(--font-body)", fontSize: 15, fontWeight: 500,
+              fontFamily: "var(--font-body)", fontSize: 15, fontWeight: 500, flexShrink: 0, whiteSpace: "nowrap",
               padding: "12px 18px", border: "none", background: "none", cursor: t.disabled ? "not-allowed" : "pointer",
               color: on ? "var(--ink)" : (t.disabled ? "var(--ink-3)" : "var(--ink-2)"),
               opacity: t.disabled ? 0.5 : 1,
@@ -142,4 +142,21 @@ function relTime(ts) {
   return new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-Object.assign(window, { Icon, StatusChip, SeverityDot, SeverityTag, CopyButton, Spinner, Tabs, relTime, STATUS_VAR });
+/* Responsive helper: true when the viewport is at/below `bp` px. Drives the
+   stacking of inline grid/fixed-width layouts that CSS media queries can't
+   override. */
+function useIsMobile(bp = 640) {
+  const query = "(max-width: " + bp + "px)";
+  const get = () => (typeof window !== "undefined" && window.matchMedia ? window.matchMedia(query).matches : false);
+  const [m, setM] = React.useState(get);
+  React.useEffect(() => {
+    const mq = window.matchMedia(query);
+    const on = () => setM(mq.matches);
+    on();
+    if (mq.addEventListener) mq.addEventListener("change", on); else mq.addListener(on);
+    return () => { if (mq.removeEventListener) mq.removeEventListener("change", on); else mq.removeListener(on); };
+  }, [query]);
+  return m;
+}
+
+Object.assign(window, { Icon, StatusChip, SeverityDot, SeverityTag, CopyButton, Spinner, Tabs, relTime, STATUS_VAR, useIsMobile });

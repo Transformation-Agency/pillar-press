@@ -47,6 +47,7 @@ function GatherItem({ item, onToggle }) {
 }
 
 function Gather({ campaignId, refCtx, onGoWeave }) {
+  const isMobile = window.useIsMobile();
   const sources = window.Store.getGatherSources(campaignId);
   const items = window.Store.getGatherItems(campaignId);
   const [running, setRunning] = React.useState(false);
@@ -86,9 +87,9 @@ function Gather({ campaignId, refCtx, onGoWeave }) {
           <span>Live fetching needs server-side connectors (keys + CORS), so results here are clearly-labeled <strong>demo</strong> seeds. The real connectors ship in the backend package.</span>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "400px 1fr", gap: 32, alignItems: "start", marginTop: 28 }}>
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "400px 1fr", gap: isMobile ? 18 : 32, alignItems: "start", marginTop: isMobile ? 18 : 28 }}>
           {/* sources */}
-          <div className="card" style={{ padding: "20px 22px", position: "sticky", top: 20 }}>
+          <div className="card" style={{ padding: "20px 22px", position: isMobile ? "static" : "sticky", top: 20 }}>
             <div className="eyebrow" style={{ marginBottom: 10 }}>Sources</div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 16 }}>
               {window.GATHER.kindList().map((k) => (

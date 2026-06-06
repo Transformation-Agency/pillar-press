@@ -84,6 +84,7 @@ function GateRail({ gateStatus, packet, onJump }) {
 function DraftTab({ piece, running, gateStatus, onRun, onChangeOriginal, onGoReview }) {
   const [text, setText] = React.useState(piece.original || "");
   const fileRef = React.useRef(null);
+  const isMobile = window.useIsMobile();
   React.useEffect(() => { setText(piece.original || ""); }, [piece.id]);
 
   const wc = window.wordCount(text);
@@ -100,8 +101,8 @@ function DraftTab({ piece, running, gateStatus, onRun, onChangeOriginal, onGoRev
 
   return (
     <div className="scroll-y" style={{ flex: 1 }}>
-      <div style={{ maxWidth: 1180, margin: "0 auto", padding: "34px 32px 90px",
-        display: "grid", gridTemplateColumns: "1fr 380px", gap: 40, alignItems: "start" }}>
+      <div style={{ maxWidth: 1180, margin: "0 auto", padding: isMobile ? "20px 16px 80px" : "34px 32px 90px",
+        display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 380px", gap: isMobile ? 22 : 40, alignItems: "start" }}>
 
         {/* Draft column */}
         <div>

@@ -29,6 +29,7 @@ function Workspace({ piece, refs, onBack, onGoStudio }) {
   const [tab, setTab] = React.useState("draft");
   const [running, setRunning] = React.useState(false);
   const [gateStatus, setGateStatus] = React.useState({});
+  const isMobile = window.useIsMobile();
 
   const update = (patch) => window.Store.updatePiece(piece.id, patch);
 
@@ -115,8 +116,8 @@ function Workspace({ piece, refs, onBack, onGoStudio }) {
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
       {/* piece header */}
-      <div style={{ padding: "18px 32px 0", flexShrink: 0 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+      <div style={{ padding: isMobile ? "12px 16px 0" : "18px 32px 0", flexShrink: 0 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
             <button className="icon-btn" onClick={onBack} title="Back to Library"><Icon name="back" size={16} /></button>
             <EditableTitle value={piece.title} onCommit={(t) => update({ title: t })} />

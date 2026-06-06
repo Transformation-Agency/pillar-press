@@ -124,6 +124,7 @@ function GoogleIcon({ size = 14 }) {
 }
 
 function OutputCard({ o, derivation, pieceId, platform, onCondensed, onDrive, onVideo, onImage }) {
+  const isMobile = window.useIsMobile();
   const clear = /clear|none|no concern|pass/i.test(o.riskCheck || "");
   const [condensing, setCondensing] = React.useState(false);
   const [cerr, setCerr] = React.useState(null);
@@ -189,7 +190,7 @@ function OutputCard({ o, derivation, pieceId, platform, onCondensed, onDrive, on
         {cerr && <span style={{ fontSize: 13, color: "var(--sev-must)" }}>{cerr}</span>}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, marginBottom: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: isMobile ? 10 : 18, marginBottom: 16 }}>
         <Field label="Hook options" items={o.hooks} />
         <Field label="CTA options" items={o.ctas} />
       </div>
@@ -229,6 +230,7 @@ function Line({ label, value }) {
 }
 
 function OutputsTab({ piece, onUpdate, refCtx, onGoStudio }) {
+  const isMobile = window.useIsMobile();
   const init = piece.outputSettings || {};
   const [active, setActive] = React.useState(init.active || ["substack", "facebook"]);
   const [auds, setAuds] = React.useState(init.audiences || { ...PLAT_AUD_DEFAULT });
@@ -286,7 +288,7 @@ function OutputsTab({ piece, onUpdate, refCtx, onGoStudio }) {
           {window.GEN.PLATFORMS.map((p, i) => {
             const on = active.includes(p.id);
             return (
-              <div key={p.id} style={{ display: "grid", gridTemplateColumns: "44px 1fr 220px", gap: 14, alignItems: "center",
+              <div key={p.id} style={{ display: "grid", gridTemplateColumns: isMobile ? "32px 1fr" : "44px 1fr 220px", gap: isMobile ? "8px 12px" : 14, alignItems: "center",
                 padding: "13px 18px", borderTop: i > 0 ? "1px solid var(--hair)" : "none" }}>
                 <Toggle on={on} onChange={() => toggle(p.id)} />
                 <div style={{ opacity: on ? 1 : 0.55 }}>
@@ -297,7 +299,7 @@ function OutputsTab({ piece, onUpdate, refCtx, onGoStudio }) {
                 </div>
                 <select className="field" value={auds[p.id]} disabled={!on}
                   onChange={(e) => setAuds((a) => ({ ...a, [p.id]: e.target.value }))}
-                  style={{ fontSize: 13, padding: "7px 10px", opacity: on ? 1 : 0.4 }}>
+                  style={{ fontSize: 13, padding: "7px 10px", opacity: on ? 1 : 0.4, gridColumn: isMobile ? "1 / -1" : "auto" }}>
                   {window.GEN.AUDIENCE_PRESETS.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
                 </select>
               </div>

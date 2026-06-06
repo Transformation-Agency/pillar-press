@@ -141,7 +141,7 @@ function BookPicker({ campaigns, bookId, onPick, onNew, role }) {
 }
 
 /* ---------- left: chapter list ---------- */
-function ChapterList({ chapters, selectedId, onSelect, onAdd, role, campaigns, bookId, onPickBook, onNewBook }) {
+function ChapterList({ chapters, selectedId, onSelect, onAdd, role, campaigns, bookId, onPickBook, onNewBook, isMobile, hidden }) {
   const [adding, setAdding] = React.useState(false);
   const [title, setTitle] = React.useState("");
   const commit = () => {
@@ -150,7 +150,9 @@ function ChapterList({ chapters, selectedId, onSelect, onAdd, role, campaigns, b
     setTitle(""); setAdding(false);
   };
   return (
-    <div style={{ width: 248, flexShrink: 0, borderRight: "1px solid var(--hair)", display: "flex", flexDirection: "column", minHeight: 0, background: "var(--paper)" }}>
+    <div style={{ width: isMobile ? "100%" : 248, flex: isMobile ? 1 : "none", flexShrink: 0,
+      borderRight: isMobile ? "none" : "1px solid var(--hair)",
+      display: hidden ? "none" : "flex", flexDirection: "column", minHeight: 0, background: "var(--paper)" }}>
       <div style={{ padding: "16px 16px 12px", borderBottom: "1px solid var(--hair)" }}>
         <BookPicker campaigns={campaigns} bookId={bookId} onPick={onPickBook} onNew={onNewBook} role={role} />
         <div className="muted mono" style={{ fontSize: 11, marginTop: 8 }}>{chapters.length} chapter{chapters.length !== 1 ? "s" : ""}</div>
@@ -404,6 +406,8 @@ function Collapsible({ label, children }) {
 function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaign }) {
   // A book IS a campaign, chosen here independently of the globally-active
   // campaign so a book has its own library separate from "Me". Remembered in prefs.
+  const isMobile = window.useIsMobile();
+  const [mobilePane, setMobilePane] = React.useState("editor"); // mobile: chapters | editor | workflow
   const [bookId, setBookId] = React.useState(() => window.Store.getPref("bookCampaignId", null));
   const [selectedId, setSelectedId] = React.useState(null);
   const [panel, setPanel] = React.useState("sources");
@@ -467,8 +471,8 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
 
   const flash = (m) => { setNote(m); setTimeout(() => setNote(null), 2200); };
 
-  const selectChapter = (id) => { saveNow(); setSelectedId(id); };
-  const addChapter = (t) => { if (!bookId) return; const p = window.Store.createPiece(t, bookId); setSelectedId(p.id); setPanel("sources"); };
+  const selectChapter = (id) => { saveNow(); setSelectedId(id); setMobilePane("editor"); };
+  const addChapter = (t) => { if (!bookId) return; const p = window.Store.createPiece(t, bookId); setSelectedId(p.id); setPanel("sources"); setMobilePane("editor"); };
 
   const runReview = async () => {
     if (!selectedId || !(draft || "").trim()) { setErr("Add some chapter text first."); return; }
@@ -575,59 +579,81 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
     { id: "outputs", label: "Outputs", dot: piece && (piece.outputOrder || []).length > 0 },
   ];
 
-  return (
-    <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
-      <ChapterList chapters={chapters} selectedId={selectedId} onSelect={selectChapter} onAdd={addChapter} role={role}
-        campaigns={campaigns} bookId={bookId} onPickBook={pickBook} onNewBook={newBook} />
+  const noBook = !bookCampaign;
+  const showChapters = !isMobile || (noBook ? true : mobilePane === "chapters");
+  const showEditor = !isMobile || (noBook ? false : mobilePane === "editor");
+  const showWorkflow = !isMobile || (noBook ? false : mobilePane === "workflow");
 
-      {!bookCampaign ? (
-        <div style={{ flex: 1, display: "grid", placeItems: "center", padding: 40 }}>
-          <div style={{ textAlign: "center", maxWidth: 440 }}>
-            <div className="eyebrow" style={{ marginBottom: 10 }}>Book Writer</div>
-            <h2 style={{ fontSize: 28, marginBottom: 10 }}>Pick a book, or start a new one</h2>
-            <p className="muted" style={{ fontSize: 15.5, marginBottom: 18 }}>A book is its own campaign with its own library of chapters — separate from your article campaigns. Choose an existing book from the list on the left, or create a new one.</p>
-            {role !== "assistant" && <button className="btn primary" onClick={newBook}><Icon name="plus" size={15} /> New book</button>}
-          </div>
+  return (
+    <div style={{ flex: 1, display: "flex", flexDirection: isMobile ? "column" : "row", minHeight: 0 }}>
+      {/* mobile pane switcher */}
+      {isMobile && !noBook && (
+        <div style={{ display: "flex", gap: 6, padding: "8px 12px", borderBottom: "1px solid var(--hair)", flexShrink: 0, background: "var(--paper)" }}>
+          {[["chapters", "Chapters"], ["editor", "Editor"], ["workflow", "Workflow"]].map(([id, l]) => {
+            const on = mobilePane === id;
+            const dis = (id === "editor" || id === "workflow") && !piece;
+            return (
+              <button key={id} onClick={() => !dis && setMobilePane(id)} disabled={dis} className="mono"
+                style={{ flex: 1, fontSize: 11, letterSpacing: "0.04em", textTransform: "uppercase", padding: "9px 4px", borderRadius: 999, border: "none",
+                  cursor: dis ? "not-allowed" : "pointer", opacity: dis ? 0.4 : 1,
+                  background: on ? "var(--accent-soft)" : "transparent", color: on ? "var(--accent-ink)" : "var(--ink-3)" }}>{l}</button>
+            );
+          })}
         </div>
-      ) : !piece ? (
-        <div style={{ flex: 1, display: "grid", placeItems: "center", padding: 40 }}>
-          <div style={{ textAlign: "center", maxWidth: 420 }}>
-            <div className="eyebrow" style={{ marginBottom: 10 }}>Book Writer · {bookCampaign.name}</div>
-            <h2 style={{ fontSize: 28, marginBottom: 10 }}>Write a book, one chapter at a time</h2>
-            <p className="muted" style={{ fontSize: 15.5, marginBottom: 18 }}>This campaign is your book; each chapter is a piece that runs through the same editorial engine — weave, the seven gates, revision, and platform outputs. Add your first chapter to begin.</p>
-            {role !== "assistant" && <button className="btn primary" onClick={() => addChapter("Chapter 1")}><Icon name="plus" size={15} /> Add chapter 1</button>}
+      )}
+
+      <ChapterList chapters={chapters} selectedId={selectedId} onSelect={selectChapter} onAdd={addChapter} role={role}
+        campaigns={campaigns} bookId={bookId} onPickBook={pickBook} onNewBook={newBook}
+        isMobile={isMobile} hidden={isMobile && !showChapters} />
+
+      {/* editor region (also hosts the no-book / no-chapter states) */}
+      <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: showEditor ? "flex" : "none", flexDirection: "column" }}>
+        {noBook ? (
+          <div style={{ flex: 1, display: "grid", placeItems: "center", padding: 24 }}>
+            <div style={{ textAlign: "center", maxWidth: 440 }}>
+              <div className="eyebrow" style={{ marginBottom: 10 }}>Book Writer</div>
+              <h2 style={{ fontSize: 28, marginBottom: 10 }}>Pick a book, or start a new one</h2>
+              <p className="muted" style={{ fontSize: 15.5, marginBottom: 18 }}>A book is its own campaign with its own library of chapters — separate from your article campaigns. Choose an existing book from the list, or create a new one.</p>
+              {role !== "assistant" && <button className="btn primary" onClick={newBook}><Icon name="plus" size={15} /> New book</button>}
+            </div>
           </div>
-        </div>
-      ) : (
-        <>
-          {/* center: editor */}
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>
-            <div style={{ padding: "16px 28px", borderBottom: "1px solid var(--hair)" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 14, marginBottom: 12 }}>
+        ) : !piece ? (
+          <div style={{ flex: 1, display: "grid", placeItems: "center", padding: 24 }}>
+            <div style={{ textAlign: "center", maxWidth: 420 }}>
+              <div className="eyebrow" style={{ marginBottom: 10 }}>Book Writer · {bookCampaign.name}</div>
+              <h2 style={{ fontSize: 28, marginBottom: 10 }}>Write a book, one chapter at a time</h2>
+              <p className="muted" style={{ fontSize: 15.5, marginBottom: 18 }}>This campaign is your book; each chapter runs through the same editorial engine — weave, the seven gates, revision, and platform outputs. Add your first chapter to begin.</p>
+              {role !== "assistant" && <button className="btn primary" onClick={() => addChapter("Chapter 1")}><Icon name="plus" size={15} /> Add chapter 1</button>}
+            </div>
+          </div>
+        ) : (
+          <>
+            <div style={{ padding: isMobile ? "12px 16px" : "16px 28px", borderBottom: "1px solid var(--hair)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 12 }}>
                 <input value={title} onChange={(e) => setTitle(e.target.value)} onBlur={saveNow}
-                  style={{ flex: 1, fontFamily: "var(--font-display)", fontSize: 26, fontWeight: 500, letterSpacing: "-0.01em",
+                  style={{ flex: 1, minWidth: 0, fontFamily: "var(--font-display)", fontSize: isMobile ? 21 : 26, fontWeight: 500, letterSpacing: "-0.01em",
                     border: "1px solid transparent", background: "transparent", color: "var(--ink)", padding: "2px 6px", marginLeft: -6, borderRadius: 6 }}
                   onFocus={(e) => { e.target.style.background = "var(--paper-sunk)"; }}
                   onMouseLeave={(e) => { if (document.activeElement !== e.target) e.target.style.background = "transparent"; }} />
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <span className="mono muted" style={{ fontSize: 11 }}>{wc(draft)} words</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+                  {!isMobile && <span className="mono muted" style={{ fontSize: 11 }}>{wc(draft)} words</span>}
                   <select className="field" value={piece.status} onChange={(e) => setStatus(e.target.value)} style={{ width: "auto", fontSize: 12, padding: "5px 8px" }}>
                     {window.Store.STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>
-                  <button className="btn ghost sm" onClick={() => { saveNow(); if (onActivateCampaign) onActivateCampaign(bookId); onOpenPiece(piece.id); }} title="Open in the full editorial desk">Desk ↗</button>
+                  {!isMobile && <button className="btn ghost sm" onClick={() => { saveNow(); if (onActivateCampaign) onActivateCampaign(bookId); onOpenPiece(piece.id); }} title="Open in the full editorial desk">Desk ↗</button>}
                 </div>
               </div>
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                 <button className="btn sm" onClick={saveNow} disabled={!dirty}><Icon name="check" size={13} /> Save</button>
                 <button className="btn sm" onClick={runReview} disabled={!!busy}>{busy === "review" ? <Spinner size={13} /> : <Icon name="flag" size={13} />} Review</button>
                 <button className="btn sm" onClick={runRevise} disabled={!!busy || !piece.packet}>{busy === "revise" ? <Spinner size={13} /> : <Icon name="play" size={13} />} Revise</button>
-                <label title="Full revision: restructure the chapter (strategy, audience, rigor, structure) then polish (clarity, tone, inoculation). Off = light clarity/tone/inoculation pass only."
+                <label title="Full revision: restructure (strategy, audience, rigor, structure) then polish (clarity, tone, inoculation). Off = light pass only."
                   style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: fullRevise ? "var(--accent-ink)" : "var(--ink-3)", cursor: "pointer", userSelect: "none" }}>
                   <input type="checkbox" checked={fullRevise} onChange={(e) => setFullRevise(e.target.checked)} disabled={!!busy} /> Full
                 </label>
-                <button className="btn sm" onClick={runOutputs} disabled={!!busy}>{busy === "outputs" ? <Spinner size={13} /> : <Icon name="arrowR" size={13} />} Generate outputs</button>
+                <button className="btn sm" onClick={runOutputs} disabled={!!busy}>{busy === "outputs" ? <Spinner size={13} /> : <Icon name="arrowR" size={13} />} {isMobile ? "Outputs" : "Generate outputs"}</button>
                 <div style={{ flex: 1 }} />
-                <button className="btn ghost sm" onClick={downloadBook} disabled={busy === "export"} title="Assemble all chapters into one Markdown file">{busy === "export" ? <Spinner size={13} /> : <Icon name="doc" size={13} />} Download book</button>
+                <button className="btn ghost sm" onClick={downloadBook} disabled={busy === "export"} title="Assemble all chapters into one Markdown file">{busy === "export" ? <Spinner size={13} /> : <Icon name="doc" size={13} />} {isMobile ? "Download" : "Download book"}</button>
                 {window.DRIVE && window.DRIVE.isConfigured() && <button className="btn ghost sm" onClick={uploadBook} disabled={busy === "export"}>{busy === "export" ? <Spinner size={13} /> : <Icon name="book" size={13} />} To Drive</button>}
               </div>
               {(err || note || (busy && prog)) && (
@@ -642,33 +668,37 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
               <textarea value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={saveNow} disabled={busy === "review" || busy === "weave"}
                 placeholder="Write or paste your chapter here — or weave it from research in the Sources panel. The seven gates read this text."
                 style={{ width: "100%", minHeight: "100%", border: "none", outline: "none", resize: "none", background: "transparent",
-                  fontFamily: "var(--font-body)", fontSize: 17.5, lineHeight: 1.78, color: "var(--ink)", padding: "30px 40px", display: "block" }} />
+                  fontFamily: "var(--font-body)", fontSize: isMobile ? 16 : 17.5, lineHeight: 1.78, color: "var(--ink)", padding: isMobile ? "18px 18px" : "30px 40px", display: "block" }} />
             </div>
-          </div>
+          </>
+        )}
+      </div>
 
-          {/* right: workflow sidebar */}
-          <div style={{ width: 384, flexShrink: 0, borderLeft: "1px solid var(--hair)", display: "flex", flexDirection: "column", minHeight: 0, background: "var(--paper)" }}>
-            <div style={{ display: "flex", gap: 2, padding: "10px 12px", borderBottom: "1px solid var(--hair)" }}>
-              {panels.map((pn) => {
-                const on = pn.id === panel;
-                return (
-                  <button key={pn.id} onClick={() => setPanel(pn.id)} className="mono"
-                    style={{ flex: 1, fontSize: 11, letterSpacing: "0.04em", textTransform: "uppercase", padding: "7px 4px", borderRadius: 999, border: "none", cursor: "pointer",
-                      background: on ? "var(--accent-soft)" : "transparent", color: on ? "var(--accent-ink)" : "var(--ink-3)", position: "relative",
-                      display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
-                    {pn.label}{pn.dot && <span style={{ width: 5, height: 5, borderRadius: 99, background: "var(--accent)" }} />}
-                  </button>
-                );
-              })}
-            </div>
-            <div className="scroll-y" style={{ flex: 1, padding: "18px 20px" }}>
-              {panel === "sources" && <SourcePack piece={piece} refCtx={refCtx} onDraft={(d) => setDraft(d)} busy={busy} setBusy={setBusy} setErr={setErr} />}
-              {panel === "review" && <PacketView piece={piece} />}
-              {panel === "revision" && <RevisionView piece={piece} onAccept={acceptRevision} accepting={false} />}
-              {panel === "outputs" && <OutputsView piece={piece} />}
-            </div>
+      {/* workflow sidebar — only when a chapter is open */}
+      {!noBook && piece && (
+        <div style={{ width: isMobile ? "100%" : 384, flex: isMobile ? 1 : "none", flexShrink: 0,
+          borderLeft: isMobile ? "none" : "1px solid var(--hair)",
+          display: showWorkflow ? "flex" : "none", flexDirection: "column", minHeight: 0, background: "var(--paper)" }}>
+          <div style={{ display: "flex", gap: 2, padding: "10px 12px", borderBottom: "1px solid var(--hair)" }}>
+            {panels.map((pn) => {
+              const on = pn.id === panel;
+              return (
+                <button key={pn.id} onClick={() => setPanel(pn.id)} className="mono"
+                  style={{ flex: 1, fontSize: 11, letterSpacing: "0.04em", textTransform: "uppercase", padding: "7px 4px", borderRadius: 999, border: "none", cursor: "pointer",
+                    background: on ? "var(--accent-soft)" : "transparent", color: on ? "var(--accent-ink)" : "var(--ink-3)", position: "relative",
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
+                  {pn.label}{pn.dot && <span style={{ width: 5, height: 5, borderRadius: 99, background: "var(--accent)" }} />}
+                </button>
+              );
+            })}
           </div>
-        </>
+          <div className="scroll-y" style={{ flex: 1, padding: "18px 20px" }}>
+            {panel === "sources" && <SourcePack piece={piece} refCtx={refCtx} onDraft={(d) => setDraft(d)} busy={busy} setBusy={setBusy} setErr={setErr} />}
+            {panel === "review" && <PacketView piece={piece} />}
+            {panel === "revision" && <RevisionView piece={piece} onAccept={acceptRevision} accepting={false} />}
+            {panel === "outputs" && <OutputsView piece={piece} />}
+          </div>
+        </div>
       )}
     </div>
   );
