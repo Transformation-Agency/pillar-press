@@ -80,6 +80,96 @@ export function pieceOutputsMarkdown(piece: PieceForExport): string {
   return L.join("\n");
 }
 
+/* ============================================================
+ * Book Writer — assemble a campaign's pieces (chapters) into one
+ * Markdown manuscript. Pure helpers (no db/auth/fetch), consumed by
+ * app/api/campaigns/[id]/book/export/route.ts and unit-tested directly.
+ *
+ * Mental model: campaign = book, piece = chapter. Nothing here changes
+ * the editorial pipeline — it only reads already-saved chapter text.
+ * ============================================================ */
+
+/** Minimal shape of a piece needed to render it as a book chapter. */
+export interface BookChapter {
+  title: string;
+  original?: string | null;
+  revision?: { text?: string | null } | null;
+  createdAt?: string | number | Date | null;
+}
+
+const tsOf = (v: string | number | Date | null | undefined): number =>
+  v == null ? 0 : typeof v === "number" ? v : +new Date(v);
+
+/**
+ * Parse a chapter number from a title, or null when there is none. VERBATIM
+ * port of `screen-book.jsx#chapterNum`: a leading number ("01 …") wins, else a
+ * "Chapter N" / "Ch. N" / "Part N" anywhere in the title.
+ */
+export function chapterLeadingNumber(title: string): number | null {
+  const t = String(title || "");
+  const lead = t.match(/^\s*0*(\d{1,3})\b/);
+  if (lead) return parseInt(lead[1], 10);
+  const ch = t.match(/\b(?:chapter|ch\.?|part)\s+0*(\d{1,3})\b/i);
+  if (ch) return parseInt(ch[1], 10);
+  return null;
+}
+
+/**
+ * The canonical text for a chapter. VERBATIM port of
+ * `exporters.js#bookMarkdown` text rule: the saved draft (`original`) is the
+ * source of truth — the UI's "Accept Revision" writes revision.text into it —
+ * with the proposed revision used ONLY as a fallback when the draft is empty.
+ */
+export function chapterText(chapter: BookChapter): string {
+  return chapter.original && chapter.original.trim()
+    ? (chapter.original as string)
+    : (chapter.revision && chapter.revision.text) || "";
+}
+
+/**
+ * Order chapters for the book. VERBATIM port of `screen-book.jsx#sortChapters`:
+ * numbered titles first (ascending, createdAt breaks ties), then un-numbered
+ * chapters by createdAt. Keeps the server export order identical to the order
+ * the user sees in the Book Writer chapter list.
+ */
+export function sortChaptersForBook<T extends BookChapter>(chapters: T[]): T[] {
+  return (chapters || []).slice().sort((a, b) => {
+    const na = chapterLeadingNumber(a.title);
+    const nb = chapterLeadingNumber(b.title);
+    if (na != null && nb != null) return na - nb || tsOf(a.createdAt) - tsOf(b.createdAt);
+    if (na != null) return -1;
+    if (nb != null) return 1;
+    return tsOf(a.createdAt) - tsOf(b.createdAt);
+  });
+}
+
+/**
+ * Assemble a book's Markdown from its (already-ordered) chapters. VERBATIM port
+ * of `exporters.js#bookMarkdown(campaign, chapters)` so the server route and the
+ * client download produce a byte-identical document:
+ *
+ *   # Book Title
+ *
+ *   ## Chapter 1 Title
+ *
+ *   Chapter text...
+ *
+ *   ---
+ *
+ *   ## Chapter 2 Title
+ *   ...
+ */
+export function bookMarkdown(input: { title: string; chapters: BookChapter[] }): string {
+  const title = input.title || "Untitled book";
+  const L: string[] = [`# ${title}`, ""];
+  (input.chapters || []).forEach((c, i) => {
+    const text = chapterText(c);
+    if (i > 0) L.push("", "---", "");
+    L.push(`## ${c.title || "Chapter " + (i + 1)}`, "", text, "");
+  });
+  return L.join("\n");
+}
+
 /**
  * safeName — VERBATIM port of `exporters.js#safeName`. Used to derive Drive
  * filenames from titles / platform names.

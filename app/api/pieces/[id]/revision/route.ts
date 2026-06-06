@@ -42,10 +42,20 @@ async function resolvePiece(id: string, user: SessionUser): Promise<Piece | null
  * Persists revision = { text, changelog: [{ finding, change, note }] } and sets
  * Reviewed → Revised. Logic ported from generators.js#generateRevision.
  */
-export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const user = await requireUser();
     const { id } = await params;
+
+    // Optional { mode: "light" | "full" }. Default light (the firewall pass).
+    // "full" runs a whole-document restructure (strategy/structure/etc.) first.
+    let mode: "light" | "full" = "light";
+    try {
+      const body = (await req.json()) as { mode?: unknown } | null;
+      if (body && body.mode === "full") mode = "full";
+    } catch {
+      /* empty/no body → light */
+    }
 
     const piece = await resolvePiece(id, user);
     if (!piece) return notFound();
@@ -65,7 +75,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
       direction: piece.direction ?? null,
     };
 
-    const result = await generateRevision(input, refCtx, ai);
+    const result = await generateRevision(input, refCtx, ai, undefined, { mode });
 
     const [updated] = await db
       .update(pieces)

@@ -195,6 +195,8 @@ export async function generateAsset(input: GenerateInput): Promise<GenerationSta
     body = { type: "image", ai_model_id: input.modelId, text_prompt: input.textPrompt ?? "" };
     if (input.aspectRatio) body.aspect_ratio = input.aspectRatio;
     if (input.resolution) body.resolution = input.resolution;
+    // Image-to-image models require a start frame (validated by requires_start_frame).
+    if (input.startAssetId) body.start_keyframe_id = input.startAssetId;
   } else {
     // video / avatar: inputs nested under generated_video_inputs.
     const vi: Record<string, unknown> = { text_prompt: input.textPrompt ?? "" };

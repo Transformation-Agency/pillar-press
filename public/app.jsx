@@ -308,6 +308,7 @@ function App() {
         </div>
         <nav className="topnav">
           <button className={view === "library" ? "active" : ""} onClick={goLibrary}>Library</button>
+          <button className={view === "book" ? "active" : ""} onClick={() => setView("book")}>Book</button>
           <button className={view === "gather" ? "active" : ""} onClick={() => setView("gather")}>Gather</button>
           <button className={view === "weave" ? "active" : ""} onClick={() => setView("weave")}>Weave</button>
           <button className={view === "studio" ? "active" : ""} onClick={() => setView("studio")}>Studio</button>
@@ -331,6 +332,10 @@ function App() {
       )}
       {view === "studio" && (
         <Studio campaignId={state.activeCampaignId} pieces={campaignPieces} onOpenPiece={openPiece} />
+      )}
+      {view === "book" && (
+        <BookWriter campaigns={campaigns} allPieces={state.pieces} role={role}
+          onOpenPiece={openPiece} onActivateCampaign={(id) => window.Store.setActiveCampaign(id)} />
       )}
       {view === "library" && (
         <Library pieces={campaignPieces} campaignName={activeCampaign && activeCampaign.name} onOpen={openPiece}
