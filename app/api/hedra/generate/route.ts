@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { requireUser } from "@/lib/auth";
 import { db, mediaJobs, references, pieces } from "@/lib/db";
 import { styleProfiles } from "@/db/style-schema";
@@ -101,8 +101,31 @@ export async function POST(req: Request) {
     const reqErr = validateAgainstModel(body, model);
     if (reqErr) return NextResponse.json({ error: reqErr, code: "validation" }, { status: 422 });
 
-    // Voiceover for avatar/synced video: render TTS and upload it to Hedra.
     let audioAssetId = body.audioAssetId;
+
+    // Combine: use an EXISTING audio media item as the video's audio track —
+    // fetch its bytes and upload them to Hedra as an audio asset.
+    if (!audioAssetId && body.audioMediaId && (body.type === "avatar_video" || body.type === "video")) {
+      const am = await db.query.mediaJobs.findFirst({
+        where: and(eq(mediaJobs.id, body.audioMediaId), eq(mediaJobs.userId, user.id)),
+      });
+      const aurl = am?.downloadUrl || am?.outputUrl;
+      if (!aurl) return NextResponse.json({ error: "That audio isn't ready to combine.", code: "validation" }, { status: 422 });
+      let abytes: Buffer;
+      if (aurl.startsWith("data:")) {
+        abytes = Buffer.from(aurl.slice(aurl.indexOf(",") + 1), "base64");
+      } else {
+        const ar = await fetch(aurl);
+        if (!ar.ok) return NextResponse.json({ error: "Couldn't fetch the audio file.", code: "upstream" }, { status: 502 });
+        abytes = Buffer.from(await ar.arrayBuffer());
+      }
+      const aname = `combine-${Date.now()}.mp3`;
+      const aasset = await createAsset({ name: aname, type: "audio" });
+      await uploadAsset(aasset.id, new Blob([new Uint8Array(abytes)], { type: "audio/mpeg" }), aname);
+      audioAssetId = aasset.id;
+    }
+
+    // Voiceover for avatar/synced video: render TTS and upload it to Hedra.
     if (!audioAssetId && body.script && (body.type === "avatar_video" || body.type === "video")) {
       const buf = await textToSpeechLong({ text: sanitizeText(body.script, 100000), voiceId: body.voiceId ?? "" });
       const asset = await createAsset({ name: `voiceover-${Date.now()}.mp3`, type: "audio" });

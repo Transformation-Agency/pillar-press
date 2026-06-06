@@ -89,7 +89,7 @@
     const req = m.requires || {
       startFrame: !!m.requires_start_frame,
       endFrame: !!m.requires_end_frame,
-      audio: !!m.requires_audio,
+      audio: !!(m.requires_audio || m.requires_audio_input),
     };
     return {
       id: m.id,
@@ -150,6 +150,14 @@
 
   function modelsByType(type) { return currentModels().filter((m) => m.type === type); }
   function getModel(id) { return currentModels().find((m) => m.id === id) || null; }
+  // Best model for combining an image + audio into a video: a video model that
+  // takes a start frame AND an audio track (duration auto-syncs to the audio).
+  // Prefer Hedra Character 3 / Hedra Avatar; fall back to the known id.
+  function combineModelId() {
+    const vids = currentModels().filter((m) => m.type === "video" && m.requires && m.requires.audio);
+    const pick = vids.find((m) => /character\s*3/i.test(m.name)) || vids.find((m) => /hedra/i.test(m.name)) || vids[0];
+    return pick ? pick.id : "d1dd37a3-e39a-4854-a298-6510289f9cf2";
+  }
 
   // listVoices() keeps its sync signature; live voices replace the cache.
   function listVoices() {
@@ -282,6 +290,7 @@
     if (media.resolution) body.resolution = media.resolution;
     if (media.duration) body.duration = media.duration;
     if (media.startImage) body.startAssetId = media.startImage;
+    if (media.audioMediaId) body.audioMediaId = media.audioMediaId; // combine: use an existing audio item as the track
     if (media.pieceId) body.pieceId = media.pieceId;
     // prompt vs script: voiceover/tts carries the spoken text as `script`;
     // everything else carries `prompt`.
@@ -306,6 +315,7 @@
     if (job.downloadUrl) out.downloadUrl = job.downloadUrl;
     if (job.thumbnailUrl) { out.thumbnailUrl = job.thumbnailUrl; out.posterUrl = job.thumbnailUrl; }
     if (job.meta && job.meta.enhancedPrompt) out.enhancedPrompt = job.meta.enhancedPrompt;
+    if (job.hedraAssetId) out.hedraAssetId = job.hedraAssetId; // so a fresh image can be combined by asset id (no re-fetch)
     if (job.error) out.error = job.error;
     return out;
   }
@@ -388,7 +398,7 @@
 
   window.STUDIO = {
     MODELS, VOICES, TYPES, ASPECT_DIM,
-    listModels, modelsByType, getModel, listVoices, getCredits,
+    listModels, modelsByType, getModel, combineModelId, listVoices, getCredits,
     refreshModels, refreshVoices, refreshCredits,
     makeImagePlaceholder, estimateAudioDuration, creditsCost, validate,
     runJob, speak, stopSpeak,

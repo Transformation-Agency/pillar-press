@@ -191,8 +191,9 @@ function MediaPreview({ media }) {
   return <VideoPreview media={media} />;
 }
 
-function MediaCard({ media, pieces, onAttach, onRegen, onDuplicate, onDelete, onAnimate, onTuneStyle }) {
+function MediaCard({ media, pieces, audios, onAttach, onCombine, onRegen, onDuplicate, onDelete, onAnimate, onTuneStyle }) {
   const [attachOpen, setAttachOpen] = React.useState(false);
+  const [combineOpen, setCombineOpen] = React.useState(false);
   const [driveState, setDriveState] = React.useState(null); // null | "saving" | "saved" | <error string>
   const driveOn = !!(window.DRIVE && window.DRIVE.isConfigured());
   const saveToDrive = async () => {
@@ -236,6 +237,7 @@ function MediaCard({ media, pieces, onAttach, onRegen, onDuplicate, onDelete, on
         {media.status === "completed" && (
           <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 2, position: "relative" }}>
             {onAnimate && media.kind === "image" && <button className="btn ghost sm" onClick={() => onAnimate(media)} title="Animate into video"><Icon name="play" size={13} /> Animate</button>}
+            {onCombine && media.kind === "image" && <button className="btn ghost sm" onClick={() => setCombineOpen((o) => !o)} title="Combine with an audio clip into a video"><Icon name="film" size={13} /> Combine</button>}
             {onTuneStyle && media.kind === "image" && <button className="btn ghost sm" onClick={() => onTuneStyle(media)} title="Teach this campaign's image style from this result"><Icon name="sparkle" size={13} /> Tune style</button>}
             {onAttach && <button className="btn ghost sm" onClick={() => setAttachOpen((o) => !o)}><Icon name="book" size={13} /> Attach</button>}
             {onRegen && <button className="btn ghost sm" onClick={() => onRegen(media)} title="Regenerate"><Icon name="play" size={13} /></button>}
@@ -256,6 +258,17 @@ function MediaCard({ media, pieces, onAttach, onRegen, onDuplicate, onDelete, on
                     style={{ width: "100%", textAlign: "left", border: "none", background: media.pieceId === p.id ? "var(--accent-soft)" : "transparent", cursor: "pointer", borderRadius: 6, padding: "8px 9px", fontSize: 13.5, color: "var(--ink)" }}>{p.title}</button>
                 ))}
                 {media.pieceId && <button onClick={() => { onAttach(media.id, null); setAttachOpen(false); }} className="mono" style={{ width: "100%", textAlign: "left", border: "none", background: "transparent", cursor: "pointer", borderRadius: 6, padding: "8px 9px", fontSize: 11, color: "var(--ink-3)" }}>DETACH</button>}
+              </div>
+            )}
+            {combineOpen && onCombine && (
+              <div className="card" style={{ position: "absolute", top: 32, left: 0, zIndex: 30, width: 250, maxHeight: 260, overflowY: "auto", padding: 6, boxShadow: "var(--shadow-lg)" }}>
+                <div className="eyebrow" style={{ padding: "4px 8px" }}>Combine with audio → video</div>
+                {(audios || []).length === 0 && <div className="muted" style={{ fontSize: 13, padding: "4px 8px", fontStyle: "italic" }}>No voiceovers yet. Generate one in the Voice tab first.</div>}
+                {(audios || []).map((a) => (
+                  <button key={a.id} onClick={() => { onCombine(media, a.id); setCombineOpen(false); }}
+                    style={{ width: "100%", textAlign: "left", border: "none", background: "transparent", cursor: "pointer", borderRadius: 6, padding: "8px 9px", fontSize: 13, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                    title={a.prompt || a.audioScript || ""}>🎙 {(a.prompt || a.audioScript || "Voiceover").slice(0, 40)}</button>
+                ))}
               </div>
             )}
           </div>
@@ -281,11 +294,37 @@ function dataURItoBlob(uri) {
   return new Blob([arr], { type: mime });
 }
 
+function mediaBucket(m) { return m.kind === "audio" ? "audio" : m.kind === "image" ? "image" : "video"; }
+
 function MediaLibrary({ items, pieces, empty, ...handlers }) {
-  if (!items.length) return <div style={{ padding: "44px 24px", textAlign: "center", border: "1px dashed var(--hair-2)", borderRadius: "var(--radius-lg)" }}><p className="muted" style={{ fontStyle: "italic", margin: 0 }}>{empty || "No media yet."}</p></div>;
+  const [filter, setFilter] = React.useState("all");
+  const counts = { all: items.length, image: 0, video: 0, audio: 0 };
+  items.forEach((m) => { counts[mediaBucket(m)]++; });
+  const shown = filter === "all" ? items : items.filter((m) => mediaBucket(m) === filter);
+  const TABS = [["all", "All"], ["image", "Images"], ["video", "Video"], ["audio", "Audio"]];
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 16 }}>
-      {items.map((m) => <MediaCard key={m.id} media={m} pieces={pieces} {...handlers} />)}
+    <div>
+      <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+        {TABS.map(([id, label]) => {
+          const on = filter === id;
+          return (
+            <button key={id} onClick={() => setFilter(id)} className="mono"
+              style={{ fontSize: 11, letterSpacing: "0.05em", textTransform: "uppercase", padding: "6px 12px", borderRadius: 999, cursor: "pointer",
+                border: "1px solid " + (on ? "var(--accent)" : "var(--hair)"), background: on ? "var(--accent-soft)" : "transparent", color: on ? "var(--accent-ink)" : "var(--ink-3)" }}>
+              {label} {counts[id] || 0}
+            </button>
+          );
+        })}
+      </div>
+      {shown.length === 0 ? (
+        <div style={{ padding: "36px 24px", textAlign: "center", border: "1px dashed var(--hair-2)", borderRadius: "var(--radius-lg)" }}>
+          <p className="muted" style={{ fontStyle: "italic", margin: 0 }}>{filter === "all" ? (empty || "No media yet.") : "No " + filter + " yet."}</p>
+        </div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 16 }}>
+          {shown.map((m) => <MediaCard key={m.id} media={m} pieces={pieces} {...handlers} />)}
+        </div>
+      )}
     </div>
   );
 }

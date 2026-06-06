@@ -11,6 +11,8 @@ export const generateBodySchema = z.object({
   // voiceover / TTS — long scripts are chunked + stitched server-side
   script: z.string().trim().max(100000).optional(),
   voiceId: z.string().optional(),
+  // combine: an existing audio media to use as the video's audio track
+  audioMediaId: z.string().uuid().optional(),
   // frames + audio refs (asset ids that belong to this user)
   startAssetId: z.string().optional(),
   endAssetId: z.string().optional(),

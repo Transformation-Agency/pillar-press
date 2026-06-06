@@ -301,6 +301,19 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
   };
   const duplicate = (m) => { setType(m.kind); setPrompt(m.prompt || ""); if (m.audioScript) { setScript(m.audioScript); setVoiceOn(true); } if (m.voiceId) setVoiceId(m.voiceId); if (m.aspect) setAspect(m.aspect); window.scrollTo && window.scrollTo(0, 0); };
   const animate = (m) => { setType("video"); setStartImage(m.outputUrl); setPrompt(m.prompt || ""); };
+  // Combine an existing image + an existing audio clip into a video (Hedra
+  // image+audio model; duration auto-syncs to the audio).
+  const combine = (image, audioId) => {
+    const m = window.Store.addMedia({
+      kind: "avatar", status: "queued", progress: 0,
+      modelId: window.STUDIO.combineModelId(), modelName: "Image + audio",
+      startImage: image.hedraAssetId || image.outputUrl,
+      audioMediaId: audioId,
+      pieceId: image.pieceId || null,
+      prompt: "Combined image + audio → video",
+    });
+    window.STUDIO.runJob(m, (patch) => window.Store.updateMedia(m.id, patch));
+  };
 
   const hedraOn = !!settings.hedra.apiKey, elevenOn = !!settings.eleven.apiKey;
 
@@ -472,8 +485,10 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
               <div className="eyebrow">Media library · {allMedia.length}</div>
             </div>
             <MediaLibrary items={allMedia} pieces={pieces}
+              audios={allMedia.filter((m) => m.kind === "audio" && m.status === "completed")}
               empty="Nothing generated yet. Make an image or a voiced video on the left."
               onAttach={(id, pid) => window.Store.attachMediaToPiece(id, pid)}
+              onCombine={combine}
               onRegen={regen} onDuplicate={duplicate} onDelete={(m) => window.Store.removeMedia(m.id)} onAnimate={animate}
               onTuneStyle={(m) => { setStyleSeedJob(m.id); setStyleOpen(true); }} />
           </div>

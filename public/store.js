@@ -122,7 +122,7 @@
 
       const media = mediaArrayFrom(mediaRes);
       if (media) {
-        const mine = media.filter((m) => m.campaignId === id);
+        const mine = media.filter((m) => m.campaignId === id).map(normMedia);
         state.media = (state.media || []).filter((m) => m.campaignId !== id).concat(mine);
       }
     } catch (e) {
@@ -137,6 +137,14 @@
     if (Array.isArray(res.media)) return res.media;
     if (Array.isArray(res.items)) return res.items;
     return null;
+  }
+
+  // Server media rows carry `type` (image/video/avatar_video/audio); the UI uses
+  // `kind`. Map it so hydrated media filter/preview correctly (fresh client media
+  // already set `kind`).
+  function normMedia(m) {
+    const kind = m.kind || ({ image: "image", audio: "audio", avatar_video: "avatar", avatar: "avatar", video: "video" }[m.type] || "video");
+    return Object.assign({ kind }, m, { kind });
   }
 
   function normPiece(p) {
