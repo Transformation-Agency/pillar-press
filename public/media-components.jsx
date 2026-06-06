@@ -144,6 +144,36 @@ function VideoPreview({ media }) {
   );
 }
 
+function fmtElapsed(sec) { const m = Math.floor(sec / 60), s = sec % 60; return m + ":" + String(s).padStart(2, "0"); }
+
+/* In-progress indicator: ticking elapsed time + a continuously-sweeping bar, so a
+   model that reports a flat progress % (e.g. GPT image models sit at 10% for ~90s)
+   still reads as actively working rather than stuck. */
+function GeneratingState({ media }) {
+  const startRef = React.useRef(null);
+  if (startRef.current == null) {
+    const c = media.createdAt;
+    const t = typeof c === "number" ? c : (c ? Date.parse(c) : NaN);
+    startRef.current = isNaN(t) ? Date.now() : t;
+  }
+  const [now, setNow] = React.useState(Date.now());
+  React.useEffect(() => { const id = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(id); }, []);
+  const elapsed = Math.max(0, Math.floor((now - startRef.current) / 1000));
+  const label = (MEDIA_STATUS[media.status] || {}).label || "Working";
+  const pct = Math.max(0, Math.min(100, media.progress || 0));
+  return (
+    <div style={{ textAlign: "center", width: 150 }}>
+      <Spinner size={22} />
+      <div className="mono muted" style={{ fontSize: 12, marginTop: 8 }}>{label} · {pct}% · {fmtElapsed(elapsed)}</div>
+      <div style={{ position: "relative", width: 150, height: 4, background: "var(--hair)", borderRadius: 9, marginTop: 8, overflow: "hidden" }}>
+        <div style={{ position: "absolute", top: 0, left: 0, height: 4, width: pct + "%", background: "var(--accent)", opacity: 0.45, transition: "width 0.4s ease" }} />
+        <div className="media-sweep" />
+      </div>
+      {elapsed >= 25 && <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-3)", marginTop: 6, maxWidth: 180, lineHeight: 1.4 }}>some models take a minute or two — still working…</div>}
+    </div>
+  );
+}
+
 function MediaPreview({ media }) {
   if (media.status !== "completed") {
     return (
@@ -151,8 +181,7 @@ function MediaPreview({ media }) {
         <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", gap: 12 }}>
           {media.status === "failed"
             ? <div style={{ textAlign: "center", color: "var(--sev-must)" }}><Icon name="warn" size={22} /><div style={{ fontSize: 13, marginTop: 6, maxWidth: 220 }}>{media.error || "Generation failed."}</div></div>
-            : <div style={{ textAlign: "center" }}><Spinner size={22} /><div className="mono muted" style={{ fontSize: 12, marginTop: 8 }}>{(MEDIA_STATUS[media.status] || {}).label} · {media.progress || 0}%</div>
-                <div style={{ width: 120, height: 3, background: "var(--hair)", borderRadius: 9, marginTop: 8, overflow: "hidden" }}><div style={{ height: 3, width: (media.progress || 0) + "%", background: "var(--accent)", transition: "width 0.2s" }} /></div></div>}
+            : <GeneratingState media={media} />}
         </div>
       </AspectBox>
     );

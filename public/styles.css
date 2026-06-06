@@ -260,3 +260,12 @@ hr.rule { border: none; border-top: 1px solid var(--hair); margin: 0; }
   h1 { font-size: clamp(26px, 8vw, 40px) !important; }
   h2 { font-size: clamp(22px, 6vw, 30px) !important; }
 }
+
+/* In-progress media: a soft highlight that sweeps the track so a flat progress
+   % still reads as "working" (see media-components.jsx GeneratingState). */
+.media-sweep {
+  position: absolute; top: 0; height: 4px; width: 36%; border-radius: 9px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: mediasweep 1.5s ease-in-out infinite;
+}
+@keyframes mediasweep { 0% { left: -36%; } 100% { left: 100%; } }
