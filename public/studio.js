@@ -265,6 +265,7 @@
   };
   // Preview/regenerate the art-directed image prompt (no image generated).
   function craftPrompt(body) { return apiPost("/hedra/prompt", body || {}); }
+  function craftVoiceScript(body) { return apiPost("/hedra/voice-script", body || {}); }
   function getStyle(campaignId) { return apiGet("/campaigns/" + encodeURIComponent(campaignId) + "/style"); }
   function sendStyleFeedback(campaignId, body) { return apiPost("/campaigns/" + encodeURIComponent(campaignId) + "/style/feedback", body); }
 
@@ -388,6 +389,6 @@
     refreshModels, refreshVoices, refreshCredits,
     makeImagePlaceholder, estimateAudioDuration, creditsCost, validate,
     runJob, speak, stopSpeak,
-    STYLE_KNOBS, getStyle, sendStyleFeedback, craftPrompt,
+    STYLE_KNOBS, getStyle, sendStyleFeedback, craftPrompt, craftVoiceScript,
   };
 })();

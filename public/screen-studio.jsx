@@ -191,6 +191,8 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
   const [enhance, setEnhance] = React.useState(true); // art-direct image prompts
   const [directed, setDirected] = React.useState(""); // previewed/edited directed prompt
   const [directing, setDirecting] = React.useState(false);
+  const [genScripting, setGenScripting] = React.useState(false); // voice "Generate script" busy
+  const [scriptErr, setScriptErr] = React.useState(null);
   React.useEffect(() => {
     let alive = true;
     window.STUDIO.getStyle(campaignId).then((s) => { if (alive && s) setStyle(s); }).catch(() => {});
@@ -251,6 +253,19 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
       if (r && r.prompt) setDirected(r.prompt);
     } catch (e) { setError((e && e.message) || "Couldn't draft the prompt."); }
     setDirecting(false);
+  };
+
+  // Voice: turn the linked piece into an ElevenLabs-ready script, into the Script field.
+  const genScript = async () => {
+    if (!prefillPiece) { setScriptErr("Pick a source piece first."); return; }
+    setGenScripting(true); setScriptErr(null);
+    try {
+      const vName = (voices.find((v) => v.id === voiceId) || {}).name;
+      const r = await window.STUDIO.craftVoiceScript({ pieceId: prefillPiece, campaignId, voiceName: vName });
+      if (r && r.script) setPrompt(r.script);
+      else setScriptErr("Couldn't generate a script.");
+    } catch (e) { setScriptErr((e && e.message) || "Couldn't generate a script."); }
+    setGenScripting(false);
   };
 
   const generate = () => {
@@ -363,6 +378,25 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
               <textarea className="field" value={prompt} onChange={(e) => setPrompt(e.target.value)}
                 placeholder={isVoiceModel ? "What should the voice say?" : type === "image" ? "Describe the image…" : "Describe the shot / character…"}
                 style={{ minHeight: 84, fontSize: 15, lineHeight: 1.55, resize: "vertical" }} />
+              {isVoiceModel && (
+                <div style={{ marginTop: 10 }}>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <select className="field" value={prefillPiece || ""} onChange={(e) => setPrefillPiece(e.target.value || null)}
+                      style={{ width: "auto", maxWidth: 300, fontSize: 13, padding: "6px 8px" }}>
+                      <option value="">From piece… (source)</option>
+                      {pieces.map((p) => <option key={p.id} value={p.id}>{p.title}</option>)}
+                    </select>
+                    <button className="btn ghost sm" onClick={genScript} disabled={genScripting || !prefillPiece}
+                      title="Adapt the selected piece into a clean spoken script for ElevenLabs">
+                      {genScripting ? <><Spinner size={13} /> Writing script…</> : <><Icon name="sparkle" size={13} /> Generate script</>}
+                    </button>
+                  </div>
+                  <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>
+                    {prefillPiece ? "Turns the linked piece into a narration-ready script (no markdown, TTS-safe)." : "Choose a piece to generate its voiceover script."}
+                  </div>
+                  {scriptErr && <div style={{ color: "var(--sev-must)", fontSize: 12.5, marginTop: 6 }}>{scriptErr}</div>}
+                </div>
+              )}
             </StField>
 
             {type === "image" && (
