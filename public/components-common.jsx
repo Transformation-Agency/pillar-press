@@ -145,7 +145,7 @@ function relTime(ts) {
 /* Responsive helper: true when the viewport is at/below `bp` px. Drives the
    stacking of inline grid/fixed-width layouts that CSS media queries can't
    override. */
-function useIsMobile(bp = 640) {
+function useIsMobile(bp = 760) {
   const query = "(max-width: " + bp + "px)";
   const get = () => (typeof window !== "undefined" && window.matchMedia ? window.matchMedia(query).matches : false);
   const [m, setM] = React.useState(get);

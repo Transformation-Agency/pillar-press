@@ -275,21 +275,34 @@ function ReviewTab({ piece }) {
   const isMobile = window.useIsMobile();
   const [sel, setSel] = React.useState({ key: null, anchor: null, bump: 0 });
   const [sevFilter, setSevFilter] = React.useState({ must: true, consider: true, note: true });
+  const [mView, setMView] = React.useState("packet"); // mobile: packet | original
   const packet = piece.packet || {};
 
   const onSelect = (gateId, idx, anchor) => {
     setSel((s) => ({ key: gateId + ":" + idx, anchor: anchor || null, bump: s.bump + 1 }));
+    if (isMobile && anchor) setMView("original"); // tapping a finding reveals the passage
   };
 
   const counts = { must: 0, consider: 0, note: 0 };
   window.GATES.forEach((g) => { const r = packet[g.id]; if (r) r.findings.forEach((f) => counts[f.severity]++); });
 
   return (
-    <div style={isMobile
-      ? { flex: 1, display: "flex", flexDirection: "column", minHeight: 0, overflowY: "auto" }
-      : { flex: 1, display: "grid", gridTemplateColumns: "1fr 1fr", minHeight: 0 }}>
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+      {isMobile && (
+        <div style={{ display: "flex", gap: 6, padding: "8px 12px", borderBottom: "1px solid var(--hair)", flexShrink: 0 }}>
+          {[["packet", "Review Packet"], ["original", "Your Original"]].map(([id, l]) => {
+            const on = mView === id;
+            return (
+              <button key={id} onClick={() => setMView(id)} className="mono"
+                style={{ flex: 1, fontSize: 11, letterSpacing: "0.04em", textTransform: "uppercase", padding: "9px 4px", borderRadius: 999, border: "none", cursor: "pointer",
+                  background: on ? "var(--accent-soft)" : "transparent", color: on ? "var(--accent-ink)" : "var(--ink-3)" }}>{l}</button>
+            );
+          })}
+        </div>
+      )}
+      <div style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr" }}>
       {/* Packet */}
-      <div className={isMobile ? "" : "scroll-y"} style={{ borderRight: isMobile ? "none" : "1px solid var(--hair)", borderBottom: isMobile ? "1px solid var(--hair)" : "none", height: isMobile ? "auto" : "100%" }}>
+      <div className="scroll-y" style={{ borderRight: isMobile ? "none" : "1px solid var(--hair)", height: "100%", display: isMobile && mView !== "packet" ? "none" : "block" }}>
         <div style={{ padding: "26px 28px 80px", maxWidth: 640, margin: "0 auto" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
             <div className="eyebrow">Review Packet</div>
@@ -330,14 +343,15 @@ function ReviewTab({ piece }) {
         </div>
       </div>
       {/* Original */}
-      <div style={{ height: isMobile ? "auto" : "100%", display: "flex", flexDirection: "column", minHeight: 0, background: "var(--paper-2)" }}>
-        <div style={{ padding: "16px 34px", borderBottom: "1px solid var(--hair)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div style={{ height: "100%", display: isMobile && mView !== "original" ? "none" : "flex", flexDirection: "column", minHeight: 0, background: "var(--paper-2)" }}>
+        <div style={{ padding: isMobile ? "12px 16px" : "16px 34px", borderBottom: "1px solid var(--hair)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div className="eyebrow">Your Original</div>
           {sel.anchor && <button className="btn ghost sm" onClick={() => setSel({ key: null, anchor: null, bump: sel.bump })}>Clear highlight</button>}
         </div>
-        <div style={{ flex: 1, minHeight: isMobile ? 320 : 0 }}>
+        <div style={{ flex: 1, minHeight: 0 }}>
           <OriginalPane text={piece.original} anchor={sel.anchor} bump={sel.bump} />
         </div>
+      </div>
       </div>
     </div>
   );

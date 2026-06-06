@@ -230,8 +230,11 @@ hr.rule { border: none; border-top: 1px solid var(--hair); margin: 0; }
    Mobile (≤640px). The shell is class-based and handled here;
    inline grid/fixed-width layouts stack via window.useIsMobile().
    ============================================================ */
-@media (max-width: 640px) {
+@media (max-width: 760px) {
   html, body { max-width: 100%; overflow-x: hidden; }
+  /* Keep form controls >=16px so iOS doesn't zoom on focus (overrides inline sizes). */
+  textarea.field, input.field, select.field { font-size: 16px !important; }
+  .scroll-y { -webkit-overflow-scrolling: touch; }
 
   /* Topbar wraps to two rows; the nav becomes a full-width scroll strip. */
   .topbar {

@@ -24,9 +24,12 @@ import Anthropic from "@anthropic-ai/sdk";
 
 // Parity with the prototype. Kept here as a single source of truth.
 export const MODEL = "claude-haiku-4-5";
-// Raised vs. the prototype default so larger structured outputs fit before the
-// truncation-repair path is needed.
-export const MAX_TOKENS = 4096;
+// Output-token ceiling. 32000 requires streaming (which raw() uses) — the
+// non-streaming path caps long generations at the 10-minute request limit.
+// You're billed for tokens actually generated, not this ceiling, so a high value
+// only removes truncation risk for single-pass outputs (references edit, voice
+// script, large gate/output JSON). Revision/weave still chunk for fidelity.
+export const MAX_TOKENS = 32000;
 
 export class AnthropicError extends Error {
   constructor(public status: number, public code: string, message: string, public details?: unknown) {
@@ -142,11 +145,14 @@ async function raw(messages: AIMessage[], system?: string): Promise<string> {
 
   let resp;
   try {
-    resp = await client().messages.create({
+    // Stream so large generations aren't capped by the non-streaming 10-minute
+    // request limit; finalMessage() assembles the full message when done.
+    const stream = client().messages.stream({
       model: MODEL,
       max_tokens: MAX_TOKENS,
       messages: msgs,
     });
+    resp = await stream.finalMessage();
   } catch (err: unknown) {
     const e = err as { status?: number; message?: string };
     throw new AnthropicError(e?.status ?? 502, "anthropic", e?.message ?? "Anthropic request failed.", err);

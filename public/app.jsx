@@ -286,6 +286,7 @@ function CampaignSwitcher({ campaigns, activeId, onSelect, onAdd }) {
 function App() {
   const state = useStore();
   const [view, setView] = React.useState("library");
+  const isMobile = window.useIsMobile();
   const role = state.role || "author";
 
   const campaigns = state.campaigns || [];
@@ -318,7 +319,7 @@ function App() {
         <div className="spacer" />
         <CampaignSwitcher campaigns={campaigns} activeId={state.activeCampaignId}
           onSelect={(id) => window.Store.setActiveCampaign(id)} onAdd={(n) => window.Store.addCampaign(n)} />
-        <RoleSwitch role={role} onChange={(r) => window.Store.setRole(r)} />
+        {!isMobile && <RoleSwitch role={role} onChange={(r) => window.Store.setRole(r)} />}
         <button className="icon-btn" onClick={() => window.Store.toggleTheme()} title="Toggle light / dark">
           <Icon name={state.theme === "dark" ? "sun" : "moon"} size={16} />
         </button>

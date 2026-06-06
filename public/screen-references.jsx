@@ -80,16 +80,84 @@ function RuleList({ rules, onChange, readOnly }) {
   );
 }
 
+/* Edit the whole references doc from a plain-language instruction (author only).
+   Generates a proposed doc + summary server-side; the author reviews, then applies. */
+function RefsAIModal({ campaignId, onClose, onApply }) {
+  const [instruction, setInstruction] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState(null);
+  const [result, setResult] = React.useState(null); // { doc, summary }
+
+  const generate = async () => {
+    if (instruction.trim().length < 3) { setErr("Describe the change you want."); return; }
+    setBusy(true); setErr(null);
+    try {
+      const r = await fetch("/api/campaigns/" + campaignId + "/references/ai-edit", {
+        method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" },
+        credentials: "same-origin", body: JSON.stringify({ instruction: instruction.trim() }),
+      });
+      const data = await r.json().catch(() => null);
+      if (!r.ok) throw new Error((data && data.error) || (r.status === 403 ? "Switch to Author to edit References." : "Couldn't generate the edit."));
+      setResult(data);
+    } catch (e) { setErr((e && e.message) || "Couldn't generate the edit."); }
+    setBusy(false);
+  };
+  const apply = () => { if (result && result.doc) onApply(result.doc); onClose(); };
+
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 200, display: "grid", placeItems: "center", padding: 16 }}>
+      <div onClick={(e) => e.stopPropagation()} className="card" style={{ width: "min(560px, 96vw)", maxHeight: "88vh", overflowY: "auto", padding: "22px 24px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+          <div className="eyebrow">Edit references with AI</div>
+          <button className="icon-btn" onClick={onClose} style={{ width: 30, height: 30 }}><Icon name="xLogo" size={14} /></button>
+        </div>
+        <p className="muted" style={{ fontSize: 13.5, marginTop: 0, marginBottom: 12 }}>
+          Describe the change in plain language. AI revises the whole references document — you review a summary before anything is applied, and your wording is preserved where the change doesn't touch it.
+        </p>
+        <textarea className="field" value={instruction} onChange={(e) => setInstruction(e.target.value)} disabled={busy || !!result}
+          placeholder={"e.g. Add an audience for skeptical executives, and make the red lines more specific."}
+          style={{ minHeight: 110, fontSize: 15, lineHeight: 1.55, resize: "vertical" }} />
+        {err && <div style={{ color: "var(--sev-must)", fontSize: 13, marginTop: 8 }}>{err}</div>}
+        {result && (
+          <div className="card" style={{ background: "var(--paper-sunk)", padding: "12px 14px", marginTop: 12 }}>
+            <div className="eyebrow" style={{ marginBottom: 4 }}>Proposed change</div>
+            <div style={{ fontSize: 14, lineHeight: 1.5 }}>{result.summary}</div>
+          </div>
+        )}
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+          {!result ? (
+            <>
+              <button className="btn ghost" onClick={onClose}>Cancel</button>
+              <button className="btn primary" onClick={generate} disabled={busy}>{busy ? <><Spinner size={14} /> Drafting…</> : <><Icon name="sparkle" size={14} /> Generate</>}</button>
+            </>
+          ) : (
+            <>
+              <button className="btn ghost" onClick={() => setResult(null)}>Try again</button>
+              <button className="btn primary" onClick={apply}><Icon name="check" size={14} /> Apply changes</button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function References({ refs, role, campaignName }) {
   const readOnly = role === "assistant";
+  const [aiOpen, setAiOpen] = React.useState(false);
+  const campaignId = window.Store.getState().activeCampaignId;
   const set = (key, value) => window.Store.setReferenceSection(key, value);
   const patch = (key, sub) => set(key, { ...refs[key], ...sub });
 
   return (
     <div className="scroll-y" style={{ flex: 1 }}>
       <div style={{ maxWidth: 800, margin: "0 auto", padding: "46px 32px 90px" }}>
+        {aiOpen && <RefsAIModal campaignId={campaignId} onClose={() => setAiOpen(false)} onApply={(doc) => window.Store.updateReferences(doc)} />}
         <div className="eyebrow" style={{ marginBottom: 8 }}>{campaignName ? campaignName + " · guidelines" : "Source of truth"}</div>
-        <h1 style={{ fontSize: 42, letterSpacing: "-0.02em", marginBottom: 14 }}>References</h1>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
+          <h1 style={{ fontSize: 42, letterSpacing: "-0.02em", margin: 0 }}>References</h1>
+          {!readOnly && <button className="btn" onClick={() => setAiOpen(true)} title="Revise the references document with AI"><Icon name="sparkle" size={15} /> Edit with AI</button>}
+        </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 16px", borderRadius: "var(--radius)", background: readOnly ? "var(--paper-sunk)" : "var(--accent-soft)", marginBottom: 30 }}>
           <span style={{ width: 7, height: 7, borderRadius: 99, background: readOnly ? "var(--ink-3)" : "var(--accent)", animation: readOnly ? "none" : "pulse 2s infinite" }} />
           <span style={{ fontSize: 14, color: readOnly ? "var(--ink-2)" : "var(--accent-ink)" }}>
