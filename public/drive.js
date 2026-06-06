@@ -75,5 +75,21 @@
     return results[0] || { name, webViewLink: "" };
   }
 
-  window.DRIVE = { isConfigured, config, uploadFile, uploadMany, refresh };
+  // Save a generated media item (image/video/audio) to the linked Drive folder.
+  // The server fetches the media bytes and uploads them (binary).
+  async function uploadMediaFile(mediaId) {
+    const res = await fetch("/api/drive/upload-media", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mediaId }),
+    });
+    if (!res.ok) {
+      let msg = "Drive save failed (" + res.status + ").";
+      try { const j = await res.json(); if (j && j.error) msg = j.error; } catch (e) {}
+      throw new Error(msg);
+    }
+    const data = await res.json();
+    return (data && data.file) || {};
+  }
+
+  window.DRIVE = { isConfigured, config, uploadFile, uploadMany, uploadMediaFile, refresh };
 })();

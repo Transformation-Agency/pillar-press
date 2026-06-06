@@ -18,6 +18,7 @@
  * SERVER ONLY. The Google client secret + the user's refresh token never reach
  * the client; the browser only calls our own /api/drive/* routes.
  */
+import { Readable } from "node:stream";
 import { google } from "googleapis";
 import type { OAuth2Client } from "google-auth-library";
 
@@ -40,7 +41,7 @@ export class DriveError extends Error {
 function oauthConfig(): { clientId: string; clientSecret: string; redirectUri: string } {
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-  const redirectUri = process.env.GOOGLE_REDIRECT_URI;
+  const redirectUri = process.env.GOOGLE_REDIRECT_URI || process.env.GOOGLE_OAUTH_REDIRECT_URL;
   if (!clientId || !clientSecret || !redirectUri) {
     throw new DriveError(
       "Google Drive is not configured on the server.",
@@ -159,6 +160,32 @@ export async function uploadFile(
       name: f.name ?? name,
       webViewLink: f.webViewLink ?? "",
     };
+  } catch (e) {
+    if (e instanceof DriveError) throw e;
+    throw new DriveError("Drive upload failed.", 502, "drive_upload_failed");
+  }
+}
+
+/**
+ * uploadBinaryFile — upload raw bytes (image / video / audio) to the linked
+ * folder. Same as uploadFile but the media body is a binary stream.
+ */
+export async function uploadBinaryFile(
+  refreshToken: string,
+  folderId: string | null | undefined,
+  name: string,
+  bytes: Buffer | Uint8Array,
+  mime: string,
+): Promise<UploadedFile> {
+  try {
+    const res = await driveApi(refreshToken).files.create({
+      requestBody: { name, ...(folderId ? { parents: [folderId] } : {}) },
+      media: { mimeType: mime, body: Readable.from(Buffer.from(bytes)) },
+      fields: "id,name,webViewLink",
+    });
+    const f = res.data;
+    if (!f.id) throw new DriveError("Drive upload returned no file id.");
+    return { id: f.id, name: f.name ?? name, webViewLink: f.webViewLink ?? "" };
   } catch (e) {
     if (e instanceof DriveError) throw e;
     throw new DriveError("Drive upload failed.", 502, "drive_upload_failed");

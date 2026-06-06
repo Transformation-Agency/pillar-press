@@ -193,6 +193,13 @@ function MediaPreview({ media }) {
 
 function MediaCard({ media, pieces, onAttach, onRegen, onDuplicate, onDelete, onAnimate, onTuneStyle }) {
   const [attachOpen, setAttachOpen] = React.useState(false);
+  const [driveState, setDriveState] = React.useState(null); // null | "saving" | "saved" | <error string>
+  const driveOn = !!(window.DRIVE && window.DRIVE.isConfigured());
+  const saveToDrive = async () => {
+    setDriveState("saving");
+    try { await window.DRIVE.uploadMediaFile(media.id); setDriveState("saved"); setTimeout(() => setDriveState(null), 2500); }
+    catch (e) { setDriveState((e && e.message) || "Drive save failed."); setTimeout(() => setDriveState(null), 4500); }
+  };
   const st = MEDIA_STATUS[media.status] || MEDIA_STATUS.queued;
   const model = window.STUDIO.getModel(media.modelId);
   const attached = media.pieceId && pieces && pieces.find((p) => p.id === media.pieceId);
@@ -234,6 +241,11 @@ function MediaCard({ media, pieces, onAttach, onRegen, onDuplicate, onDelete, on
             {onRegen && <button className="btn ghost sm" onClick={() => onRegen(media)} title="Regenerate"><Icon name="play" size={13} /></button>}
             {onDuplicate && <button className="btn ghost sm" onClick={() => onDuplicate(media)} title="Duplicate prompt"><Icon name="copy" size={13} /></button>}
             {(media.downloadUrl || media.outputUrl || media.posterUrl) && <button className="btn ghost sm" onClick={download} title="Download"><Icon name="doc" size={13} /></button>}
+            {driveOn && (media.downloadUrl || media.outputUrl) && (
+              <button className="btn ghost sm" onClick={saveToDrive} disabled={driveState === "saving"} title="Save to Google Drive">
+                {driveState === "saving" ? <Spinner size={13} /> : <Icon name={driveState === "saved" ? "check" : "upload"} size={13} />} {driveState === "saved" ? "Saved" : "Drive"}
+              </button>
+            )}
             {onDelete && <button className="btn ghost sm" onClick={() => onDelete(media)} title="Delete"><Icon name="trash" size={13} /></button>}
             {attachOpen && onAttach && (
               <div className="card" style={{ position: "absolute", top: 32, left: 0, zIndex: 30, width: 220, maxHeight: 240, overflowY: "auto", padding: 6, boxShadow: "var(--shadow-lg)" }}>
@@ -247,6 +259,9 @@ function MediaCard({ media, pieces, onAttach, onRegen, onDuplicate, onDelete, on
               </div>
             )}
           </div>
+        )}
+        {media.status === "completed" && driveState && driveState !== "saving" && driveState !== "saved" && (
+          <div style={{ fontSize: 12, color: "var(--sev-must)" }}>{driveState}</div>
         )}
         {media.status === "processing" && <button className="btn ghost sm" onClick={() => onDelete && onDelete(media)} style={{ alignSelf: "flex-start" }}>Cancel</button>}
       </div>
