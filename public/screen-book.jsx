@@ -413,6 +413,7 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
   const [note, setNote] = React.useState(null);          // transient success note
   const [title, setTitle] = React.useState("");
   const [draft, setDraft] = React.useState("");
+  const [fullRevise, setFullRevise] = React.useState(false); // full = restructure + polish
 
   // Drop a stale book selection if the campaign no longer exists; load the
   // book's pieces/references on demand (without making it the active campaign).
@@ -506,9 +507,12 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
     if (!p) return;
     if (!p.packet) { setErr("Run Review before Revise."); setPanel("review"); return; }
     setBusy("revise"); setErr(null); setPanel("revision");
+    setProg({ label: fullRevise ? "Restructuring, then revising…" : "Writing the revision…" });
     try {
       await persistChapter();
-      const res = await window.GEN.generateRevision(window.Store.getPiece(selectedId), refCtx, (done, total) => setProg({ label: `Revising passage ${done}/${total}…` }));
+      const res = await window.GEN.generateRevision(window.Store.getPiece(selectedId), refCtx,
+        (done, total) => setProg({ label: `Revising passage ${done}/${total}…` }),
+        { mode: fullRevise ? "full" : "light" });
       const patch = { revision: { text: res.revision, changelog: res.changelog } };
       if (p.status === "Reviewed") patch.status = "Revised";
       window.Store.updatePiece(p.id, patch);
@@ -617,6 +621,10 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
                 <button className="btn sm" onClick={saveNow} disabled={!dirty}><Icon name="check" size={13} /> Save</button>
                 <button className="btn sm" onClick={runReview} disabled={!!busy}>{busy === "review" ? <Spinner size={13} /> : <Icon name="flag" size={13} />} Review</button>
                 <button className="btn sm" onClick={runRevise} disabled={!!busy || !piece.packet}>{busy === "revise" ? <Spinner size={13} /> : <Icon name="play" size={13} />} Revise</button>
+                <label title="Full revision: restructure the chapter (strategy, audience, rigor, structure) then polish (clarity, tone, inoculation). Off = light clarity/tone/inoculation pass only."
+                  style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: fullRevise ? "var(--accent-ink)" : "var(--ink-3)", cursor: "pointer", userSelect: "none" }}>
+                  <input type="checkbox" checked={fullRevise} onChange={(e) => setFullRevise(e.target.checked)} disabled={!!busy} /> Full
+                </label>
                 <button className="btn sm" onClick={runOutputs} disabled={!!busy}>{busy === "outputs" ? <Spinner size={13} /> : <Icon name="arrowR" size={13} />} Generate outputs</button>
                 <div style={{ flex: 1 }} />
                 <button className="btn ghost sm" onClick={downloadBook} disabled={busy === "export"} title="Assemble all chapters into one Markdown file">{busy === "export" ? <Spinner size={13} /> : <Icon name="doc" size={13} />} Download book</button>

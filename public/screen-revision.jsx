@@ -43,6 +43,7 @@ function RevisionTab({ piece, onUpdate, refCtx }) {
   const [prog, setProg] = React.useState(null);
   const [err, setErr] = React.useState(null);
   const [mode, setMode] = React.useState("clean"); // clean | diff
+  const [full, setFull] = React.useState(false);   // full = restructure + polish
   const rev = piece.revision;
 
   const generate = async () => {
@@ -50,7 +51,7 @@ function RevisionTab({ piece, onUpdate, refCtx }) {
     try {
       const res = await window.GEN.generateRevision(piece, refCtx, (done, total) => {
         setProg({ done, total });
-      });
+      }, { mode: full ? "full" : "light" });
       const revision = { text: res.revision, changelog: res.changelog };
       const patch = { revision };
       if (piece.status === "Reviewed") patch.status = "Revised";
@@ -61,7 +62,16 @@ function RevisionTab({ piece, onUpdate, refCtx }) {
 
   const busyLabel = prog && prog.total > 1
     ? `Revising passage ${Math.min(prog.done + 1, prog.total)} of ${prog.total}…`
-    : "Writing the revision…";
+    : (full ? "Restructuring, then revising…" : "Writing the revision…");
+
+  // Toggle: light firewall pass vs full restructure-then-polish pass.
+  const FullToggle = (
+    <label title="Full revision: restructure the piece (strategy, audience, rigor, structure) then polish (clarity, tone, inoculation). Off = the light clarity/tone/inoculation pass only."
+      style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: full ? "var(--accent-ink)" : "var(--ink-3)", cursor: "pointer", userSelect: "none" }}>
+      <input type="checkbox" checked={full} onChange={(e) => setFull(e.target.checked)} disabled={busy} />
+      Full revision — apply strategy &amp; structure too
+    </label>
+  );
 
   if (!piece.packet) {
     return <EmptyState icon="flag" title="Run the review first"
@@ -82,6 +92,7 @@ function RevisionTab({ piece, onUpdate, refCtx }) {
           <p className="muted" style={{ fontSize: 14.5, fontStyle: "italic", marginBottom: 24 }}>
             Where a clarity rule would flatten a line that sounds like you, your line wins.
           </p>
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: 16 }}>{FullToggle}</div>
           <button className="btn primary" onClick={generate} disabled={busy}>
             {busy ? <><Spinner size={15} /> {busyLabel}</> : <><Icon name="play" size={15} /> Generate revision</>}
           </button>
@@ -105,7 +116,8 @@ function RevisionTab({ piece, onUpdate, refCtx }) {
                     boxShadow: mode === id ? "var(--shadow-sm)" : "none" }}>{l}</button>
               ))}
             </div>
-            <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+              {FullToggle}
               <CopyButton text={() => rev.text} label="Copy revision" />
               <button className="btn ghost sm" onClick={generate} disabled={busy}>
                 {busy ? <Spinner size={14} /> : <Icon name="play" size={14} />} Regenerate

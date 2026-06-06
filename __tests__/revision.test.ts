@@ -4,7 +4,9 @@ import {
   parseDelimited,
   collectFirewallFindings,
   buildFindingsBlock,
+  buildFullFindingsBlock,
   REVISION_SYSTEM,
+  RESTRUCTURE_SYSTEM,
   buildGuidance,
   generateRevision,
   type RevisionPacket,
@@ -253,5 +255,81 @@ describe("generateRevision", () => {
       expect(seenPrompt).not.toContain(forbidden);
     }
     expect(seenPrompt).toContain('C1 [must] Tighten — wordy');
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * FULL mode — restructure (strategy/structure/etc.) then polish.
+ * ------------------------------------------------------------------ */
+
+describe("buildFullFindingsBlock", () => {
+  it("includes strategy / audience / rigor / self with S/A/R/V ids", () => {
+    const block = buildFullFindingsBlock(FULL_PACKET);
+    expect(block).toContain("S1 [must] STRAT — no");
+    expect(block).toContain("A1 [must] AUD — no");
+    expect(block).toContain("R1 [must] RIGOR — no");
+    expect(block).toContain("V1 [must] IDENT — no");
+  });
+});
+
+describe("RESTRUCTURE_SYSTEM", () => {
+  it("permits reorganization and protects the author's voice", () => {
+    const sys = RESTRUCTURE_SYSTEM("REFX");
+    expect(sys).toContain("REFX");
+    expect(sys).toMatch(/reorganize|reorder/i);
+    expect(sys).toContain("PRESERVE the author's VOICE");
+    expect(sys).toContain("@@REVISION@@");
+  });
+});
+
+describe("generateRevision — full mode", () => {
+  const isRestructure = (sys?: string) => !!sys && sys.includes("structural editor");
+
+  it("runs a whole-document restructure first, then the per-passage polish", async () => {
+    const calls: string[] = [];
+    const ai = fakeAI((_p, o) => {
+      const restructure = isRestructure(o?.system);
+      calls.push(restructure ? "restructure" : "passage");
+      return restructure
+        ? `@@REVISION@@\nrestructured doc\n@@CHANGELOG@@\n- [S1] reordered the opening :: lead with stakes\n- [STRUCT] merged two sections :: tighter\n@@END@@`
+        : `@@REVISION@@\npolished passage\n@@CHANGELOG@@\n- [C1] tightened :: wordy\n@@END@@`;
+    });
+    const result = await generateRevision({ original: "some original text", packet: FULL_PACKET }, "REF", ai, undefined, { mode: "full" });
+
+    expect(calls[0]).toBe("restructure");
+    expect(calls.slice(1).every((c) => c === "passage")).toBe(true);
+    expect(result.text).toBe("polished passage");
+    // structural changelog entries come first (bracketed ids parsed), then per-passage
+    expect(result.changelog[0]).toEqual({ finding: "S1", change: "reordered the opening", note: "lead with stakes" });
+    expect(result.changelog).toContainEqual({ finding: "STRUCT", change: "merged two sections", note: "tighter" });
+    expect(result.changelog).toContainEqual({ finding: "C1", change: "tightened", note: "wordy" });
+  });
+
+  it("feeds strategy/audience/rigor/self into the restructure step (which the firewall excludes)", async () => {
+    let restructurePrompt = "";
+    const ai = fakeAI((p, o) => {
+      if (isRestructure(o?.system)) { restructurePrompt = p; return `@@REVISION@@\nrs body\n@@END@@`; }
+      return `@@REVISION@@\npp body\n@@END@@`;
+    });
+    await generateRevision({ original: "x y z", packet: FULL_PACKET }, "REF", ai, undefined, { mode: "full" });
+    for (const wanted of ["STRAT", "AUD", "RIGOR", "IDENT"]) expect(restructurePrompt).toContain(wanted);
+  });
+
+  it("light mode (default) never invokes the restructure step", async () => {
+    const systems: string[] = [];
+    const ai = fakeAI((_p, o) => { systems.push(o?.system ?? ""); return `@@REVISION@@\nbody body\n@@END@@`; });
+    await generateRevision({ original: "hello there", packet: FULL_PACKET }, "REF", ai); // default light
+    expect(systems.some(isRestructure)).toBe(false);
+  });
+
+  it("falls back to per-passage polish if the restructure call throws", async () => {
+    const ai = fakeAI((_p, o) => {
+      if (isRestructure(o?.system)) throw new Error("restructure boom");
+      return `@@REVISION@@\npolished only\n@@END@@`;
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const result = await generateRevision({ original: "original body", packet: {} }, "REF", ai, undefined, { mode: "full" });
+    expect(result.text).toBe("polished only");
+    warn.mockRestore();
   });
 });

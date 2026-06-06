@@ -74,10 +74,13 @@
     return { revision: body, changelog };
   }
 
-  async function generateRevision(piece, refCtx, onProgress) {
+  async function generateRevision(piece, refCtx, onProgress, opts) {
     // Revision is produced server-side: POST /api/pieces/:id/revision
     // returns { piece } with piece.revision = { text, changelog }.
-    const res = await apiSend("POST", "/pieces/" + piece.id + "/revision");
+    // opts.mode "full" runs a whole-document restructure (strategy/structure/
+    // etc.) before the per-passage clarity/tone/inoculation polish.
+    const body = opts && opts.mode ? { mode: opts.mode } : null;
+    const res = await apiSend("POST", "/pieces/" + piece.id + "/revision", body);
     const rev = (res && res.piece && res.piece.revision) || {};
     if (onProgress) onProgress(1, 1);
     return {

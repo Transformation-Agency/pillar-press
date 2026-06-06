@@ -42,16 +42,31 @@ export interface ScreenshotTest {
   inoculation: string;
 }
 
+export interface GateResult {
+  summary?: string;
+  findings?: GateFinding[];
+  screenshotTests?: ScreenshotTest[];
+}
+
 /**
- * The ONLY packet slices the firewall permits into a revision:
- * clarity findings, tone findings, and the stress gate's screenshot-test
- * inoculations. strategy / audience / rigor / self (identity) are deliberately
- * NOT part of this type — they must never inform the revision.
+ * The packet the reviser may read. There are two passes:
+ *  - LIGHT (default): collectFirewallFindings()/buildFindingsBlock() read ONLY
+ *    clarity, tone, and stress.screenshotTests — the FIREWALL. strategy /
+ *    audience / rigor / self never inform this pass.
+ *  - FULL (opt-in): a preceding restructure step (buildFullFindingsBlock /
+ *    restructureDraft) ALSO applies strategy / audience / rigor / self and may
+ *    reorganize the document; the light pass then polishes the result.
+ * The firewall for the light pass is enforced in those functions and in
+ * REVISION_SYSTEM — not by this type.
  */
 export interface RevisionPacket {
-  clarity?: { findings?: GateFinding[] };
-  tone?: { findings?: GateFinding[] };
-  stress?: { screenshotTests?: ScreenshotTest[] };
+  strategy?: GateResult;
+  audience?: GateResult;
+  tone?: GateResult;
+  rigor?: GateResult;
+  stress?: GateResult;
+  clarity?: GateResult;
+  self?: GateResult;
 }
 
 export interface RevisionPieceInput {
@@ -142,7 +157,15 @@ export function chunkText(text: string, maxWords = 260): string[] {
  * parseDelimited — VERBATIM from generators.js
  * ------------------------------------------------------------------ */
 
-export function parseDelimited(out: string): { revision: string; changelog: ChangelogEntry[] } {
+/** Light-pass finding ids: C#/T#/I# (brackets optional). Verbatim default. */
+const DEFAULT_ID_RE = /^\[?\s*([CTI]\s*\d+)\s*\]?/i;
+/** Full-pass restructure ids: any bracketed token (S1, A2, R1, V1, STRUCT). */
+const RESTRUCTURE_ID_RE = /^\[\s*([A-Za-z0-9]{1,12})\s*\]/;
+
+export function parseDelimited(
+  out: string,
+  idRegex: RegExp = DEFAULT_ID_RE,
+): { revision: string; changelog: ChangelogEntry[] } {
   let body = out || "";
   let changelog: ChangelogEntry[] = [];
   const rev = (out || "").split(/@@\s*REVISION\s*@@/i);
@@ -157,7 +180,7 @@ export function parseDelimited(out: string): { revision: string; changelog: Chan
       .map((l) => {
         l = l.replace(/^[-•]\s*/, "");
         let finding = "—";
-        const idm = l.match(/^\[?\s*([CTI]\s*\d+)\s*\]?/i);
+        const idm = l.match(idRegex);
         if (idm) {
           finding = idm[1].replace(/\s+/g, "").toUpperCase();
           l = l.slice(idm[0].length);
@@ -212,6 +235,83 @@ export function buildFindingsBlock(packet: RevisionPacket | null | undefined): s
 }
 
 /* ------------------------------------------------------------------ *
+ * FULL pass — the restructure step. Reads the dimensions the firewall
+ * excludes (strategy / audience / rigor / self) and may reorganize the
+ * whole document. Runs BEFORE the light per-passage pass when mode:"full".
+ * ------------------------------------------------------------------ */
+
+/** [gate key, changelog id prefix, label] for the dimensions the restructure applies. */
+const FULL_GATES: Array<[keyof RevisionPacket, string, string]> = [
+  ["strategy", "S", "STRATEGY"],
+  ["audience", "A", "AUDIENCE"],
+  ["rigor", "R", "RIGOR"],
+  ["self", "V", "SELF-ALIGNMENT (voice/identity — guide, don't flatten)"],
+];
+
+export function buildFullFindingsBlock(packet: RevisionPacket | null | undefined): string {
+  const p = (packet || {}) as Record<string, GateResult | undefined>;
+  const blocks: string[] = [];
+  for (const [key, prefix, label] of FULL_GATES) {
+    const findings = (p[key as string] && p[key as string]!.findings) || [];
+    blocks.push(`${label} FINDINGS:`);
+    findings.forEach((f, i) =>
+      blocks.push(`${prefix}${i + 1} [${f.severity}] ${f.title} — ${f.detail}${f.anchor ? ` (re: "${f.anchor}")` : ""}`),
+    );
+  }
+  return blocks.join("\n");
+}
+
+export function RESTRUCTURE_SYSTEM(refCtx: string, guidance?: { direction: string; notesBlock: string; hasGuidance: boolean }): string {
+  const g = guidance ?? { direction: "", notesBlock: "", hasGuidance: false };
+  const eClause = g.hasGuidance
+    ? `\n(f) HONOR THE AUTHOR'S DIRECTION & SECTION COMMENTARY below — they govern the approach and emphasis and take precedence over the findings where they conflict. When a change is driven by author guidance (not a finding), tag its changelog line [DIR].`
+    : "";
+  const directionBlock = g.direction ? `\n\nAUTHOR'S CREATIVE DIRECTION (apply throughout):\n${g.direction}` : "";
+  const notesBlock = g.notesBlock ? `\n\nAUTHOR COMMENTARY BY REVIEW SECTION (apply where relevant):\n${g.notesBlock}` : "";
+  return `You are the structural editor in an editorial system for a single author. You revise the WHOLE piece at once. Your job is the document's STRATEGY and STRUCTURE — not line-level polish (clarity, tone, and inoculation are applied in a later pass).
+(a) You MAY reorganize: reorder, merge, split, or add/cut sections, and sharpen the through-line so the piece serves its strategy and audience and stands up to scrutiny;
+(b) apply the strategy, audience, rigor, and self-alignment findings below;
+(c) PRESERVE the author's VOICE and identity — where a line sounds like the author, keep it verbatim; never flatten the author's register, and treat self-alignment findings as a guide to protect the author's voice, not license to rewrite their persona;
+(d) do NOT invent facts, data, citations, or claims; restructure and strengthen what is already there;
+(e) make changes that genuinely serve the piece; if the structure is already sound, return it unchanged with an empty changelog.${eClause}
+
+AUTHOR REFERENCES:
+${refCtx}${directionBlock}${notesBlock}
+
+Return EXACTLY this format and NOTHING else (no JSON, no preamble):
+@@REVISION@@
+<the restructured piece as plain prose; keep paragraph breaks as blank lines; you may use section headings>
+@@CHANGELOG@@
+- [id] what changed :: short why
+@@END@@
+(One line per structural/strategic change. id is bracketed, like [S1] (strategy), [A1] (audience), [R1] (rigor), [V1] (self/voice), or [STRUCT] for a reorganization. Omit the line if nothing changed.)`;
+}
+
+/**
+ * restructureDraft — the FULL pass's first step: one whole-document call that
+ * applies strategy/audience/rigor/self and may reorganize the piece. Returns the
+ * restructured text + a structural changelog. On failure the caller falls back
+ * to the original text (light pass only).
+ */
+export async function restructureDraft(
+  piece: RevisionPieceInput,
+  refCtx: string,
+  ai: AI,
+): Promise<{ text: string; changelog: ChangelogEntry[] }> {
+  const system = RESTRUCTURE_SYSTEM(refCtx, buildGuidance(piece));
+  const prompt = `STRATEGY / AUDIENCE / RIGOR / SELF FINDINGS — apply these and improve the document's structure (clarity, tone, and inoculation are handled in a later polishing pass):
+${buildFullFindingsBlock(piece.packet || {})}
+
+FULL DRAFT:
+"""${piece.original || ""}"""
+
+Return the delimited format now.`;
+  const out = await ai.text(prompt, { system });
+  const parsed = parseDelimited(out, RESTRUCTURE_ID_RE);
+  return { text: parsed.revision, changelog: parsed.changelog };
+}
+
+/* ------------------------------------------------------------------ *
  * System prompt — byte-identical to generators.js (refCtx interpolated).
  * ------------------------------------------------------------------ */
 
@@ -246,19 +346,41 @@ Return EXACTLY this format and NOTHING else (no JSON, no preamble):
  * Returns { text, changelog } (DATA_MODEL field name "text").
  * ------------------------------------------------------------------ */
 
+export interface RevisionOptions {
+  /** "light" (default): firewall pass only. "full": restructure (strategy /
+   *  audience / rigor / self + reorganization) THEN the firewall polish pass. */
+  mode?: "light" | "full";
+}
+
 export async function generateRevision(
   piece: RevisionPieceInput,
   refCtx: string,
   ai: AI,
   onProgress?: OnProgress,
+  opts?: RevisionOptions,
 ): Promise<RevisionResult> {
+  const mode = opts?.mode === "full" ? "full" : "light";
   const packet = piece.packet || {};
   const findingsBlock = buildFindingsBlock(packet);
   const system = REVISION_SYSTEM(refCtx, buildGuidance(piece));
 
-  const chunks = chunkText(piece.original || "", 260);
+  // FULL mode: a whole-document restructure pass first (strategy/structure/etc.),
+  // then the per-passage firewall polish runs over the restructured text.
+  let baseText = piece.original || "";
+  let preChangelog: ChangelogEntry[] = [];
+  if (mode === "full") {
+    try {
+      const r = await restructureDraft(piece, refCtx, ai);
+      if (r.text && r.text.trim().length > 2) baseText = r.text;
+      preChangelog = r.changelog;
+    } catch (e) {
+      console.warn("Restructure pass failed; falling back to per-passage polish only:", e);
+    }
+  }
+
+  const chunks = chunkText(baseText, 260);
   const revisions: string[] = [];
-  let changelog: ChangelogEntry[] = [];
+  let changelog: ChangelogEntry[] = preChangelog.slice();
   for (let i = 0; i < chunks.length; i++) {
     if (onProgress) onProgress(i, chunks.length);
     const prompt = `FINDINGS AVAILABLE (apply only those relevant to this passage):
