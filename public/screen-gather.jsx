@@ -1,5 +1,5 @@
-/* Gather — research ingestion: connect sources, run a (simulated) gather,
-   curate results, and pipe them into Weave. */
+/* Gather — research ingestion: connect sources, run live connectors (each writes
+   its own research brief), curate results, and pipe them into Weave. */
 
 function GToggle({ on, onChange }) {
   return (
@@ -37,10 +37,35 @@ function GatherItem({ item, onToggle }) {
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3, flexWrap: "wrap" }}>
           <span className="chip" style={{ gap: 5 }}><Icon name={k.icon} size={11} /> {k.label}</span>
           <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)" }}>{item.source}{item.author ? " · " + item.author : ""}{item.date ? " · " + item.date : ""}</span>
-          <span className="mono" style={{ fontSize: 9, padding: "1px 6px", borderRadius: 99, background: "var(--paper-sunk)", color: "var(--ink-3)", letterSpacing: "0.06em" }}>DEMO</span>
+          {item.demo && <span className="mono" style={{ fontSize: 9, padding: "1px 6px", borderRadius: 99, background: "var(--paper-sunk)", color: "var(--ink-3)", letterSpacing: "0.06em" }}>DEMO</span>}
+          {item.url && /^https?:/i.test(item.url) && <a href={item.url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="mono" style={{ fontSize: 10, color: "var(--accent-ink)" }}>open ↗</a>}
         </div>
         <div style={{ fontFamily: "var(--font-display)", fontSize: 17, lineHeight: 1.25, marginBottom: 3 }}>{item.title}</div>
         <div className="muted" style={{ fontSize: 14, lineHeight: 1.5 }}>{item.transcript ? <span><span className="eyebrow">Transcript · </span>{item.transcript}</span> : item.snippet}</div>
+      </div>
+    </div>
+  );
+}
+
+function SummaryCard({ summary, onSendToWeave, onDismiss }) {
+  const k = window.GATHER.SOURCE_KINDS[summary.kind] || { label: summary.kind, icon: "doc" };
+  const [open, setOpen] = React.useState(true);
+  const title = summary.label || (summary.query ? `${k.label}: ${summary.query}` : k.label);
+  return (
+    <div className="card" style={{ padding: "16px 18px", marginBottom: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 8, flexWrap: "wrap" }}>
+        <span className="chip" style={{ gap: 5 }}><Icon name={k.icon} size={11} /> {k.label}</span>
+        <span style={{ fontFamily: "var(--font-display)", fontSize: 16, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
+        <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)", marginLeft: "auto" }}>{summary.itemCount} source{summary.itemCount === 1 ? "" : "s"}</span>
+        <button className="icon-btn" style={{ width: 26, height: 26 }} onClick={() => setOpen((o) => !o)} title={open ? "Collapse" : "Expand"}><Icon name={open ? "chevD" : "chevR"} size={14} /></button>
+      </div>
+      {open && (
+        <div style={{ whiteSpace: "pre-wrap", fontSize: 14.5, lineHeight: 1.6, color: "var(--ink-2)", maxHeight: 340, overflowY: "auto", padding: "2px 2px 6px" }}>{summary.text}</div>
+      )}
+      <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+        <button className="btn sm" onClick={() => onSendToWeave(summary)}><Icon name="arrowR" size={13} /> Send to Weave</button>
+        <CopyButton text={summary.text} label="Copy" />
+        <button className="btn ghost sm" onClick={() => onDismiss(summary.id)} title="Dismiss this brief"><Icon name="trash" size={13} /></button>
       </div>
     </div>
   );
@@ -55,9 +80,26 @@ function Gather({ campaignId, refCtx, onGoWeave }) {
   const [err, setErr] = React.useState(null);
   const [filter, setFilter] = React.useState("all");
 
+  const summaries = window.Store.getGatherSummaries(campaignId);
   const shown = filter === "all" ? items : items.filter((i) => i.kind === filter);
   const selected = items.filter((i) => i.selected);
   const usedKinds = [...new Set(items.map((i) => i.kind))];
+
+  const summaryTitle = (s) => {
+    const k = window.GATHER.SOURCE_KINDS[s.kind] || { label: s.kind };
+    return (s.label || (s.query ? `${k.label}: ${s.query}` : `${k.label} brief`)).slice(0, 60);
+  };
+  const sendSummaryToWeave = (s) => {
+    window.Store.addWeaveSource(summaryTitle(s), s.text);
+    window.__weaveSourcesAdded = true;
+    window.Store.removeGatherSummary(s.id);
+  };
+  const sendAllSummariesToWeave = () => {
+    summaries.forEach((s) => window.Store.addWeaveSource(summaryTitle(s), s.text));
+    window.__weaveSourcesAdded = true;
+    summaries.forEach((s) => window.Store.removeGatherSummary(s.id));
+    onGoWeave && onGoWeave();
+  };
 
   const run = async () => {
     setRunning(true); setErr(null); setProg(null);
@@ -82,9 +124,9 @@ function Gather({ campaignId, refCtx, onGoWeave }) {
         <p className="muted" style={{ fontSize: 16, marginTop: 12, maxWidth: "62ch" }}>
           Connect news feeds, web &amp; database searches, verified journal libraries, X trends, and YouTube transcripts. Run a gather, curate the results, and send the keepers straight into Weave.
         </p>
-        <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 14px", borderRadius: "var(--radius)", background: "var(--paper-sunk)", marginTop: 16, fontSize: 13, color: "var(--ink-2)", maxWidth: "70ch" }}>
-          <Icon name="warn" size={15} style={{ color: "var(--sev-consider)", flexShrink: 0 }} />
-          <span>Live fetching needs server-side connectors (keys + CORS), so results here are clearly-labeled <strong>demo</strong> seeds. The real connectors ship in the backend package.</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 14px", borderRadius: "var(--radius)", background: "var(--paper-sunk)", marginTop: 16, fontSize: 13, color: "var(--ink-2)", maxWidth: "74ch" }}>
+          <Icon name="sparkle" size={15} style={{ color: "var(--accent-ink)", flexShrink: 0 }} />
+          <span>Each enabled source fetches live results, then writes its own research brief. Send any brief — or individual results — to Weave. <strong>RSS, journals, scrape &amp; YouTube</strong> need no key; <strong>web search</strong> needs a key configured.</span>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "400px 1fr", gap: isMobile ? 18 : 32, alignItems: "start", marginTop: isMobile ? 18 : 28 }}>
@@ -111,6 +153,19 @@ function Gather({ campaignId, refCtx, onGoWeave }) {
 
           {/* results */}
           <div>
+            {/* per-source research briefs */}
+            {summaries.length > 0 && (
+              <div style={{ marginBottom: 22 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+                  <div className="eyebrow" style={{ marginRight: "auto" }}><Icon name="sparkle" size={12} style={{ marginRight: 5 }} />{summaries.length} research brief{summaries.length === 1 ? "" : "s"}</div>
+                  <button className="btn sm" onClick={sendAllSummariesToWeave}><Icon name="arrowR" size={13} /> Send all to Weave</button>
+                </div>
+                {summaries.map((s) => (
+                  <SummaryCard key={s.id} summary={s} onSendToWeave={sendSummaryToWeave} onDismiss={(id) => window.Store.removeGatherSummary(id)} />
+                ))}
+              </div>
+            )}
+
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
               <div className="eyebrow" style={{ marginRight: "auto" }}>{items.length} gathered{selected.length ? ` · ${selected.length} selected` : ""}</div>
               {items.length > 0 && <>

@@ -114,6 +114,10 @@ Return ONLY JSON: {"items":[{"title":"…","source":"<generic publication/source
 
     refreshGatherItems(campaignId, items);
 
+    // Per-source research briefs (one independent LLM call each, server-side).
+    const summaries = (runRes && runRes.summaries) || [];
+    window.Store.setGatherSummaries(campaignId, summaries);
+
     if (onProgress) onProgress({ done: true });
     return items;
   }

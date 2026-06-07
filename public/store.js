@@ -50,6 +50,7 @@
     media: [],
     gatherSources: [],
     gatherItems: [],
+    gatherSummaries: [], // per-source research briefs from the last run (cache-only)
     pieces: [],
     activePieceId: null,
     theme: "light",
@@ -363,6 +364,19 @@
       state.gatherItems = state.gatherItems.filter((i) => i.campaignId !== cid);
       emit();
       toRemove.forEach((i) => bg(apiSend("DELETE", "/gather/items?id=" + encodeURIComponent(i.id)), "DELETE /gather/items"));
+    },
+    // Per-source research summaries (cache-only; produced by a gather run, sent to Weave).
+    getGatherSummaries(cid) { if (!Array.isArray(state.gatherSummaries)) state.gatherSummaries = []; return state.gatherSummaries.filter((s) => s.campaignId === cid); },
+    setGatherSummaries(cid, arr) {
+      if (!Array.isArray(state.gatherSummaries)) state.gatherSummaries = [];
+      const made = (arr || []).map((o) => Object.assign({ id: uid(), campaignId: cid, at: now() }, o));
+      state.gatherSummaries = state.gatherSummaries.filter((s) => s.campaignId !== cid).concat(made);
+      emit();
+      return made;
+    },
+    removeGatherSummary(id) {
+      state.gatherSummaries = (state.gatherSummaries || []).filter((s) => s.id !== id);
+      emit();
     },
 
     /* ---- Pieces ---- */
