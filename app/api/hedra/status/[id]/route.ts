@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { requireUser } from "@/lib/auth";
 import { db, mediaJobs } from "@/lib/db";
 import { getGenerationStatus, getAssetUrls } from "@/lib/hedra";
+import { persistRemoteImage } from "@/lib/storage";
 import { toErrorResponse } from "@/lib/errors";
 
 // GET /api/hedra/status/[id]
@@ -40,6 +41,19 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
         dl = dl ?? a.url;
       } catch {
         /* asset lookup is best-effort; keep nulls */
+      }
+    }
+
+    // Hedra's image URLs are signed CDN links that expire ~1h after issue, so a
+    // stored URL goes 403 (broken image) before long. Download the rendered
+    // image once and persist a permanent copy in our public bucket. Best-effort:
+    // on any failure we keep the signed URL. (Videos still use the signed URL.)
+    if (terminal && s.status === "completed" && job.type === "image" && outUrl) {
+      const permanent = await persistRemoteImage(outUrl, job.id);
+      if (permanent) {
+        outUrl = permanent;
+        dl = permanent;
+        thumb = permanent;
       }
     }
 

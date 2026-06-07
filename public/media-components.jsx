@@ -24,7 +24,27 @@ function AspectBox({ aspect, children, style }) {
 }
 
 function ImagePreview({ media }) {
-  return <AspectBox aspect={media.aspect}><img src={media.outputUrl} alt={media.prompt || ""} style={{ width: "100%", height: "100%", objectFit: "cover" }} /></AspectBox>;
+  const [broken, setBroken] = React.useState(false);
+  React.useEffect(() => { setBroken(false); }, [media.outputUrl]);
+  return (
+    <AspectBox aspect={media.aspect}>
+      {broken || !media.outputUrl ? (
+        <div style={{
+          width: "100%", height: "100%", display: "flex", flexDirection: "column",
+          alignItems: "center", justifyContent: "center", gap: 8, padding: 16,
+          textAlign: "center", color: "var(--ink-3)", background: "var(--paper-sunk)",
+        }}>
+          <Icon name="image" size={22} />
+          <span className="mono" style={{ fontSize: 11, letterSpacing: "0.04em" }}>Image unavailable</span>
+        </div>
+      ) : (
+        // alt="" on purpose: a broken <img> would otherwise render the full prompt
+        // as a wall of text. The onError fallback shows a compact placeholder.
+        <img src={media.outputUrl} alt="" onError={() => setBroken(true)}
+          style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+      )}
+    </AspectBox>
+  );
 }
 
 function Waveform({ active }) {

@@ -13,26 +13,71 @@ export function storageConfigured(): boolean {
   return !!(supaUrl() && supaKey());
 }
 
-/** Upload MP3 bytes to the public "audio" bucket; returns the public URL. */
-export async function uploadPublicAudio(bytes: Buffer | Uint8Array, name: string): Promise<string> {
+// Everything is stored in the one public bucket ("audio"); the prefix keeps
+// kinds tidy (voice/, image/). The bucket name is just an id.
+const BUCKET = "audio";
+
+/** True if a URL already points at our own public storage (so we don't re-upload). */
+export function isStoredUrl(url: string | null | undefined): boolean {
+  return !!url && url.includes(`/storage/v1/object/public/${BUCKET}/`);
+}
+
+/**
+ * Upload arbitrary bytes to the public bucket and return a stable public URL.
+ * Used for any generated media we must keep past the provider's short-lived,
+ * signed URLs (audio MP3s, and Hedra images whose signed CDN URLs expire ~1h).
+ */
+export async function uploadPublicFile(
+  bytes: Buffer | Uint8Array,
+  name: string,
+  contentType: string,
+  prefix = "file",
+): Promise<string> {
   const base = supaUrl();
   const key = supaKey();
   if (!base || !key) throw new Error("Supabase storage is not configured.");
-  const safe = (name || "audio.mp3").replace(/[^a-zA-Z0-9._-]/g, "-");
-  const path = `voice/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safe}`;
-  const res = await fetch(`${base}/storage/v1/object/audio/${path}`, {
+  const ct = contentType || "application/octet-stream";
+  const safe = (name || "file").replace(/[^a-zA-Z0-9._-]/g, "-");
+  const path = `${prefix}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safe}`;
+  const res = await fetch(`${base}/storage/v1/object/${BUCKET}/${path}`, {
     method: "POST",
     headers: {
       apikey: key,
       authorization: `Bearer ${key}`,
-      "content-type": "audio/mpeg",
+      "content-type": ct,
       "x-upsert": "true",
     },
-    body: new Blob([new Uint8Array(bytes)], { type: "audio/mpeg" }),
+    body: new Blob([new Uint8Array(bytes)], { type: ct }),
   });
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
-    throw new Error(`Audio upload failed (${res.status}): ${detail.slice(0, 160)}`);
+    throw new Error(`Upload failed (${res.status}): ${detail.slice(0, 160)}`);
   }
-  return `${base}/storage/v1/object/public/audio/${path}`;
+  return `${base}/storage/v1/object/public/${BUCKET}/${path}`;
+}
+
+/** Upload MP3 bytes to the public bucket; returns the public URL. */
+export async function uploadPublicAudio(bytes: Buffer | Uint8Array, name: string): Promise<string> {
+  return uploadPublicFile(bytes, name || "audio.mp3", "audio/mpeg", "voice");
+}
+
+/**
+ * Fetch a (possibly short-lived, signed) image URL and persist a permanent copy
+ * in our public bucket. Returns the stable URL, or null if anything fails (the
+ * caller keeps the original signed URL as a fallback).
+ */
+export async function persistRemoteImage(srcUrl: string, baseName: string): Promise<string | null> {
+  try {
+    if (!srcUrl || isStoredUrl(srcUrl) || !storageConfigured()) return null;
+    const r = await fetch(srcUrl);
+    if (!r.ok) return null;
+    const ct = r.headers.get("content-type") || "image/png";
+    if (!/^image\//i.test(ct)) return null;
+    const buf = Buffer.from(await r.arrayBuffer());
+    if (!buf.length) return null;
+    const ext = /webp/i.test(ct) ? "webp" : /jpe?g/i.test(ct) ? "jpg" : /gif/i.test(ct) ? "gif" : "png";
+    return await uploadPublicFile(buf, `${baseName}.${ext}`, ct, "image");
+  } catch {
+    return null;
+  }
 }
