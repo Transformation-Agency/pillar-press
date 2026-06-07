@@ -15,6 +15,11 @@ export const gatherSources = pgTable(
     enabled: boolean("enabled").notNull().default(true),
     lastRun: timestamp("last_run", { withTimezone: true }),
     lastCount: integer("last_count"),
+    // Latest per-source research brief (one current brief per source), persisted
+    // so it survives reloads. Cleared when the user dismisses or sends it to Weave.
+    summary: text("summary"),
+    summaryAt: timestamp("summary_at", { withTimezone: true }),
+    summaryItemCount: integer("summary_item_count"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({ byCampaign: index("gather_sources_campaign_idx").on(t.campaignId, t.userId) }),

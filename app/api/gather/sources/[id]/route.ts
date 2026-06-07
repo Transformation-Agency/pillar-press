@@ -24,9 +24,14 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         .limit(1);
       return NextResponse.json({ source: row ?? null });
     }
+    // Clearing the brief (summary: null) also clears its timestamp/count.
+    const set =
+      "summary" in patch && patch.summary === null
+        ? { ...patch, summaryAt: null, summaryItemCount: null }
+        : patch;
     const [row] = await db
       .update(gatherSources)
-      .set(patch)
+      .set(set)
       .where(and(eq(gatherSources.id, id), eq(gatherSources.userId, user.id)))
       .returning();
     if (!row) return NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });

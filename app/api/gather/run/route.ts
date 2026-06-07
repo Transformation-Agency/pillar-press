@@ -90,6 +90,13 @@ export async function POST(req: Request) {
               items: group,
               refContext,
             });
+            // Persist the brief on the source so it survives reloads.
+            if (text) {
+              await db
+                .update(gatherSources)
+                .set({ summary: text, summaryAt: new Date(), summaryItemCount: group.length })
+                .where(eq(gatherSources.id, s.id));
+            }
             return { sourceId: s.id, kind: s.kind, label: s.label ?? null, query: s.config ?? "", itemCount: group.length, text };
           }),
         )

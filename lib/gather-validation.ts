@@ -29,6 +29,8 @@ export const updateSourceSchema = z.object({
   config: z.string().trim().max(500).optional(),
   label: z.string().trim().max(120).optional(),
   enabled: z.boolean().optional(),
+  // Clearing the persisted brief (dismiss / sent to Weave). Pass null to clear.
+  summary: z.string().nullable().optional(),
 });
 
 export const runSchema = z.object({ campaignId: z.string().min(1) });

@@ -118,6 +118,17 @@
       const sources = (srcRes && srcRes.sources) || [];
       state.gatherSources = (state.gatherSources || []).filter((s) => s.campaignId !== id).concat(sources);
 
+      // Rebuild this campaign's research briefs from the persisted source rows.
+      const hydratedSummaries = sources
+        .filter((s) => s.summary)
+        .map((s) => ({
+          id: uid(), campaignId: id, sourceId: s.id, kind: s.kind,
+          label: s.label || null, query: s.config || "",
+          itemCount: s.summaryItemCount || 0, text: s.summary,
+          at: s.summaryAt ? new Date(s.summaryAt).getTime() : now(),
+        }));
+      state.gatherSummaries = (state.gatherSummaries || []).filter((s) => s.campaignId !== id).concat(hydratedSummaries);
+
       const items = (itemRes && itemRes.items) || [];
       state.gatherItems = (state.gatherItems || []).filter((i) => i.campaignId !== id).concat(items);
 
@@ -365,18 +376,26 @@
       emit();
       toRemove.forEach((i) => bg(apiSend("DELETE", "/gather/items?id=" + encodeURIComponent(i.id)), "DELETE /gather/items"));
     },
-    // Per-source research summaries (cache-only; produced by a gather run, sent to Weave).
+    // Per-source research briefs (persisted on the source row server-side).
     getGatherSummaries(cid) { if (!Array.isArray(state.gatherSummaries)) state.gatherSummaries = []; return state.gatherSummaries.filter((s) => s.campaignId === cid); },
+    // Merge a run's fresh briefs by sourceId, preserving briefs for sources not
+    // in this run (server already persisted these on their source rows).
     setGatherSummaries(cid, arr) {
       if (!Array.isArray(state.gatherSummaries)) state.gatherSummaries = [];
       const made = (arr || []).map((o) => Object.assign({ id: uid(), campaignId: cid, at: now() }, o));
-      state.gatherSummaries = state.gatherSummaries.filter((s) => s.campaignId !== cid).concat(made);
+      const freshSourceIds = new Set(made.map((s) => s.sourceId));
+      state.gatherSummaries = state.gatherSummaries
+        .filter((s) => !(s.campaignId === cid && freshSourceIds.has(s.sourceId)))
+        .concat(made);
       emit();
       return made;
     },
     removeGatherSummary(id) {
-      state.gatherSummaries = (state.gatherSummaries || []).filter((s) => s.id !== id);
+      const s = (state.gatherSummaries || []).find((x) => x.id === id);
+      state.gatherSummaries = (state.gatherSummaries || []).filter((x) => x.id !== id);
       emit();
+      // Clear the persisted brief on its source row so it doesn't rehydrate.
+      if (s && s.sourceId) bg(apiSend("PATCH", "/gather/sources/" + s.sourceId, { summary: null }), "PATCH /gather/sources/:id (clear summary)");
     },
 
     /* ---- Pieces ---- */
