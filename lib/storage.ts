@@ -62,22 +62,42 @@ export async function uploadPublicAudio(bytes: Buffer | Uint8Array, name: string
 }
 
 /**
- * Fetch a (possibly short-lived, signed) image URL and persist a permanent copy
- * in our public bucket. Returns the stable URL, or null if anything fails (the
- * caller keeps the original signed URL as a fallback).
+ * Fetch a (possibly short-lived, signed) media URL and persist a permanent copy
+ * in our public bucket. `accept` guards the content-type ("image" or "video").
+ * Returns the stable URL, or null if anything fails (the caller keeps the
+ * original signed URL as a fallback).
  */
-export async function persistRemoteImage(srcUrl: string, baseName: string): Promise<string | null> {
+async function persistRemote(
+  srcUrl: string,
+  baseName: string,
+  accept: "image" | "video",
+): Promise<string | null> {
   try {
     if (!srcUrl || isStoredUrl(srcUrl) || !storageConfigured()) return null;
     const r = await fetch(srcUrl);
     if (!r.ok) return null;
-    const ct = r.headers.get("content-type") || "image/png";
-    if (!/^image\//i.test(ct)) return null;
+    const ct = r.headers.get("content-type") || (accept === "video" ? "video/mp4" : "image/png");
+    if (!new RegExp(`^${accept}/`, "i").test(ct)) return null;
     const buf = Buffer.from(await r.arrayBuffer());
     if (!buf.length) return null;
-    const ext = /webp/i.test(ct) ? "webp" : /jpe?g/i.test(ct) ? "jpg" : /gif/i.test(ct) ? "gif" : "png";
-    return await uploadPublicFile(buf, `${baseName}.${ext}`, ct, "image");
+    let ext: string;
+    if (accept === "video") {
+      ext = /webm/i.test(ct) ? "webm" : /quicktime|mov/i.test(ct) ? "mov" : "mp4";
+    } else {
+      ext = /webp/i.test(ct) ? "webp" : /jpe?g/i.test(ct) ? "jpg" : /gif/i.test(ct) ? "gif" : "png";
+    }
+    return await uploadPublicFile(buf, `${baseName}.${ext}`, ct, accept);
   } catch {
     return null;
   }
+}
+
+/** Persist a signed image URL to permanent storage (or null on failure). */
+export function persistRemoteImage(srcUrl: string, baseName: string): Promise<string | null> {
+  return persistRemote(srcUrl, baseName, "image");
+}
+
+/** Persist a signed video URL to permanent storage (or null on failure). */
+export function persistRemoteVideo(srcUrl: string, baseName: string): Promise<string | null> {
+  return persistRemote(srcUrl, baseName, "video");
 }
