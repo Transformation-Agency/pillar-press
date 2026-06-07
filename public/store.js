@@ -365,6 +365,21 @@
       if (i) { Object.assign(i, patch); emit(); }
       return i;
     },
+    // Create a gathered item directly (uploaded document) — persisted server-side.
+    addUploadedItem(obj) {
+      if (!Array.isArray(state.gatherItems)) state.gatherItems = [];
+      const id = uid();
+      const cid = state.activeCampaignId;
+      const it = Object.assign({ id, campaignId: cid, kind: "upload", createdAt: now(), selected: false }, obj);
+      state.gatherItems.unshift(it);
+      emit();
+      bg(apiSend("POST", "/gather/items", {
+        id, campaignId: cid, kind: it.kind, title: it.title,
+        source: it.source, author: it.author || null, url: it.url || null,
+        snippet: it.snippet, transcript: it.transcript || null,
+      }), "POST /gather/items");
+      return it;
+    },
     removeGatherItem(id) {
       state.gatherItems = state.gatherItems.filter((x) => x.id !== id);
       emit();

@@ -41,7 +41,7 @@ function GatherItem({ item, onToggle }) {
           {item.url && /^https?:/i.test(item.url) && <a href={item.url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="mono" style={{ fontSize: 10, color: "var(--accent-ink)" }}>open ↗</a>}
         </div>
         <div style={{ fontFamily: "var(--font-display)", fontSize: 17, lineHeight: 1.25, marginBottom: 3 }}>{item.title}</div>
-        <div className="muted" style={{ fontSize: 14, lineHeight: 1.5 }}>{item.transcript ? <span><span className="eyebrow">Transcript · </span>{item.transcript}</span> : item.snippet}</div>
+        <div className="muted" style={{ fontSize: 14, lineHeight: 1.5 }}>{item.transcript ? <span>{item.kind !== "upload" && <span className="eyebrow">Transcript · </span>}{item.transcript.slice(0, 300)}{item.transcript.length > 300 ? "…" : ""}</span> : item.snippet}</div>
       </div>
     </div>
   );
@@ -79,6 +79,8 @@ function Gather({ campaignId, refCtx, onGoWeave }) {
   const [prog, setProg] = React.useState(null);
   const [err, setErr] = React.useState(null);
   const [filter, setFilter] = React.useState("all");
+  const [uploading, setUploading] = React.useState(false);
+  const fileRef = React.useRef(null);
 
   const summaries = window.Store.getGatherSummaries(campaignId);
   const shown = filter === "all" ? items : items.filter((i) => i.kind === filter);
@@ -106,6 +108,25 @@ function Gather({ campaignId, refCtx, onGoWeave }) {
     try { await window.GATHER.runGather(sources, refCtx, (p) => setProg(p)); }
     catch (e) { setErr(e.message || "Gather failed."); }
     setRunning(false); setProg(null);
+  };
+
+  const uploadDocs = async (e) => {
+    const files = [...e.target.files];
+    e.target.value = "";
+    if (!files.length) return;
+    setUploading(true); setErr(null);
+    for (const f of files) {
+      try {
+        const text = await window.extractFileText(f);
+        window.Store.addUploadedItem({
+          title: f.name.replace(/\.[^.]+$/, ""),
+          source: "Uploaded · " + f.name,
+          snippet: text.slice(0, 400),
+          transcript: text,
+        });
+      } catch (err) { setErr((err && err.message) || ("Couldn't read " + f.name + ".")); }
+    }
+    setUploading(false);
   };
 
   const sendToWeave = () => {
@@ -146,6 +167,15 @@ function Gather({ campaignId, refCtx, onGoWeave }) {
             </div>
             <button className="btn primary" style={{ width: "100%", marginTop: 16 }} disabled={running || !sources.some((s) => s.enabled && (s.config || "").trim())} onClick={run}>
               {running ? <><Spinner size={15} /> Gathering…</> : <><Icon name="globe" size={15} /> Gather now</>}
+            </button>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "12px 0 2px" }}>
+              <div style={{ flex: 1, height: 1, background: "var(--hair)" }} />
+              <span className="eyebrow" style={{ fontSize: 10 }}>or</span>
+              <div style={{ flex: 1, height: 1, background: "var(--hair)" }} />
+            </div>
+            <input ref={fileRef} type="file" accept={window.UPLOAD_ACCEPT} multiple style={{ display: "none" }} onChange={uploadDocs} />
+            <button className="btn ghost" style={{ width: "100%" }} disabled={uploading} onClick={() => fileRef.current.click()} title="Upload PDFs, images, .docx, or text files as research items">
+              {uploading ? <><Spinner size={14} /> Reading…</> : <><Icon name="doc" size={14} /> Upload documents</>}
             </button>
             {progLabel && <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, fontSize: 13, color: "var(--accent-ink)" }}><Spinner size={14} /> {progLabel}</div>}
             {err && <p style={{ color: "var(--sev-must)", fontSize: 13.5, marginTop: 12 }}>{err}</p>}

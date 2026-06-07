@@ -330,7 +330,23 @@ function Hint({ icon, text }) {
 function SourcePack({ piece, refCtx, onDraft, busy, setBusy, setErr }) {
   const [notes, setNotes] = React.useState("");
   const [prog, setProg] = React.useState(null);
+  const [uploading, setUploading] = React.useState(false);
+  const fileRef = React.useRef(null);
   const weave = piece.weave;
+
+  const upload = async (e) => {
+    const files = [...e.target.files];
+    e.target.value = "";
+    if (!files.length) return;
+    setUploading(true); setErr(null);
+    for (const f of files) {
+      try {
+        const text = await window.extractFileText(f);
+        setNotes((prev) => (prev.trim() ? prev.trim() + "\n\n" : "") + text);
+      } catch (err) { setErr((err && err.message) || ("Couldn't read " + f.name + ".")); }
+    }
+    setUploading(false);
+  };
 
   const run = async () => {
     const sources = notesToSources(notes);
@@ -352,9 +368,15 @@ function SourcePack({ piece, refCtx, onDraft, busy, setBusy, setErr }) {
 
   return (
     <div>
-      <p className="muted" style={{ fontSize: 13.5, marginTop: 0, marginBottom: 10 }}>
-        Paste research, notes, excerpts, or an outline. Separate distinct sources with a blank line — weave finds the thread and drafts the chapter.
-      </p>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 10 }}>
+        <p className="muted" style={{ fontSize: 13.5, margin: 0 }}>
+          Paste or upload research, notes, excerpts, or an outline. Separate distinct sources with a blank line — weave finds the thread and drafts the chapter.
+        </p>
+        <input ref={fileRef} type="file" accept={window.UPLOAD_ACCEPT} multiple style={{ display: "none" }} onChange={upload} />
+        <button className="btn ghost sm" style={{ flexShrink: 0 }} disabled={busy === "weave" || uploading} onClick={() => fileRef.current.click()} title="Upload PDFs, images, .docx, or text files">
+          {uploading ? <Spinner size={13} /> : <Icon name="doc" size={13} />} Upload
+        </button>
+      </div>
       <textarea className="field" value={notes} onChange={(e) => setNotes(e.target.value)} disabled={busy === "weave"}
         placeholder={"Paste source material here…\n\nA second source, separated by a blank line…"}
         style={{ minHeight: 200, fontSize: 14, lineHeight: 1.6, resize: "vertical", background: "var(--paper-2)" }} />
@@ -418,6 +440,8 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
   const [title, setTitle] = React.useState("");
   const [draft, setDraft] = React.useState("");
   const [fullRevise, setFullRevise] = React.useState(false); // full = restructure + polish
+  const [uploadingDraft, setUploadingDraft] = React.useState(false);
+  const draftFileRef = React.useRef(null);
 
   // Drop a stale book selection if the campaign no longer exists; load the
   // book's pieces/references on demand (without making it the active campaign).
@@ -473,6 +497,21 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
 
   const selectChapter = (id) => { saveNow(); setSelectedId(id); setMobilePane("editor"); };
   const addChapter = (t) => { if (!bookId) return; const p = window.Store.createPiece(t, bookId); setSelectedId(p.id); setPanel("sources"); setMobilePane("editor"); };
+
+  // Load a chapter draft from an uploaded file (PDF, image, .docx, or text).
+  const uploadDraft = async (e) => {
+    const f = e.target.files[0];
+    e.target.value = "";
+    if (!f || !piece) return;
+    setUploadingDraft(true); setErr(null);
+    try {
+      const text = await window.extractFileText(f);
+      const merged = draft.trim() ? draft.trimEnd() + "\n\n" + text : text;
+      setDraft(merged);
+      window.Store.updatePiece(piece.id, { original: merged });
+    } catch (err) { setErr((err && err.message) || ("Couldn't read " + f.name + ".")); }
+    setUploadingDraft(false);
+  };
 
   const runReview = async () => {
     if (!selectedId || !(draft || "").trim()) { setErr("Add some chapter text first."); return; }
@@ -645,6 +684,8 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
               </div>
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                 <button className="btn sm" onClick={saveNow} disabled={!dirty}><Icon name="check" size={13} /> Save</button>
+                <input ref={draftFileRef} type="file" accept={window.UPLOAD_ACCEPT} style={{ display: "none" }} onChange={uploadDraft} />
+                <button className="btn sm" onClick={() => draftFileRef.current.click()} disabled={!!busy || uploadingDraft} title="Load this chapter from a PDF, image, .docx, or text file">{uploadingDraft ? <Spinner size={13} /> : <Icon name="doc" size={13} />} Upload</button>
                 <button className="btn sm" onClick={runReview} disabled={!!busy}>{busy === "review" ? <Spinner size={13} /> : <Icon name="flag" size={13} />} Review</button>
                 <button className="btn sm" onClick={runRevise} disabled={!!busy || !piece.packet}>{busy === "revise" ? <Spinner size={13} /> : <Icon name="play" size={13} />} Revise</button>
                 <label title="Full revision: restructure (strategy, audience, rigor, structure) then polish (clarity, tone, inoculation). Off = light pass only."

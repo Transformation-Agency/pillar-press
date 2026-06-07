@@ -18,8 +18,11 @@
     journal:  { id: "journal",  label: "Journal library", icon: "book",  field: "query", placeholder: "topic, author, or DOI",                   hint: "Verified academic libraries (Crossref / PubMed / arXiv).", noun: "query" },
     x:        { id: "x",        label: "X trending",      icon: "xLogo", field: "query", placeholder: "#topic or @handle",                       hint: "A trending topic or handle on X.", noun: "topic" },
     youtube:  { id: "youtube",  label: "YouTube transcript", icon: "film", field: "url", placeholder: "https://youtube.com/watch?v=…",          hint: "A video to transcribe.", noun: "video" },
+    // Not a connector you add — used to render uploaded-document items.
+    upload:   { id: "upload",   label: "Uploaded file",   icon: "doc",   field: "file",  placeholder: "",                                       hint: "An uploaded document.", noun: "file" },
   };
 
+  // Connectors offered in the "add source" picker (upload is excluded — it's an item kind).
   const ORDER = ["rss", "web", "journal", "database", "x", "youtube"];
 
   function kindList() { return ORDER.map((k) => SOURCE_KINDS[k]); }
@@ -97,11 +100,14 @@ Return ONLY JSON: {"items":[{"title":"…","source":"<generic publication/source
     const runRes = await apiPost("/gather/run", { campaignId });
     const perSource = (runRes && runRes.perSource) || null;
 
-    // Refresh from server truth so the UI shows the persisted items.
-    let items = (runRes && runRes.items) || null;
-    if (!Array.isArray(items)) {
+    // Refresh from server truth (the FULL list — fetched results, prior items,
+    // and uploaded documents) so nothing drops out of the view after a run.
+    let items;
+    try {
       const itemRes = await apiGet("/gather/items?campaignId=" + encodeURIComponent(campaignId));
       items = (itemRes && itemRes.items) || [];
+    } catch (e) {
+      items = (runRes && runRes.items) || [];
     }
 
     // best-effort: stamp lastRun / lastCount on each enabled source

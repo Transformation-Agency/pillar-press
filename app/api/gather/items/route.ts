@@ -3,7 +3,29 @@ import { and, eq, desc } from "drizzle-orm";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { gatherItems } from "@/db/gather-schema";
+import { createItemSchema } from "@/lib/gather-validation";
 import { toErrorResponse } from "@/lib/errors";
+
+// POST /api/gather/items  — create an item directly (uploaded documents).
+export async function POST(req: Request) {
+  try {
+    const user = await requireUser();
+    const body = createItemSchema.parse(await req.json());
+    const [row] = await db.insert(gatherItems).values({
+      ...(body.id ? { id: body.id } : {}),
+      userId: user.id,
+      campaignId: body.campaignId,
+      kind: body.kind,
+      title: body.title,
+      source: body.source ?? null,
+      author: body.author ?? null,
+      url: body.url ?? null,
+      snippet: body.snippet ?? null,
+      transcript: body.transcript ?? null,
+    }).returning();
+    return NextResponse.json({ item: row }, { status: 201 });
+  } catch (err) { return toErrorResponse(err); }
+}
 
 // GET /api/gather/items?campaignId=  — list the user's gathered items
 export async function GET(req: Request) {

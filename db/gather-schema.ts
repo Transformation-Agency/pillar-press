@@ -1,7 +1,8 @@
 /** Drizzle schema for Gather: sources + persisted items. Follows the media_jobs style. */
 import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, index } from "drizzle-orm/pg-core";
 
-export const gatherKind = ["rss", "web", "database", "journal", "x", "youtube"] as const;
+// "upload" = a document the user uploaded (not fetched by a connector).
+export const gatherKind = ["rss", "web", "database", "journal", "x", "youtube", "upload"] as const;
 
 export const gatherSources = pgTable(
   "gather_sources",

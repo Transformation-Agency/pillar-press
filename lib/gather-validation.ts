@@ -34,3 +34,18 @@ export const updateSourceSchema = z.object({
 });
 
 export const runSchema = z.object({ campaignId: z.string().min(1) });
+
+// Items can also be uploaded documents (kind "upload"), not just fetched.
+export const itemKindSchema = z.enum(["rss", "web", "database", "journal", "x", "youtube", "upload"]);
+
+export const createItemSchema = z.object({
+  id: z.string().uuid().optional(),
+  campaignId: z.string().min(1),
+  kind: itemKindSchema,
+  title: z.string().trim().min(1).max(300),
+  source: z.string().trim().max(200).optional(),
+  author: z.string().trim().max(200).nullable().optional(),
+  url: z.string().trim().max(2000).nullable().optional(),
+  snippet: z.string().max(2000).optional(),
+  transcript: z.string().nullable().optional(),
+});

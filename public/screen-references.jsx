@@ -87,6 +87,26 @@ function RefsAIModal({ campaignId, onClose, onApply }) {
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState(null);
   const [result, setResult] = React.useState(null); // { doc, summary }
+  const [uploading, setUploading] = React.useState(false);
+  const [attached, setAttached] = React.useState([]); // file names attached
+  const fileRef = React.useRef(null);
+
+  const attach = async (e) => {
+    const files = [...e.target.files];
+    e.target.value = "";
+    if (!files.length) return;
+    setUploading(true); setErr(null);
+    for (const f of files) {
+      try {
+        const text = await window.extractFileText(f);
+        setInstruction((prev) =>
+          (prev ? prev.trim() + "\n\n" : "") +
+          "Source material from \"" + f.name + "\":\n\"\"\"\n" + text.slice(0, 16000) + "\n\"\"\"");
+        setAttached((a) => [...a, f.name]);
+      } catch (err) { setErr((err && err.message) || ("Couldn't read " + f.name + ".")); }
+    }
+    setUploading(false);
+  };
 
   const generate = async () => {
     if (instruction.trim().length < 3) { setErr("Describe the change you want."); return; }
@@ -115,8 +135,17 @@ function RefsAIModal({ campaignId, onClose, onApply }) {
           Describe the change in plain language. AI revises the whole references document — you review a summary before anything is applied, and your wording is preserved where the change doesn't touch it.
         </p>
         <textarea className="field" value={instruction} onChange={(e) => setInstruction(e.target.value)} disabled={busy || !!result}
-          placeholder={"e.g. Add an audience for skeptical executives, and make the red lines more specific."}
+          placeholder={"e.g. Add an audience for skeptical executives, and make the red lines more specific. — or attach a brand doc / bio and say 'fold this in.'"}
           style={{ minHeight: 110, fontSize: 15, lineHeight: 1.55, resize: "vertical" }} />
+        {!result && (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
+            <input ref={fileRef} type="file" accept={window.UPLOAD_ACCEPT} multiple style={{ display: "none" }} onChange={attach} />
+            <button className="btn ghost sm" onClick={() => fileRef.current.click()} disabled={busy || uploading} title="Attach a PDF, image, .docx, or text file as source material">
+              {uploading ? <><Spinner size={13} /> Reading…</> : <><Icon name="doc" size={13} /> Attach document</>}
+            </button>
+            {attached.length > 0 && <span className="mono muted" style={{ fontSize: 11 }}>{attached.length} attached: {attached.join(", ").slice(0, 60)}</span>}
+          </div>
+        )}
         {err && <div style={{ color: "var(--sev-must)", fontSize: 13, marginTop: 8 }}>{err}</div>}
         {result && (
           <div className="card" style={{ background: "var(--paper-sunk)", padding: "12px 14px", marginTop: 12 }}>
