@@ -63,38 +63,46 @@ export async function POST(req: Request) {
     }
 
     // ---- per-source research summaries (one independent LLM call each) ----
-    // Summarize ALL items found this run (not just newly-saved), grouped by source.
-    const ref = await db.query.references.findFirst({ where: eq(references.campaignId, campaignId) });
-    const refContext = buildRefContext((ref?.doc as ReferencesDoc | undefined) ?? null);
+    // Non-fatal: a summary failure must never lose the fetched items.
+    let summaries: SourceSummary[] = [];
+    let _summaryError: string | undefined;
+    try {
+      // Summarize ALL items found this run (not just newly-saved), grouped by source.
+      const ref = await db.query.references.findFirst({ where: eq(references.campaignId, campaignId) });
+      const refContext = buildRefContext((ref?.doc as ReferencesDoc | undefined) ?? null);
 
-    const bySource = new Map<string, GatherItem[]>();
-    for (const it of items) {
-      const sid = it.sourceId ?? "_";
-      const arr = bySource.get(sid) ?? [];
-      arr.push(it);
-      bySource.set(sid, arr);
-    }
-    const sourcesWithItems = sources.filter((s) => (bySource.get(s.id)?.length ?? 0) > 0);
+      const bySource = new Map<string, GatherItem[]>();
+      for (const it of items) {
+        const sid = it.sourceId ?? "_";
+        const arr = bySource.get(sid) ?? [];
+        arr.push(it);
+        bySource.set(sid, arr);
+      }
+      const sourcesWithItems = sources.filter((s) => (bySource.get(s.id)?.length ?? 0) > 0);
 
-    const summaries: SourceSummary[] = (
-      await Promise.allSettled(
-        sourcesWithItems.map(async (s): Promise<SourceSummary> => {
-          const group = bySource.get(s.id) ?? [];
-          const text = await craftSourceSummary({
-            kindLabel: SOURCE_KIND_LABELS[s.kind] ?? s.kind,
-            label: s.label ?? undefined,
-            query: s.config ?? undefined,
-            items: group,
-            refContext,
-          });
-          return { sourceId: s.id, kind: s.kind, label: s.label ?? null, query: s.config ?? "", itemCount: group.length, text };
-        }),
+      summaries = (
+        await Promise.allSettled(
+          sourcesWithItems.map(async (s): Promise<SourceSummary> => {
+            const group = bySource.get(s.id) ?? [];
+            const text = await craftSourceSummary({
+              kindLabel: SOURCE_KIND_LABELS[s.kind] ?? s.kind,
+              label: s.label ?? undefined,
+              query: s.config ?? undefined,
+              items: group,
+              refContext,
+            });
+            return { sourceId: s.id, kind: s.kind, label: s.label ?? null, query: s.config ?? "", itemCount: group.length, text };
+          }),
+        )
       )
-    )
-      .filter((r): r is PromiseFulfilledResult<SourceSummary> => r.status === "fulfilled")
-      .map((r) => r.value)
-      .filter((s) => s.text);
+        .filter((r): r is PromiseFulfilledResult<SourceSummary> => r.status === "fulfilled")
+        .map((r) => r.value)
+        .filter((s) => s.text);
+    } catch (e) {
+      _summaryError = (e as Error)?.message ?? String(e);
+      console.error(JSON.stringify({ level: "error", msg: "gather summary block failed", detail: _summaryError }));
+    }
 
-    return NextResponse.json({ items: saved, found: items.length, saved: saved.length, perSource, summaries });
+    return NextResponse.json({ items: saved, found: items.length, saved: saved.length, perSource, summaries, _summaryError });
   } catch (err) { return toErrorResponse(err); }
 }
