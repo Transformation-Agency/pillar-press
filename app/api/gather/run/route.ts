@@ -65,7 +65,6 @@ export async function POST(req: Request) {
     // ---- per-source research summaries (one independent LLM call each) ----
     // Non-fatal: a summary failure must never lose the fetched items.
     let summaries: SourceSummary[] = [];
-    let _summaryError: string | undefined;
     try {
       // Summarize ALL items found this run (not just newly-saved), grouped by source.
       const ref = await db.query.references.findFirst({ where: eq(references.campaignId, campaignId) });
@@ -99,10 +98,9 @@ export async function POST(req: Request) {
         .map((r) => r.value)
         .filter((s) => s.text);
     } catch (e) {
-      _summaryError = (e as Error)?.message ?? String(e);
-      console.error(JSON.stringify({ level: "error", msg: "gather summary block failed", detail: _summaryError }));
+      console.error(JSON.stringify({ level: "error", msg: "gather summary block failed", detail: (e as Error)?.message ?? String(e) }));
     }
 
-    return NextResponse.json({ items: saved, found: items.length, saved: saved.length, perSource, summaries, _summaryError });
+    return NextResponse.json({ items: saved, found: items.length, saved: saved.length, perSource, summaries });
   } catch (err) { return toErrorResponse(err); }
 }
