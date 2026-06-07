@@ -4,6 +4,18 @@ function wordCount(t) { return (t || "").trim() ? (t.trim().split(/\s+/).length)
 
 function PieceRow({ piece, onOpen, onDelete }) {
   const [hover, setHover] = React.useState(false);
+  const [titling, setTitling] = React.useState(false);
+  const autoTitle = async (e) => {
+    e.stopPropagation();
+    setTitling(true);
+    try {
+      const r = await fetch("/api/pieces/" + piece.id + "/title", { method: "POST", headers: { Accept: "application/json" }, credentials: "same-origin" });
+      const d = await r.json().catch(() => null);
+      if (!r.ok) throw new Error((d && d.error) || "Couldn't auto-title.");
+      if (d && d.title) window.Store.updatePiece(piece.id, { title: d.title });
+    } catch (err) { window.alert((err && err.message) || "Couldn't auto-title."); }
+    setTitling(false);
+  };
   const snippet = (piece.original || "").trim().split("\n").find((l) => l.trim()) || "No draft yet — paste one to begin.";
   const hasPacket = !!piece.packet;
   const hasRev = !!piece.revision;
@@ -39,6 +51,10 @@ function PieceRow({ piece, onOpen, onDelete }) {
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
         <StatusChip status={piece.status} />
+        <button className="icon-btn" title="Auto-title from the draft" onClick={autoTitle} disabled={titling}
+          style={{ opacity: hover ? 1 : 0.55, transition: "opacity 0.15s" }}>
+          {titling ? <Spinner size={14} /> : <Icon name="sparkle" size={15} />}
+        </button>
         <button className="icon-btn" title="Delete piece"
           onClick={(e) => { e.stopPropagation(); if (confirm(`Delete "${piece.title}"? This can't be undone.`)) onDelete(piece.id); }}
           style={{ opacity: hover ? 1 : 0.55, transition: "opacity 0.15s" }}>
