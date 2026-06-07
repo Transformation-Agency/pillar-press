@@ -159,4 +159,22 @@ function useIsMobile(bp = 760) {
   return m;
 }
 
-Object.assign(window, { Icon, StatusChip, SeverityDot, SeverityTag, CopyButton, Spinner, Tabs, relTime, STATUS_VAR, useIsMobile });
+/* Read an uploaded file into research text. Text-like files are decoded in the
+   browser; PDFs, images, and .docx go to /api/extract (Claude / mammoth). */
+const UPLOAD_TEXT_EXT = ["txt", "md", "markdown", "csv", "tsv", "json", "log", "html", "htm", "xml", "yaml", "yml", "rtf"];
+async function extractFileText(file) {
+  const ext = (file.name.split(".").pop() || "").toLowerCase();
+  if (UPLOAD_TEXT_EXT.indexOf(ext) >= 0 || /^text\//.test(file.type || "")) {
+    try { return await file.text(); } catch (e) { /* fall through to server */ }
+  }
+  const fd = new FormData();
+  fd.append("file", file);
+  const r = await fetch("/api/extract", { method: "POST", body: fd, credentials: "same-origin" });
+  const d = await r.json().catch(() => null);
+  if (!r.ok) throw new Error((d && d.error) || ("Couldn't read " + file.name + "."));
+  return (d && d.text) || "";
+}
+// Broad accept list for the upload inputs.
+const UPLOAD_ACCEPT = ".txt,.md,.markdown,.csv,.tsv,.json,.log,.html,.htm,.xml,.yaml,.yml,.rtf,.pdf,.docx,.png,.jpg,.jpeg,.gif,.webp,text/*,application/pdf,image/*";
+
+Object.assign(window, { Icon, StatusChip, SeverityDot, SeverityTag, CopyButton, Spinner, Tabs, relTime, STATUS_VAR, useIsMobile, extractFileText, UPLOAD_ACCEPT });

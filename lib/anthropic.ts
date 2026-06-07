@@ -167,6 +167,28 @@ export async function complete(messages: AIMessage[], system?: string): Promise<
   return raw(messages, system);
 }
 
+/**
+ * Single multimodal turn: `content` is an array of Anthropic content blocks
+ * (text + image/document), so callers can send a PDF or image to the model.
+ * Returns the assembled text. SERVER ONLY.
+ */
+export async function completeBlocks(content: unknown, system?: string): Promise<string> {
+  let resp;
+  try {
+    const stream = client().messages.stream({
+      model: MODEL,
+      max_tokens: MAX_TOKENS,
+      ...(system ? { system } : {}),
+      messages: [{ role: "user", content: content as Anthropic.MessageParam["content"] }],
+    });
+    resp = await stream.finalMessage();
+  } catch (err: unknown) {
+    const e = err as { status?: number; message?: string };
+    throw new AnthropicError(e?.status ?? 502, "anthropic", e?.message ?? "Anthropic request failed.", err);
+  }
+  return resp.content.map((block) => (block.type === "text" ? block.text : "")).join("");
+}
+
 // Call expecting JSON. Falls back to truncation repair, then a repair round-trip.
 export async function json<T = unknown>(prompt: string, { system }: AIOptions = {}): Promise<T> {
   const messages: AIMessage[] = [{ role: "user", content: prompt }];

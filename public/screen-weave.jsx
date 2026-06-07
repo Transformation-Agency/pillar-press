@@ -135,6 +135,7 @@ function Weave({ weave, refCtx, onOpenPiece }) {
   const [err, setErr] = React.useState(null);
   const [view, setView] = React.useState(result ? "result" : "intake");
   const fileRef = React.useRef(null);
+  const [uploading, setUploading] = React.useState(false);
   const isMobile = window.useIsMobile();
 
   React.useEffect(() => { if (result && !running) setView("result"); }, [result]);
@@ -142,14 +143,23 @@ function Weave({ weave, refCtx, onOpenPiece }) {
 
   const usableCount = sources.filter((s) => (s.text || "").trim().length > 20).length;
 
-  const upload = (e) => {
+  const upload = async (e) => {
     const files = [...e.target.files];
-    files.forEach((f) => {
-      const r = new FileReader();
-      r.onload = () => window.Store.addWeaveSource(f.name.replace(/\.(txt|md|markdown)$/i, ""), r.result);
-      r.readAsText(f);
-    });
     e.target.value = "";
+    if (!files.length) return;
+    setUploading(true); setErr(null);
+    for (const f of files) {
+      const base = f.name.replace(/\.[^.]+$/, "");
+      const src = window.Store.addWeaveSource(base, "Reading " + f.name + "…");
+      try {
+        const text = await window.extractFileText(f);
+        window.Store.updateWeaveSource(src.id, { text });
+      } catch (err) {
+        window.Store.updateWeaveSource(src.id, { text: "" });
+        setErr((err && err.message) || ("Couldn't read " + f.name + "."));
+      }
+    }
+    setUploading(false);
   };
 
   const run = async () => {
@@ -195,15 +205,15 @@ function Weave({ weave, refCtx, onOpenPiece }) {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
                 <div className="eyebrow">{sources.length} source{sources.length !== 1 ? "s" : ""}</div>
                 <div style={{ display: "flex", gap: 8 }}>
-                  <input ref={fileRef} type="file" accept=".txt,.md,.markdown,text/*" multiple style={{ display: "none" }} onChange={upload} />
-                  <button className="btn ghost sm" onClick={() => fileRef.current.click()}><Icon name="doc" size={14} /> Upload files</button>
+                  <input ref={fileRef} type="file" accept={window.UPLOAD_ACCEPT} multiple style={{ display: "none" }} onChange={upload} />
+                  <button className="btn ghost sm" onClick={() => fileRef.current.click()} disabled={uploading} title="PDF, images, .docx, or text files">{uploading ? <><Spinner size={13} /> Reading…</> : <><Icon name="doc" size={14} /> Upload files</>}</button>
                   <button className="btn ghost sm" onClick={() => { window.Store.addWeaveSource("New source", ""); setExpanded((x) => ({ ...x })); }}><Icon name="plus" size={14} /> Add</button>
                 </div>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {sources.length === 0 && (
                   <div style={{ padding: "44px 24px", textAlign: "center", border: "1px dashed var(--hair-2)", borderRadius: "var(--radius-lg)" }}>
-                    <p className="muted" style={{ fontStyle: "italic", margin: 0 }}>No sources yet. Upload .txt/.md files or add one to paste into.</p>
+                    <p className="muted" style={{ fontStyle: "italic", margin: 0 }}>No sources yet. Upload PDFs, images, .docx, or text files — or add one to paste into.</p>
                   </div>
                 )}
                 {sources.map((s) => (

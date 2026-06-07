@@ -84,6 +84,7 @@ function GateRail({ gateStatus, packet, onJump }) {
 function DraftTab({ piece, running, gateStatus, onRun, onChangeOriginal, onGoReview }) {
   const [text, setText] = React.useState(piece.original || "");
   const fileRef = React.useRef(null);
+  const [uploading, setUploading] = React.useState(false);
   const isMobile = window.useIsMobile();
   React.useEffect(() => { setText(piece.original || ""); }, [piece.id]);
 
@@ -91,12 +92,18 @@ function DraftTab({ piece, running, gateStatus, onRun, onChangeOriginal, onGoRev
   const dirty = text !== piece.original;
   const hasPacket = !!piece.packet;
 
-  const upload = (e) => {
+  const upload = async (e) => {
     const f = e.target.files[0];
+    e.target.value = "";
     if (!f) return;
-    const r = new FileReader();
-    r.onload = () => { setText(r.result); onChangeOriginal(r.result); };
-    r.readAsText(f);
+    setUploading(true);
+    try {
+      const t = await window.extractFileText(f);
+      setText(t); onChangeOriginal(t);
+    } catch (err) {
+      window.alert((err && err.message) || ("Couldn't read " + f.name + "."));
+    }
+    setUploading(false);
   };
 
   return (
@@ -110,9 +117,9 @@ function DraftTab({ piece, running, gateStatus, onRun, onChangeOriginal, onGoRev
             <div className="eyebrow">The Draft</div>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <span className="mono muted" style={{ fontSize: 12 }}>{wc} words</span>
-              <input ref={fileRef} type="file" accept=".txt,.md,.markdown,text/*" style={{ display: "none" }} onChange={upload} />
-              <button className="btn ghost sm" onClick={() => fileRef.current.click()} disabled={running}>
-                <Icon name="doc" size={14} /> Upload
+              <input ref={fileRef} type="file" accept={window.UPLOAD_ACCEPT} style={{ display: "none" }} onChange={upload} />
+              <button className="btn ghost sm" onClick={() => fileRef.current.click()} disabled={running || uploading} title="PDF, image, .docx, or text file">
+                {uploading ? <><Spinner size={14} /> Reading…</> : <><Icon name="doc" size={14} /> Upload</>}
               </button>
             </div>
           </div>

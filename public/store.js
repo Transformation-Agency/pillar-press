@@ -443,8 +443,10 @@
       return state.weave;
     },
     addWeaveSource(name, text) {
-      api.getWeave().sources.push({ id: uid(), name: name || "Untitled source", text: text || "" });
+      const s = { id: uid(), name: name || "Untitled source", text: text || "" };
+      api.getWeave().sources.push(s);
       emit();
+      return s;
     },
     updateWeaveSource(id, patch) {
       const w = api.getWeave();
