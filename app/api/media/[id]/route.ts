@@ -3,6 +3,8 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { requireUser } from "@/lib/auth";
 import { db, mediaJobs, pieces } from "@/lib/db";
+import { getLocalMediaJob, getLocalPiece, updateLocalMediaJob } from "@/lib/local/database";
+import { isLocalFirstMode } from "@/lib/local/mode";
 import { toErrorResponse } from "@/lib/errors";
 
 // Attach (string pieceId) or detach (null) a media job to/from a piece.
@@ -20,6 +22,16 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     const user = await requireUser();
     const { id } = await params;
     const { pieceId } = patchBodySchema.parse(await req.json());
+
+    if (isLocalFirstMode()) {
+      const job = getLocalMediaJob(id, user.id);
+      if (!job) return NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
+      if (pieceId && !getLocalPiece(pieceId, user.id, user.workspaceId)) {
+        return NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
+      }
+      const updated = updateLocalMediaJob(id, user.id, { pieceId });
+      return NextResponse.json({ job: updated });
+    }
 
     // 1) authorize the job to the current user (no cross-user writes)
     const job = await db.query.mediaJobs.findFirst({

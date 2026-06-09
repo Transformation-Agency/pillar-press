@@ -1,0 +1,16 @@
+[[permission]]
+identifier = "desktop-setup"
+description = "Allows the main King’s Press window to manage local setup, model settings, backups, and desktop runtime status."
+commands.allow = [
+  "ollama_status",
+  "start_ollama_service",
+  "open_ollama_download",
+  "list_ollama_models",
+  "pull_ollama_model",
+  "save_model_choice",
+  "save_llm_settings",
+  "get_model_choice",
+  "init_local_database",
+  "create_local_backup",
+  "desktop_runtime_status",
+]

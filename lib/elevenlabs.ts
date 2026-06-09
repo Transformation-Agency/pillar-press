@@ -4,7 +4,7 @@
  * Reads ELEVENLABS_API_KEY from the server runtime. Used to generate the
  * voiceover audio that Hedra avatar/animation generations sync to.
  *
- * In the Pillar Press flow: generate TTS here -> upload the resulting audio
+ * In the King's Press flow: generate TTS here -> upload the resulting audio
  * to Hedra as an asset (hedra.createAsset + hedra.uploadAsset) -> pass that
  * audio_asset_id into hedra.generateAsset for an avatar/lip-synced video.
  */

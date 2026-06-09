@@ -1,4 +1,4 @@
-import { ai, type AI } from "@/lib/anthropic";
+import { ai, type AI } from "@/lib/llm";
 
 export interface TitleInput {
   text: string;

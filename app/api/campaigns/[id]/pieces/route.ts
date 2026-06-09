@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { and, desc, eq } from "drizzle-orm";
 import { requireUser } from "@/lib/auth";
 import { db, campaigns, pieces } from "@/lib/db";
+import { createLocalPiece, getLocalCampaign, listLocalPieces } from "@/lib/local/database";
+import { isLocalFirstMode } from "@/lib/local/mode";
 import { createPieceSchema } from "@/lib/schemas-pieces";
 import { toErrorResponse } from "@/lib/errors";
 
@@ -15,6 +17,7 @@ const notFound = () =>
  */
 async function resolveCampaign(cid: string, workspaceId: string | undefined) {
   if (!workspaceId) return null;
+  if (isLocalFirstMode()) return getLocalCampaign(cid, workspaceId);
   return (
     (await db.query.campaigns.findFirst({
       where: and(eq(campaigns.id, cid), eq(campaigns.workspaceId, workspaceId)),
@@ -32,6 +35,12 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
     const campaign = await resolveCampaign(id, user.workspaceId);
     if (!campaign) return notFound();
+
+    if (isLocalFirstMode()) {
+      const list = listLocalPieces(campaign.id, user.workspaceId);
+      if (!list) return notFound();
+      return NextResponse.json({ pieces: list });
+    }
 
     const list = await db
       .select()
@@ -56,6 +65,21 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     if (!campaign) return notFound();
 
     const body = createPieceSchema.parse(await req.json());
+
+    if (isLocalFirstMode()) {
+      const piece = createLocalPiece(
+        {
+          id: body.id,
+          campaignId: campaign.id,
+          userId: user.id,
+          title: body.title,
+          original: body.original ?? "",
+        },
+        user.workspaceId,
+      );
+      if (!piece) return notFound();
+      return NextResponse.json({ piece }, { status: 201 });
+    }
 
     const [piece] = await db
       .insert(pieces)

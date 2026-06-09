@@ -7,8 +7,8 @@
    Plain JS. Exposes window.DRIVE.
    ============================================================ */
 (function () {
-  // Cached server status: { linked, folderId, folderName }.
-  let status = { linked: false, folderId: "", folderName: "" };
+  // Cached server status: { linked, folderId, folderName, localExportAvailable }.
+  let status = { linked: false, folderId: "", folderName: "", localExportAvailable: false };
   let refreshing = null;
 
   async function refresh() {
@@ -19,11 +19,12 @@
       status = {
         linked: !!data.linked,
         folderId: data.folderId || "",
-        folderName: data.folderName || "",
+        folderName: data.folderName || (data.localExportAvailable ? "Local exports" : ""),
+        localExportAvailable: !!data.localExportAvailable,
       };
     } catch (e) {
       // Leave the last known status in place; treat failures as "not linked".
-      if (!status.linked) status = { linked: false, folderId: "", folderName: "" };
+      if (!status.linked) status = { linked: false, folderId: "", folderName: "", localExportAvailable: false };
     }
     return status;
   }
@@ -32,14 +33,14 @@
   refreshing = refresh().finally(() => { refreshing = null; });
 
   function config() {
-    return { folderId: status.folderId, folderName: status.folderName };
+    return { folderId: status.folderId, folderName: status.folderName, localExportAvailable: status.localExportAvailable };
   }
 
   function isConfigured() {
     // Return the cached boolean immediately; trigger a background refresh so the
     // value becomes accurate on subsequent renders.
     if (!refreshing) { refreshing = refresh().finally(() => { refreshing = null; }); }
-    return !!status.linked;
+    return !!(status.linked || status.localExportAvailable);
   }
 
   async function uploadMany(files, onProgress) {

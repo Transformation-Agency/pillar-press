@@ -4,14 +4,26 @@ import { requireUser } from "@/lib/auth";
 import { db, mediaJobs, references, pieces } from "@/lib/db";
 import { styleProfiles } from "@/db/style-schema";
 import {
+  createLocalMediaJob,
+  getLocalMediaJob,
+  getLocalPiece,
+  getLocalReferences,
+  getLocalStyleProfile,
+} from "@/lib/local/database";
+import { isLocalFirstMode } from "@/lib/local/mode";
+import {
   listModels, generateAsset, createAsset, uploadAsset, type GenerateInput, type GenerationType,
 } from "@/lib/hedra";
 import { textToSpeechLong } from "@/lib/elevenlabs";
 import { uploadPublicAudio } from "@/lib/storage";
 import { buildRefContext, type ReferencesDoc } from "@/lib/refContext";
 import { craftImagePrompt } from "@/lib/ai/imagePrompt";
+import { getAIForTask } from "@/lib/llm";
 import { generateBodySchema, validateAgainstModel, sanitizeText } from "@/lib/validation";
 import { toErrorResponse } from "@/lib/errors";
+import { getAudioProviderConfig, getImageProviderConfig } from "@/lib/mediaProviders";
+import { generateOpenAICompatibleImage } from "@/lib/mediaImage";
+import { generateOpenAICompatibleSpeech } from "@/lib/mediaAudio";
 
 /** Trim a piece down to a prompt-sized excerpt for image grounding. */
 function pieceExcerpt(p: { original?: string | null; revision?: unknown } | undefined): string {
@@ -57,23 +69,37 @@ export async function POST(req: Request) {
     if (body.type === "audio") {
       const script = sanitizeText(body.script || body.prompt, 100000);
       if (!script) return NextResponse.json({ error: "Provide a script to voice.", code: "validation" }, { status: 422 });
-      if (!body.voiceId) return NextResponse.json({ error: "Pick a voice.", code: "validation" }, { status: 422 });
 
-      // Long scripts are chunked + stitched, then stored (an inline data URL
-      // would exceed the serverless response limit). Fall back to inline only
-      // for small clips when storage isn't configured (e.g. local dev).
-      const buf = await textToSpeechLong({ text: script, voiceId: body.voiceId });
+      const audioProvider = getAudioProviderConfig(body.provider);
       let audioUrl: string;
-      try {
-        audioUrl = await uploadPublicAudio(buf, `voiceover-${Date.now()}.mp3`);
-      } catch (e) {
-        if (buf.length <= 4_000_000) audioUrl = `data:audio/mpeg;base64,${buf.toString("base64")}`;
-        else throw e;
+      let audioVoice = body.voiceId;
+      const meta: Record<string, unknown> = {};
+      if (audioProvider) {
+        const result = await generateOpenAICompatibleSpeech({
+          config: audioProvider,
+          model: body.modelId,
+          text: script,
+          voice: body.voiceId,
+        });
+        audioUrl = result.outputUrl;
+        audioVoice = result.voice;
+        meta.provider = audioProvider.provider;
+      } else {
+        if (!body.voiceId) return NextResponse.json({ error: "Pick a voice.", code: "validation" }, { status: 422 });
+        // Long scripts are chunked + stitched, then stored (an inline data URL
+        // would exceed the serverless response limit). Fall back to inline only
+        // for small clips when storage isn't configured (e.g. local dev).
+        const buf = await textToSpeechLong({ text: script, voiceId: body.voiceId });
+        try {
+          audioUrl = await uploadPublicAudio(buf, `voiceover-${Date.now()}.mp3`);
+        } catch (e) {
+          if (buf.length <= 4_000_000) audioUrl = `data:audio/mpeg;base64,${buf.toString("base64")}`;
+          else throw e;
+        }
+        meta.provider = "elevenlabs";
       }
 
-      const [job] = await db
-        .insert(mediaJobs)
-        .values({
+      const jobValues = {
           userId: user.id,
           workspaceId: user.workspaceId,
           campaignId: body.campaignId,
@@ -81,13 +107,83 @@ export async function POST(req: Request) {
           type: "audio",
           prompt: script.slice(0, 2000),
           modelId: body.modelId,
-          voiceId: body.voiceId,
+          voiceId: audioVoice,
           status: "completed",
           progress: 100,
           outputUrl: audioUrl,
           downloadUrl: audioUrl,
           completedAt: new Date(),
-        })
+          meta,
+      } as const;
+      if (isLocalFirstMode()) {
+        const job = createLocalMediaJob({
+          ...jobValues,
+          userId: user.id,
+          workspaceId: user.workspaceId ?? null,
+          type: "audio",
+          modelId: body.modelId,
+          completedAt: jobValues.completedAt.toISOString(),
+        });
+        return NextResponse.json({ job }, { status: 201 });
+      }
+
+      const [job] = await db
+        .insert(mediaJobs)
+        .values(jobValues)
+        .returning();
+      return NextResponse.json({ job }, { status: 201 });
+    }
+
+    // ── OpenAI-compatible image providers ─────────────────────────────────
+    const imageProvider = getImageProviderConfig(body.provider);
+    if (body.type === "image" && imageProvider) {
+      const prompt = sanitizeText(body.prompt, 2000);
+      if (!prompt) return NextResponse.json({ error: "Provide an image prompt.", code: "validation" }, { status: 422 });
+
+      const result = await generateOpenAICompatibleImage({
+        config: imageProvider,
+        model: body.modelId,
+        prompt,
+        aspectRatio: body.aspectRatio,
+        resolution: body.resolution,
+      });
+
+      const jobValues = {
+        userId: user.id,
+        workspaceId: user.workspaceId,
+        campaignId: body.campaignId,
+        sourceContentId: body.pieceId,
+        type: "image",
+        prompt,
+        modelId: body.modelId,
+        modelName: `${imageProvider.provider}:${body.modelId}`,
+        aspectRatio: body.aspectRatio,
+        resolution: body.resolution,
+        status: "completed",
+        progress: 100,
+        outputUrl: result.outputUrl,
+        downloadUrl: result.downloadUrl,
+        completedAt: new Date(),
+        meta: { provider: imageProvider.provider, providerResponseId: result.providerResponseId ?? null },
+      } as const;
+
+      if (isLocalFirstMode()) {
+        const job = createLocalMediaJob({
+          ...jobValues,
+          userId: user.id,
+          workspaceId: user.workspaceId ?? null,
+          campaignId: body.campaignId ?? null,
+          sourceContentId: body.pieceId ?? null,
+          type: "image",
+          modelId: body.modelId,
+          completedAt: jobValues.completedAt.toISOString(),
+        });
+        return NextResponse.json({ job }, { status: 201 });
+      }
+
+      const [job] = await db
+        .insert(mediaJobs)
+        .values(jobValues)
         .returning();
       return NextResponse.json({ job }, { status: 201 });
     }
@@ -106,9 +202,11 @@ export async function POST(req: Request) {
     // Combine: use an EXISTING audio media item as the video's audio track —
     // fetch its bytes and upload them to Hedra as an audio asset.
     if (!audioAssetId && body.audioMediaId && (body.type === "avatar_video" || body.type === "video")) {
-      const am = await db.query.mediaJobs.findFirst({
-        where: and(eq(mediaJobs.id, body.audioMediaId), eq(mediaJobs.userId, user.id)),
-      });
+      const am = isLocalFirstMode()
+        ? getLocalMediaJob(body.audioMediaId, user.id)
+        : await db.query.mediaJobs.findFirst({
+            where: and(eq(mediaJobs.id, body.audioMediaId), eq(mediaJobs.userId, user.id)),
+          });
       const aurl = am?.downloadUrl || am?.outputUrl;
       if (!aurl) return NextResponse.json({ error: "That audio isn't ready to combine.", code: "validation" }, { status: 422 });
       let abytes: Buffer;
@@ -145,7 +243,9 @@ export async function POST(req: Request) {
     };
     // Load the campaign's learned style (record provenance regardless of path).
     const prof = body.campaignId
-      ? await db.query.styleProfiles.findFirst({ where: eq(styleProfiles.campaignId, body.campaignId) })
+      ? isLocalFirstMode()
+        ? getLocalStyleProfile(body.campaignId, user.workspaceId)
+        : await db.query.styleProfiles.findFirst({ where: eq(styleProfiles.campaignId, body.campaignId) })
       : null;
     const meta: Record<string, unknown> = {};
     if (prof) { meta.styleRound = prof.rounds; meta.styleKnobs = prof.knobs; }
@@ -155,12 +255,16 @@ export async function POST(req: Request) {
       // style into a vivid, specifically-composed cover-image prompt.
       let refCtx = "";
       if (body.campaignId) {
-        const ref = await db.query.references.findFirst({ where: eq(references.campaignId, body.campaignId) });
+        const ref = isLocalFirstMode()
+          ? getLocalReferences(body.campaignId, user.workspaceId)
+          : await db.query.references.findFirst({ where: eq(references.campaignId, body.campaignId) });
         refCtx = buildRefContext((ref?.doc as ReferencesDoc | undefined) ?? null);
       }
       let article: { title?: string; excerpt?: string } | undefined;
       if (body.pieceId) {
-        const pc = await db.query.pieces.findFirst({ where: eq(pieces.id, body.pieceId) });
+        const pc = isLocalFirstMode()
+          ? getLocalPiece(body.pieceId, user.id, user.workspaceId)
+          : await db.query.pieces.findFirst({ where: eq(pieces.id, body.pieceId) });
         if (pc) article = { title: pc.title, excerpt: pieceExcerpt(pc) };
       }
       const enhanced = await craftImagePrompt({
@@ -168,7 +272,7 @@ export async function POST(req: Request) {
         styleDirective: prof?.directive || "",
         refContext: refCtx,
         article,
-      });
+      }, getAIForTask("mediaPrompt"));
       input.textPrompt = enhanced || input.textPrompt;
       meta.enhancedPrompt = enhanced;
     } else if (prof?.directive && !body.directed) {
@@ -180,6 +284,31 @@ export async function POST(req: Request) {
 
     const styleMeta = Object.keys(meta).length ? meta : undefined;
     const gen = await generateAsset(input);
+
+    if (isLocalFirstMode()) {
+      const job = createLocalMediaJob({
+        userId: user.id,
+        workspaceId: user.workspaceId ?? null,
+        campaignId: body.campaignId ?? null,
+        sourceContentId: body.pieceId ?? null,
+        meta: styleMeta,
+        hedraGenerationId: gen.id,
+        hedraAssetId: gen.asset_id ?? null,
+        elevenAudioAssetId: audioAssetId ?? null,
+        type: body.type,
+        prompt: sanitizeText(body.prompt, 2000),
+        modelId: model.id,
+        modelName: model.name,
+        voiceId: body.voiceId ?? null,
+        aspectRatio: body.aspectRatio ?? null,
+        resolution: body.resolution ?? null,
+        duration: body.duration ?? null,
+        status: (gen.status as any) ?? "queued",
+        progress: pct(gen.progress),
+        creditsEstimate: model.credits ?? null,
+      });
+      return NextResponse.json({ job }, { status: 201 });
+    }
 
     const [job] = await db
       .insert(mediaJobs)

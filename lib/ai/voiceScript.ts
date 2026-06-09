@@ -1,4 +1,4 @@
-import { ai, type AI } from "@/lib/anthropic";
+import { ai, type AI } from "@/lib/llm";
 
 export interface VoiceScriptInput {
   /** The article to voice: title + full body text. */

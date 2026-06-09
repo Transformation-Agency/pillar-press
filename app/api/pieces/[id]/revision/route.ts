@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { requireUser } from "@/lib/auth";
 import { db, campaigns, pieces, references } from "@/lib/db";
-import { ai } from "@/lib/anthropic";
+import { getLocalPiece, getLocalReferences, updateLocalPiece } from "@/lib/local/database";
+import { isLocalFirstMode } from "@/lib/local/mode";
+import { getAIForTask } from "@/lib/llm";
 import { buildRefContext, type ReferencesDoc } from "@/lib/refContext";
 import { generateRevision, type RevisionPacket, type RevisionPieceInput } from "@/lib/revision";
 import { toErrorResponse } from "@/lib/errors";
@@ -19,6 +21,7 @@ const notFound = () =>
  * never reveal that the row exists.
  */
 async function resolvePiece(id: string, user: SessionUser): Promise<Piece | null> {
+  if (isLocalFirstMode()) return getLocalPiece(id, user.id, user.workspaceId) as Piece | null;
   const piece = await db.query.pieces.findFirst({
     where: and(eq(pieces.id, id), eq(pieces.userId, user.id)),
   });
@@ -62,9 +65,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     // Load the campaign's references doc to build the author ref-context. The
     // campaign (and thus this campaignId) was already authorized in resolvePiece.
-    const ref = await db.query.references.findFirst({
-      where: eq(references.campaignId, piece.campaignId),
-    });
+    const ref = isLocalFirstMode()
+      ? getLocalReferences(piece.campaignId, user.workspaceId)
+      : await db.query.references.findFirst({
+          where: eq(references.campaignId, piece.campaignId),
+        });
     const refDoc = (ref?.doc ?? null) as ReferencesDoc | null;
     const refCtx = buildRefContext(refDoc);
 
@@ -75,7 +80,21 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       direction: piece.direction ?? null,
     };
 
-    const result = await generateRevision(input, refCtx, ai, undefined, { mode });
+    const result = await generateRevision(input, refCtx, getAIForTask("revision"), undefined, { mode });
+
+    if (isLocalFirstMode()) {
+      const updated = updateLocalPiece(
+        piece.id,
+        user.id,
+        {
+          revision: result,
+          ...(piece.status === "Reviewed" ? { status: "Revised" as const } : {}),
+        },
+        user.workspaceId,
+      );
+      if (!updated) return notFound();
+      return NextResponse.json({ piece: updated });
+    }
 
     const [updated] = await db
       .update(pieces)

@@ -3,6 +3,8 @@ import { and, eq } from "drizzle-orm";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { gatherSources } from "@/db/gather-schema";
+import { deleteLocalGatherSource, getLocalGatherSource, updateLocalGatherSource } from "@/lib/local/database";
+import { isLocalFirstMode } from "@/lib/local/mode";
 import { updateSourceSchema } from "@/lib/gather-validation";
 import { toErrorResponse } from "@/lib/errors";
 
@@ -17,6 +19,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     // The client also PATCHes run stats (lastRun/lastCount) which the schema
     // strips; the run route already persists those, so an empty patch is a no-op.
     if (Object.keys(patch).length === 0) {
+      if (isLocalFirstMode()) {
+        return NextResponse.json({ source: getLocalGatherSource(id, user.id) });
+      }
       const [row] = await db
         .select()
         .from(gatherSources)
@@ -29,6 +34,17 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       "summary" in patch && patch.summary === null
         ? { ...patch, summaryAt: null, summaryItemCount: null }
         : patch;
+    if (isLocalFirstMode()) {
+      const source = updateLocalGatherSource(
+        id,
+        user.id,
+        "summary" in patch && patch.summary === null
+          ? { ...patch, summaryAt: null, summaryItemCount: null }
+          : patch,
+      );
+      if (!source) return NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
+      return NextResponse.json({ source });
+    }
     const [row] = await db
       .update(gatherSources)
       .set(set)
@@ -46,6 +62,10 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   try {
     const user = await requireUser();
     const { id } = await params;
+    if (isLocalFirstMode()) {
+      deleteLocalGatherSource(id, user.id);
+      return NextResponse.json({ ok: true });
+    }
     await db.delete(gatherSources).where(and(eq(gatherSources.id, id), eq(gatherSources.userId, user.id)));
     return NextResponse.json({ ok: true });
   } catch (err) {

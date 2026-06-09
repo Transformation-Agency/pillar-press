@@ -4,6 +4,7 @@ import { requireUser } from "@/lib/auth";
 import { db, settings, type Setting } from "@/lib/db";
 import { exchangeCode, DriveError } from "@/lib/drive";
 import { toErrorResponse } from "@/lib/errors";
+import { isLocalFirstMode } from "@/lib/local/mode";
 
 /**
  * GET /api/drive/auth/callback — Google redirects here after consent.
@@ -28,6 +29,13 @@ function scopeFor(user: { id: string; workspaceId?: string }) {
 export async function GET(req: Request) {
   try {
     const user = await requireUser();
+
+    if (isLocalFirstMode()) {
+      return NextResponse.json(
+        { error: "Google Drive linking is disabled in local-first desktop mode. Use local exports instead.", code: "local_first" },
+        { status: 400 },
+      );
+    }
 
     const url = new URL(req.url);
     const error = url.searchParams.get("error");

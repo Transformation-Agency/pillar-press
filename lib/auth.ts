@@ -1,30 +1,26 @@
 /**
- * Auth — Supabase-backed session resolution + role authorization.
+ * Auth — local-first session resolution with hosted compatibility.
  *
- * getCurrentUser() reads the Supabase session server-side from the request's
- * Authorization bearer token (or a `sb-access-token` cookie), validates it
- * against Supabase Auth, and resolves a {@link SessionUser} from the user's
- * membership row (which carries the active workspace + role).
+ * In the King’s Press desktop runtime, every request resolves to a single local
+ * owner/workspace stored in embedded SQLite. No cloud auth, Supabase session,
+ * or Postgres round-trip is required.
  *
- * SERVER ONLY. Supabase service-role / JWT secrets live in env and are never
- * exposed to the client; the browser only calls our own /api/* routes.
- *
- * Dev convenience: when NODE_ENV !== 'production', an `x-debug-user` header (and
- * optional `x-debug-workspace` / `x-debug-role`) short-circuits the Supabase
- * round-trip so the app is runnable without the Supabase stack up.
+ * Hosted/web compatibility can still validate a Supabase bearer token when
+ * AUTH_DISABLED=false and local-first mode is not active. The browser only
+ * calls our own /api/* routes; provider secrets stay server-side.
  */
 import { headers, cookies } from "next/headers";
 import { and, eq } from "drizzle-orm";
 import { db, memberships } from "@/lib/db";
+import { ensureLocalWorkspace, LOCAL_USER_ID } from "@/lib/local/database";
+import { isLocalFirstMode } from "@/lib/local/mode";
 import { supabaseFromToken } from "@/lib/supabase";
 
 export type Role = (typeof import("@/db/schema").membershipRole)[number];
 
-// Skip-login phase: when AUTH_DISABLED is not explicitly "false", the app runs
-// without authentication — every request resolves to a single default local
-// user whose workspace is auto-provisioned, and role checks are not enforced
-// (assistant has the same access as author). Set AUTH_DISABLED=false to require
-// real Supabase sessions again.
+// Skip-login compatibility: when AUTH_DISABLED is not explicitly "false", web
+// dev runs without authentication. Desktop local-first mode has its own branch
+// below and never needs Supabase.
 const DEFAULT_USER_ID = process.env.DEFAULT_USER_ID ?? "dev-user";
 const authDisabled = () => process.env.AUTH_DISABLED !== "false";
 
@@ -51,7 +47,7 @@ function forbidden(msg = "Forbidden"): Error {
   return e;
 }
 
-/** Pull the Supabase access token from the Authorization header or cookie. */
+/** Pull a hosted Supabase access token from the Authorization header or cookie. */
 async function readAccessToken(): Promise<string | null> {
   const h = await headers();
   const authz = h.get("authorization") ?? h.get("Authorization");
@@ -93,6 +89,14 @@ async function resolveMembership(userId: string): Promise<SessionUser> {
  * session (the route's requireUser() turns that into a 401).
  */
 export async function getCurrentUser(): Promise<SessionUser | null> {
+  // Desktop/local-first mode: a single local owner profile is resolved from the
+  // embedded SQLite database. This path does not touch Supabase or Postgres.
+  if (isLocalFirstMode()) {
+    const id = process.env.DEFAULT_USER_ID ?? LOCAL_USER_ID;
+    const workspaceId = ensureLocalWorkspace(id);
+    return { id, workspaceId, role: "author" };
+  }
+
   // Dev-only fallback: bypass Supabase entirely with x-debug-* headers.
   if (process.env.NODE_ENV !== "production") {
     const h = await headers();
@@ -114,8 +118,8 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
     }
   }
 
-  // Skip-login phase: resolve a single default local user, auto-provisioning
-  // (and seeding) their workspace on first access. No session required.
+  // Skip-login compatibility: resolve a single default user and workspace. The
+  // seed hook now creates no default campaigns.
   if (authDisabled()) {
     const workspaceId = await getOrCreateWorkspace(DEFAULT_USER_ID);
     return { id: DEFAULT_USER_ID, workspaceId, role: "author" };
@@ -152,7 +156,7 @@ export async function requireUser(): Promise<SessionUser> {
  */
 export async function requireRole(role: Role): Promise<SessionUser> {
   const u = await requireUser();
-  // Skip-login phase: roles not enforced — assistant has the same access.
+  // Skip-login compatibility: roles not enforced.
   if (authDisabled()) return u;
   if (u.role !== role) throw forbidden(`Requires ${role} role.`);
   return u;
@@ -168,9 +172,9 @@ export async function assertAuthor(): Promise<SessionUser> {
 
 /**
  * Bootstrap helper: ensure the user has a workspace. If they already have a
- * membership, returns its workspaceId. Otherwise creates a workspace, an author
- * membership, and seeds the 11 default campaigns (+ their references) by calling
- * the seed module.
+ * membership, returns its workspaceId. Otherwise creates a workspace and an
+ * author membership. The seed hook is retained for hosted compatibility, but it
+ * intentionally inserts no default campaigns in the desktop product.
  *
  * The seed module is imported LAZILY to avoid an import cycle
  * (auth -> seed -> db, while routes import auth).

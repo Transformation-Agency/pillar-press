@@ -5,8 +5,11 @@ import { requireUser } from "@/lib/auth";
 import type { SessionUser } from "@/lib/auth";
 import { db, campaigns, references, pieces } from "@/lib/db";
 import type { Piece } from "@/lib/db";
+import { getLocalPiece, getLocalReferences, updateLocalPiece } from "@/lib/local/database";
+import { isLocalFirstMode } from "@/lib/local/mode";
 import { buildRefContext, type ReferencesDoc } from "@/lib/refContext";
 import { condensePost } from "@/lib/ai/condense";
+import { getAIForTask } from "@/lib/llm";
 import { toErrorResponse } from "@/lib/errors";
 
 const notFound = () =>
@@ -16,6 +19,7 @@ const bodySchema = z.object({ ratio: z.number().min(0.1).max(0.9).optional() });
 
 // Mirrors app/api/pieces/[id]/outputs/route.ts#resolvePiece: owner + workspace.
 async function resolvePiece(id: string, user: SessionUser): Promise<Piece | null> {
+  if (isLocalFirstMode()) return getLocalPiece(id, user.id, user.workspaceId) as Piece | null;
   const piece = await db.query.pieces.findFirst({
     where: and(eq(pieces.id, id), eq(pieces.userId, user.id)),
   });
@@ -54,14 +58,20 @@ export async function POST(
     const body = bodySchema.parse(await req.json().catch(() => ({})));
     const ratio = body.ratio ?? 0.4;
 
-    const ref = await db.query.references.findFirst({
-      where: eq(references.campaignId, piece.campaignId),
-    });
+    const ref = isLocalFirstMode()
+      ? getLocalReferences(piece.campaignId, user.workspaceId)
+      : await db.query.references.findFirst({
+          where: eq(references.campaignId, piece.campaignId),
+        });
     const refCtx = buildRefContext((ref?.doc as ReferencesDoc | undefined) ?? null);
 
-    const draftPost = await condensePost(target.draftPost, refCtx, ratio);
+    const draftPost = await condensePost(target.draftPost, refCtx, ratio, getAIForTask("outputs"));
 
     const nextOutputs = { ...outputs, [platform]: { ...target, draftPost } };
+    if (isLocalFirstMode()) {
+      updateLocalPiece(piece.id, user.id, { outputs: nextOutputs }, user.workspaceId);
+      return NextResponse.json({ platform, draftPost });
+    }
     await db
       .update(pieces)
       .set({ outputs: nextOutputs, updatedAt: new Date() })

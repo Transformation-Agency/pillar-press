@@ -4,7 +4,9 @@ import { requireUser } from "@/lib/auth";
 import type { SessionUser } from "@/lib/auth";
 import { db, campaigns, references, pieces } from "@/lib/db";
 import type { Piece } from "@/lib/db";
-import { ai } from "@/lib/anthropic";
+import { getLocalPiece, getLocalReferences, updateLocalPiece } from "@/lib/local/database";
+import { isLocalFirstMode } from "@/lib/local/mode";
+import { getAIForTask } from "@/lib/llm";
 import { buildRefContext, type ReferencesDoc } from "@/lib/refContext";
 import { generateOutputs, type GeneratorPiece } from "@/lib/generators";
 import { outputsBodySchema } from "@/lib/schemas-generators";
@@ -20,6 +22,7 @@ const notFound = () =>
  * that the row exists. Mirrors app/api/pieces/[id]/route.ts#resolvePiece.
  */
 async function resolvePiece(id: string, user: SessionUser): Promise<Piece | null> {
+  if (isLocalFirstMode()) return getLocalPiece(id, user.id, user.workspaceId) as Piece | null;
   const piece = await db.query.pieces.findFirst({
     where: and(eq(pieces.id, id), eq(pieces.userId, user.id)),
   });
@@ -56,9 +59,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     // Read the campaign's CURRENT references doc for prompt context (the gates
     // and generators must always read the live version).
-    const ref = await db.query.references.findFirst({
-      where: eq(references.campaignId, piece.campaignId),
-    });
+    const ref = isLocalFirstMode()
+      ? getLocalReferences(piece.campaignId, user.workspaceId)
+      : await db.query.references.findFirst({
+          where: eq(references.campaignId, piece.campaignId),
+        });
     const refCtx = buildRefContext((ref?.doc as ReferencesDoc | undefined) ?? null);
 
     const generatorPiece: GeneratorPiece = {
@@ -71,8 +76,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       body.active,
       body.audiences,
       refCtx,
-      ai,
+      getAIForTask("outputs"),
     );
+
+    if (isLocalFirstMode()) {
+      const updated = updateLocalPiece(piece.id, user.id, { outputs, outputOrder: order }, user.workspaceId);
+      if (!updated) return notFound();
+      return NextResponse.json({ piece: updated, outputs, outputOrder: order });
+    }
 
     const [updated] = await db
       .update(pieces)

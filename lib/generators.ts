@@ -6,7 +6,7 @@
  * resolveSources / canonicalSource ordering, the TWO-calls-per-platform shape
  * (delimiter @@POST@@ body + compact metadata JSON), and the exact output
  * object fields are ported VERBATIM. Only the AI seam changes: the prototype's
- * `window.AI.text/json` becomes an injected {@link AI} (lib/anthropic.ts), so
+ * `window.AI.text/json` becomes an injected {@link AI} (lib/llm), so
  * the pure functions are unit-testable WITHOUT a database or network.
  *
  * The proposed-revision half of generators.js lives in the SEPARATE file
@@ -16,7 +16,7 @@
  * the route handler (app/api/pieces/[id]/outputs/route.ts) does auth + db +
  * calls generateOutputs + persists `outputs` and `output_order`.
  */
-import type { AI } from "@/lib/anthropic";
+import type { AI } from "@/lib/llm";
 
 /* ---------- Audience presets (ported verbatim from generators.js) ---------- */
 

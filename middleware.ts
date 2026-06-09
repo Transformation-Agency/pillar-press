@@ -9,7 +9,7 @@ import type { NextRequest } from "next/server";
  * Password Protection / Vercel Authentication require a paid plan, so we gate at
  * the app level instead:
  *
- *  - Set SITE_PASSWORD (and optionally SITE_USER, default "pillar") in the
+ *  - Set SITE_PASSWORD (and optionally SITE_USER, default "king") in the
  *    environment → every request must present matching Basic credentials.
  *  - Leave SITE_PASSWORD unset (e.g. local dev) → no gate.
  *
@@ -21,7 +21,7 @@ export function middleware(req: NextRequest) {
   const password = process.env.SITE_PASSWORD;
   if (!password) return NextResponse.next(); // gate disabled when unconfigured
 
-  const expectedUser = process.env.SITE_USER || "pillar";
+  const expectedUser = process.env.SITE_USER || "king";
   const header = req.headers.get("authorization") || "";
   const [scheme, encoded] = header.split(" ");
   if (scheme === "Basic" && encoded) {
@@ -41,7 +41,7 @@ export function middleware(req: NextRequest) {
 
   return new NextResponse("Authentication required.", {
     status: 401,
-    headers: { "WWW-Authenticate": 'Basic realm="Pillar Press", charset="UTF-8"' },
+    headers: { "WWW-Authenticate": 'Basic realm="King\'s Press", charset="UTF-8"' },
   });
 }
 

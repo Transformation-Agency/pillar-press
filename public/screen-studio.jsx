@@ -1,27 +1,32 @@
-/* Studio — Hedra + ElevenLabs media generation surface.
-   Generation is simulated in-app (see studio.js); the production
-   server-side build lives in /handoff. */
+/* Studio — provider-backed media generation surface. */
 
-function KeysDialog({ onClose }) {
-  const s = window.Store.getSettings();
-  const [hedra, setHedra] = React.useState(s.hedra.apiKey || "");
-  const [eleven, setEleven] = React.useState(s.eleven.apiKey || "");
-  const save = () => { window.Store.setHedraConfig({ apiKey: hedra.trim() }); window.Store.setElevenConfig({ apiKey: eleven.trim() }); onClose(); };
+function MediaProvidersDialog({ status, onClose }) {
+  const providers = (status && status.providers) || [];
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "oklch(0 0 0 / 0.4)", display: "grid", placeItems: "center", zIndex: 80 }}>
       <div className="card" onClick={(e) => e.stopPropagation()} style={{ width: 560, maxWidth: "92vw", padding: "26px 28px" }}>
-        <div className="eyebrow" style={{ marginBottom: 6 }}>Connect</div>
-        <h2 style={{ fontSize: 24, marginBottom: 10 }}>API keys</h2>
+        <div className="eyebrow" style={{ marginBottom: 6 }}>Media providers</div>
+        <h2 style={{ fontSize: 24, marginBottom: 10 }}>Optional cloud media</h2>
         <p className="muted" style={{ fontSize: 13.5, marginBottom: 18 }}>
-          This prototype simulates generation locally, so keys aren't required to try the flow. In the production build (see the <span className="mono">handoff</span> package) these live <strong>server-side only</strong> as <span className="mono">HEDRA_API_KEY</span> / <span className="mono">ELEVENLABS_API_KEY</span> and are never sent to the browser.
+          Studio can use any configured server-side media provider. Keys stay in the packaged server environment or native app settings, never in browser storage.
         </p>
-        <label className="eyebrow" style={{ display: "block", marginBottom: 5 }}>Hedra API key</label>
-        <input className="field" value={hedra} onChange={(e) => setHedra(e.target.value)} placeholder="hedra_xxx" style={{ marginBottom: 14, fontFamily: "var(--font-mono)", fontSize: 13 }} />
-        <label className="eyebrow" style={{ display: "block", marginBottom: 5 }}>ElevenLabs API key</label>
-        <input className="field" value={eleven} onChange={(e) => setEleven(e.target.value)} placeholder="sk_xxx" style={{ marginBottom: 22, fontFamily: "var(--font-mono)", fontSize: 13 }} />
+        <div style={{ display: "grid", gap: 8, marginBottom: 18 }}>
+          {providers.map((p) => (
+            <div key={p.id} className="card" style={{ padding: "10px 12px", borderRadius: "var(--radius)", display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+              <div>
+                <div style={{ fontSize: 15 }}>{p.label}</div>
+                <div className="muted" style={{ fontSize: 12.5 }}>{(p.capabilities || []).join(", ") || "No capabilities"}</div>
+              </div>
+              <StatusChipMini ok={!!p.configured} label={p.configured ? "Configured" : "Not configured"} />
+            </div>
+          ))}
+        </div>
+        <p className="muted" style={{ fontSize: 12.5, lineHeight: 1.5, marginBottom: 18 }}>
+          Configure <span className="mono">HEDRA_API_KEY</span>, <span className="mono">ELEVENLABS_API_KEY</span>,
+          <span className="mono"> OPENAI_API_KEY</span>, <span className="mono">XAI_API_KEY</span>, or custom <span className="mono">MEDIA_IMAGE_*</span> variables for the providers you want to use.
+        </p>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-          <button className="btn ghost" onClick={onClose}>Cancel</button>
-          <button className="btn primary" onClick={save}>Save</button>
+          <button className="btn primary" onClick={onClose}>Done</button>
         </div>
       </div>
     </div>
@@ -152,16 +157,20 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
   // live catalog / voices / credits are fetched async; bump this to re-render
   // the composer once each lands (the STUDIO getters read from cache).
   const [catalogVersion, setCatalogVersion] = React.useState(0);
+  const [providerStatus, setProviderStatus] = React.useState(null);
   React.useEffect(() => {
     let alive = true;
     const bump = () => { if (alive) setCatalogVersion((v) => v + 1); };
+    fetch("/api/media/providers", { headers: { Accept: "application/json" } })
+      .then((r) => r.ok ? r.json() : null)
+      .then((s) => { if (alive && s) setProviderStatus(s); })
+      .catch(() => {});
     Promise.resolve(window.STUDIO.refreshModels()).then(bump);
     Promise.resolve(window.STUDIO.refreshVoices()).then(bump);
     Promise.resolve(window.STUDIO.refreshCredits()).then(bump);
     return () => { alive = false; };
   }, []);
 
-  const voices = window.STUDIO.listVoices();
   const [type, setType] = React.useState("image");
   const models = window.STUDIO.modelsByType(type);
   const [modelId, setModelId] = React.useState(() => {
@@ -172,13 +181,14 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
     return m && m.id;
   });
   const model = window.STUDIO.getModel(modelId) || models[0];
+  const voices = window.STUDIO.listVoices(model && model.provider);
 
   const [prompt, setPrompt] = React.useState("");
   const [aspect, setAspect] = React.useState((model && model.aspectRatios[0]) || "1:1");
   const [resolution, setResolution] = React.useState((model && model.resolutions[0]) || "720p");
   const [duration, setDuration] = React.useState((model && model.durations[0]) || 5);
   const [batch, setBatch] = React.useState(1);
-  const [voiceId, setVoiceId] = React.useState((window.STUDIO.listVoices()[0] || {}).id || "rachel");
+  const [voiceId, setVoiceId] = React.useState((voices[0] || {}).id || "rachel");
   const [script, setScript] = React.useState("");
   const [voiceOn, setVoiceOn] = React.useState(false);
   const [startImage, setStartImage] = React.useState(null);
@@ -223,9 +233,9 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
 
   // keep the selected voice valid once the live voice list arrives
   React.useEffect(() => {
-    const vs = window.STUDIO.listVoices();
+    const vs = window.STUDIO.listVoices(model && model.provider);
     if (vs.length && !vs.some((v) => v.id === voiceId)) setVoiceId(vs[0].id);
-  }, [catalogVersion]);
+  }, [catalogVersion, modelId]);
 
   // prefill from "→ Video" on an Outputs card
   React.useEffect(() => {
@@ -281,6 +291,7 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
       // a staged/edited directed prompt is sent verbatim (enhance off); otherwise
       // the seed is art-directed server-side (enhance on).
       kind: type, prompt: usingDirected ? directed.trim() : (prompt || (isVoiceModel ? script : "")), modelId: model.id, modelName: model.name,
+      provider: model.provider || "hedra",
       aspect: model.aspectRatios.length ? aspect : (type === "audio" ? null : aspect),
       resolution: model.resolutions.length ? resolution : null,
       duration: model.durations.length ? duration : null,
@@ -315,7 +326,11 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
     window.STUDIO.runJob(m, (patch) => window.Store.updateMedia(m.id, patch));
   };
 
-  const hedraOn = !!settings.hedra.apiKey, elevenOn = !!settings.eleven.apiKey;
+  const hedraOn = !!(providerStatus && providerStatus.hedra && providerStatus.hedra.configured);
+  const elevenOn = !!(providerStatus && providerStatus.elevenlabs && providerStatus.elevenlabs.configured);
+  const imageProviders = providerStatus && providerStatus.providers
+    ? providerStatus.providers.filter((p) => p.configured && p.capabilities && p.capabilities.includes("image")).length
+    : 0;
 
   return (
     <div className="scroll-y" style={{ flex: 1 }}>
@@ -327,10 +342,11 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
             <h1 style={{ fontSize: 42, letterSpacing: "-0.02em" }}>Studio</h1>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            <StatusChipMini ok={hedraOn} label={hedraOn ? "Hedra connected" : "Hedra: demo mode"} />
-            <StatusChipMini ok={elevenOn} label={elevenOn ? "ElevenLabs connected" : "ElevenLabs: demo mode"} />
+            <StatusChipMini ok={imageProviders > 0} label={imageProviders ? `${imageProviders} image provider${imageProviders === 1 ? "" : "s"}` : "Images not configured"} />
+            <StatusChipMini ok={hedraOn} label={hedraOn ? "Video ready" : "Video not configured"} />
+            <StatusChipMini ok={elevenOn} label={elevenOn ? "Voice ready" : "Voice not configured"} />
             <span className="chip" title="Available credits"><Icon name="sparkle" size={12} /> {window.STUDIO.getCredits().toLocaleString()} credits</span>
-            <button className="btn sm" onClick={() => setKeysOpen(true)}><Icon name="key" size={13} /> Keys</button>
+            <button className="btn sm" onClick={() => setKeysOpen(true)}><Icon name="key" size={13} /> Providers</button>
           </div>
         </div>
         <p className="muted" style={{ fontSize: 16, marginTop: 12, maxWidth: "60ch" }}>
@@ -493,7 +509,7 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
               onTuneStyle={(m) => { setStyleSeedJob(m.id); setStyleOpen(true); }} />
           </div>
         </div>
-        {keysOpen && <KeysDialog onClose={() => setKeysOpen(false)} />}
+        {keysOpen && <MediaProvidersDialog status={providerStatus} onClose={() => setKeysOpen(false)} />}
         {styleOpen && <StyleSurveyModal campaignId={campaignId} profile={style} mediaJobId={styleSeedJob}
           onClose={() => setStyleOpen(false)} onSaved={(p) => { setStyle(p); setStyleOpen(false); }} />}
       </div>
@@ -501,4 +517,4 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
   );
 }
 
-Object.assign(window, { Studio, KeysDialog });
+Object.assign(window, { Studio, MediaProvidersDialog });

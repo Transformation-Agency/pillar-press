@@ -2,12 +2,9 @@
    Gather — research ingestion surface.
 
    Connectors (RSS, web search, database scrape, journal library,
-   X trending, YouTube transcripts) all require server-side fetching
-   with keys + CORS that a browser prototype can't do. So in-app the
-   run is SIMULATED: it asks the model for plausible, clearly-labeled
-   DEMO items relevant to the campaign's focus — useful as seed
-   material to pipe into Weave. The real connectors live in the
-   backend handoff package. Plain JS. Exposes window.GATHER.
+   X trending, YouTube transcripts) all run through server routes so
+   keys, provider configuration, and CORS stay server-side.
+   Plain JS. Exposes window.GATHER.
    ============================================================ */
 (function () {
 
@@ -27,36 +24,6 @@
 
   function kindList() { return ORDER.map((k) => SOURCE_KINDS[k]); }
 
-  async function runSource(source, refCtx) {
-    const k = SOURCE_KINDS[source.kind];
-    const want = source.kind === "youtube" ? 1 : 3;
-    const transcriptField = source.kind === "youtube"
-      ? `,"transcript":"<a 2-4 sentence excerpt of what such a video's transcript might say>"` : "";
-    const system =
-`You SIMULATE a "${k.label}" research connector for a product demo. Produce ${want} plausible, ILLUSTRATIVE item(s) such a connector might surface for the input below, slanted toward the author's focus so they're useful research seeds.
-These are DEMO placeholders — do NOT invent real URLs, real article IDs, or real people's quotes. Use generic source names and example.com URLs. Keep snippets to 1-3 sentences.
-
-AUTHOR FOCUS (bias items toward these throughlines/audiences):
-${refCtx}
-
-Return ONLY JSON: {"items":[{"title":"…","source":"<generic publication/source name>","author":"<name or null>","date":"<e.g. 2026-05>","url":"https://example.com/…","snippet":"…"${transcriptField}}]}`;
-    const prompt = `${k.label} input (${k.field}): ${source.config || "(unspecified)"}\n\nReturn the JSON.`;
-    const res = await window.AI.json(prompt, { system });
-    return (res.items || []).map((it) => ({
-      kind: source.kind,
-      sourceId: source.id,
-      sourceLabel: source.label || k.label,
-      title: it.title || "Untitled",
-      source: it.source || k.label,
-      author: it.author || null,
-      date: it.date || "",
-      url: it.url || "https://example.com",
-      snippet: it.snippet || "",
-      transcript: it.transcript || null,
-      demo: true,
-    }));
-  }
-
   // same-origin REST helpers (no auth headers; auth is skip-login)
   async function apiGet(path) {
     const r = await fetch("/api" + path, { headers: { Accept: "application/json" } });
@@ -72,6 +39,152 @@ Return ONLY JSON: {"items":[{"title":"…","source":"<generic publication/source
     if (!r.ok) throw new Error("POST " + path + " -> " + r.status);
     const ct = r.headers.get("content-type") || "";
     return ct.indexOf("application/json") >= 0 ? r.json() : null;
+  }
+
+  const SCHEDULE_KEY = "kingspress.gatherSchedules.v1";
+  let schedulerStarted = false;
+
+  function uid() {
+    try {
+      if (window.crypto && typeof window.crypto.randomUUID === "function") return window.crypto.randomUUID();
+    } catch (e) { /* fall through */ }
+    return "sched-" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+  }
+
+  function readSchedules() {
+    try {
+      const raw = window.localStorage.getItem(SCHEDULE_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function writeSchedules(schedules) {
+    window.localStorage.setItem(SCHEDULE_KEY, JSON.stringify(schedules));
+  }
+
+  function listSchedules(campaignId) {
+    return readSchedules().filter((s) => s.campaignId === campaignId);
+  }
+
+  function normalizeSchedule(s) {
+    if (!s) return s;
+    return Object.assign({}, s, {
+      time: s.time || s.timeOfDay || "08:00",
+      timeOfDay: s.timeOfDay || s.time || null,
+      dayOfWeek: s.dayOfWeek == null ? null : Number(s.dayOfWeek),
+      enabled: s.enabled !== false,
+    });
+  }
+
+  async function syncSchedules(campaignId) {
+    try {
+      const res = await apiGet("/gather/schedules?campaignId=" + encodeURIComponent(campaignId));
+      const remote = ((res && res.schedules) || []).map(normalizeSchedule);
+      const others = readSchedules().filter((s) => s.campaignId !== campaignId);
+      writeSchedules(others.concat(remote));
+      return remote;
+    } catch (e) {
+      return listSchedules(campaignId).map(normalizeSchedule);
+    }
+  }
+
+  function saveSchedule(input) {
+    const schedules = readSchedules();
+    const now = Date.now();
+    const next = normalizeSchedule(Object.assign({
+      id: uid(),
+      enabled: true,
+      createdAt: now,
+      lastRunAt: null,
+      lastStatus: null,
+    }, input, { timeOfDay: input.timeOfDay || input.time || null, updatedAt: now }));
+    const idx = schedules.findIndex((s) => s.id === next.id);
+    if (idx >= 0) schedules[idx] = Object.assign({}, schedules[idx], next);
+    else schedules.push(next);
+    writeSchedules(schedules);
+    apiPost("/gather/schedules", {
+      id: next.id,
+      campaignId: next.campaignId,
+      cadence: next.cadence,
+      runAt: next.runAt || null,
+      timeOfDay: next.timeOfDay || next.time || null,
+      dayOfWeek: next.dayOfWeek == null ? null : Number(next.dayOfWeek),
+      enabled: next.enabled !== false,
+    }).catch(() => {});
+    return next;
+  }
+
+  function deleteSchedule(id) {
+    writeSchedules(readSchedules().filter((s) => s.id !== id));
+    fetch("/api/gather/schedules?id=" + encodeURIComponent(id), {
+      method: "DELETE",
+      headers: { Accept: "application/json" },
+    }).catch(() => {});
+  }
+
+  function parseTimeToday(time) {
+    const m = String(time || "").match(/^(\d{2}):(\d{2})$/);
+    const d = new Date();
+    if (m) d.setHours(Number(m[1]), Number(m[2]), 0, 0);
+    return d;
+  }
+
+  function sameLocalDay(a, b) {
+    if (!a || !b) return false;
+    const da = new Date(a), db = new Date(b);
+    return da.getFullYear() === db.getFullYear() && da.getMonth() === db.getMonth() && da.getDate() === db.getDate();
+  }
+
+  function isDue(s, now = new Date()) {
+    if (!s.enabled) return false;
+    if (s.cadence === "once") {
+      return s.runAt && new Date(s.runAt).getTime() <= now.getTime() && !s.lastRunAt;
+    }
+    if (s.cadence === "daily") {
+      return parseTimeToday(s.time).getTime() <= now.getTime() && !sameLocalDay(s.lastRunAt, now);
+    }
+    if (s.cadence === "weekly") {
+      const day = Number(s.dayOfWeek);
+      return now.getDay() === day && parseTimeToday(s.time).getTime() <= now.getTime() && !sameLocalDay(s.lastRunAt, now);
+    }
+    return false;
+  }
+
+  async function runScheduledGather(s) {
+    const schedules = readSchedules();
+    const idx = schedules.findIndex((x) => x.id === s.id);
+    try {
+      await apiPost("/gather/run", { campaignId: s.campaignId });
+      if (idx >= 0) {
+        schedules[idx] = Object.assign({}, schedules[idx], {
+          enabled: s.cadence === "once" ? false : schedules[idx].enabled,
+          lastRunAt: new Date().toISOString(),
+          lastStatus: "ok",
+          updatedAt: Date.now(),
+        });
+      }
+    } catch (e) {
+      if (idx >= 0) {
+        schedules[idx] = Object.assign({}, schedules[idx], {
+          lastRunAt: new Date().toISOString(),
+          lastStatus: (e && e.message) || "failed",
+          updatedAt: Date.now(),
+        });
+      }
+    }
+    writeSchedules(schedules);
+  }
+
+  function startScheduler() {
+    if (window.KINGS_DESKTOP && window.KINGS_DESKTOP.isDesktop && window.KINGS_DESKTOP.isDesktop()) return;
+    if (schedulerStarted) return;
+    schedulerStarted = true;
+    const tick = () => readSchedules().map(normalizeSchedule).filter((s) => isDue(s)).forEach((s) => runScheduledGather(s));
+    setTimeout(tick, 1500);
+    setInterval(tick, 60000);
   }
 
   // Replace this campaign's cached gather items with server truth, then emit.
@@ -138,5 +251,5 @@ Return ONLY JSON: {"items":[{"title":"…","source":"<generic publication/source
     ].join("\n");
   }
 
-  window.GATHER = { SOURCE_KINDS, kindList, runSource, runGather, itemToText };
+  window.GATHER = { SOURCE_KINDS, kindList, runGather, itemToText, listSchedules, syncSchedules, saveSchedule, deleteSchedule, startScheduler };
 })();

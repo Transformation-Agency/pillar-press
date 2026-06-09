@@ -1,16 +1,21 @@
+import {
+  isLocalStoredUrl,
+  localStorageConfigured,
+  writeLocalPublicFile,
+} from "@/lib/local/storage";
+
 /**
- * Supabase Storage upload (server-side). Used for generated audio: long
- * voiceovers can't be returned inline (they'd exceed the serverless response
- * limit), so we store the MP3 in the public "audio" bucket and persist its URL.
+ * Public media storage (server-side).
  *
- * Uploads with the anon key against the bucket's anon-insert policy. Public
- * read serves a stable URL.
+ * Desktop/local-first mode writes generated media into the King’s Press app-data
+ * folder and serves it through /api/local-files. Supabase Storage remains only
+ * as a compatibility path for legacy hosted/web setups.
  */
 const supaUrl = () => (process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "").replace(/\/$/, "");
 const supaKey = () => process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 
 export function storageConfigured(): boolean {
-  return !!(supaUrl() && supaKey());
+  return localStorageConfigured() || !!(supaUrl() && supaKey());
 }
 
 // Everything is stored in the one public bucket ("audio"); the prefix keeps
@@ -19,7 +24,7 @@ const BUCKET = "audio";
 
 /** True if a URL already points at our own public storage (so we don't re-upload). */
 export function isStoredUrl(url: string | null | undefined): boolean {
-  return !!url && url.includes(`/storage/v1/object/public/${BUCKET}/`);
+  return isLocalStoredUrl(url) || (!!url && url.includes(`/storage/v1/object/public/${BUCKET}/`));
 }
 
 /**
@@ -35,6 +40,9 @@ export async function uploadPublicFile(
 ): Promise<string> {
   const base = supaUrl();
   const key = supaKey();
+  if (localStorageConfigured()) {
+    return writeLocalPublicFile(bytes, name, contentType, prefix);
+  }
   if (!base || !key) throw new Error("Supabase storage is not configured.");
   const ct = contentType || "application/octet-stream";
   const safe = (name || "file").replace(/[^a-zA-Z0-9._-]/g, "-");

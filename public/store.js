@@ -44,8 +44,8 @@
     activeCampaignId: null,
     settings: {
       drive: { clientId: "", folderId: "", folderName: "" },
-      hedra: { apiKey: "" },
-      eleven: { apiKey: "" },
+      hedra: {},
+      eleven: {},
     },
     media: [],
     gatherSources: [],
@@ -56,6 +56,7 @@
     theme: "light",
     role: "author",
     weave: { sources: [], result: null },
+    desk: { threads: [], activeId: null },
   };
 
   // tracks which campaigns have had their per-campaign data hydrated
@@ -73,9 +74,9 @@
         folderId: s.driveFolderId || (s.drive && s.drive.folderId) || prefs.driveFolderId || "",
         folderName: (s.drive && s.drive.folderName) || prefs.driveFolderName || "",
       },
-      // hedra/eleven keys are server-side env now; keep cache shape only.
-      hedra: { apiKey: (state.settings.hedra && state.settings.hedra.apiKey) || "" },
-      eleven: { apiKey: (state.settings.eleven && state.settings.eleven.apiKey) || "" },
+      // Media provider keys are server-side/native-side only.
+      hedra: {},
+      eleven: {},
       prefs: prefs,
     };
     if (prefs.theme === "light" || prefs.theme === "dark") state.theme = prefs.theme;
@@ -189,6 +190,11 @@
       emit(); // render shell with campaign list + settings
 
       if (activeId) await hydrateCampaign(activeId);
+      const deskRes = await apiGet("/desk/session").catch(() => ({ session: { state: {} } }));
+      const deskState = deskRes && deskRes.session && deskRes.session.state;
+      if (deskState && typeof deskState === "object") {
+        state.desk = Object.assign({ threads: [], activeId: null }, deskState);
+      }
     } catch (e) {
       console.warn("[Store] hydrate failed:", e && e.message);
     }
@@ -222,6 +228,22 @@
       if (!state.settings) state.settings = {};
       state.settings.prefs = Object.assign({}, state.settings.prefs || {}, { [key]: value });
       emit(); persistPrefs({ [key]: value });
+    },
+
+    /* ---- Desk chat session (thread state, persisted as one scoped blob) ---- */
+    getDesk() {
+      if (!state.desk) state.desk = { threads: [], activeId: null };
+      if (!Array.isArray(state.desk.threads)) state.desk.threads = [];
+      return state.desk;
+    },
+    setDesk(next) {
+      state.desk = Object.assign({ threads: [], activeId: null }, next || {});
+      emit();
+      bg(apiSend("PUT", "/desk/session", {
+        activeId: state.desk.activeId || null,
+        state: state.desk,
+      }), "PUT /desk/session");
+      return state.desk;
     },
 
     /* ---- Campaigns ---- */
@@ -275,8 +297,8 @@
       if (!state.settings) state.settings = {};
       const s = state.settings;
       s.drive = s.drive || { clientId: "", folderId: "", folderName: "" };
-      s.hedra = s.hedra || { apiKey: "" };
-      s.eleven = s.eleven || { apiKey: "" };
+      s.hedra = s.hedra || {};
+      s.eleven = s.eleven || {};
       return s;
     },
     setDriveConfig(patch) {
@@ -292,10 +314,6 @@
       state.settings.prefs = body.prefs;
       bg(apiSend("PUT", "/settings", body), "PUT /settings (drive)");
     },
-    // hedra/eleven keys are env-side now; keep in cache only, do not send.
-    setHedraConfig(patch) { const s = api.getSettings(); s.hedra = Object.assign({}, s.hedra, patch); emit(); },
-    setElevenConfig(patch) { const s = api.getSettings(); s.eleven = Object.assign({}, s.eleven, patch); emit(); },
-
     /* ---- Media assets (Studio) ---- */
     getMedia() { if (!Array.isArray(state.media)) state.media = []; return state.media; },
     mediaForCampaign(cid) { return api.getMedia().filter((m) => m.campaignId === cid); },

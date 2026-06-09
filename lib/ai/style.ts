@@ -1,4 +1,4 @@
-import { ai, extractJSON, repairJSON, type AI } from "@/lib/anthropic";
+import { ai, extractJSON, repairJSON, type AI } from "@/lib/llm";
 import type { StyleKnobs } from "@/db/style-schema";
 import { DEFAULT_KNOBS } from "@/db/style-schema";
 

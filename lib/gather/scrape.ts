@@ -7,7 +7,7 @@ export async function runScrape(input: string): Promise<GatherItem[]> {
   // input may be "https://site/page" or "https://site | what to look for"
   const url = input.split("|")[0].trim();
   if (!/^https?:\/\//i.test(url)) throw new GatherError(400, "bad_request", "Provide an http(s) URL to scrape.");
-  const html = await fetchText(url, { headers: { "User-Agent": "PillarPress/1.0 (+gather)" } });
+  const html = await fetchText(url, { headers: { "User-Agent": "KingsPress/1.0 (+gather)" } });
   const $ = cheerio.load(html);
   $("script,style,nav,footer,header,noscript").remove();
   const title = ($("title").first().text() || $("h1").first().text() || url).trim();

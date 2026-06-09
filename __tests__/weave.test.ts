@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import type { AI } from "@/lib/anthropic";
+import type { AI } from "@/lib/llm";
 import {
   extractSource,
   synthesizeBrief,

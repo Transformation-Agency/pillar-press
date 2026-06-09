@@ -20,7 +20,7 @@
  *    key): the route persists revision = { text, changelog }.
  */
 
-import type { AI } from "@/lib/anthropic";
+import type { AI } from "@/lib/llm";
 
 /* ------------------------------------------------------------------ *
  * Packet shapes (the FIREWALL inputs). Every field optional/guarded — the

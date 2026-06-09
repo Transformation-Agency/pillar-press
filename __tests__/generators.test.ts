@@ -8,7 +8,7 @@ import {
   generateOutputs,
   type PlatformOutput,
 } from "@/lib/generators";
-import type { AI } from "@/lib/anthropic";
+import type { AI } from "@/lib/llm";
 
 /**
  * Unit tests for the platform generators — no DB, no network. The AI seam is a

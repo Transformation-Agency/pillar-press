@@ -176,9 +176,9 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 }/*EDITMODE-END*/;
 
 const TYPEFACES = {
-  Literary: { display: '"Newsreader", Georgia, serif', body: '"Spectral", Georgia, serif', note: "Newsreader + Spectral" },
-  Newsroom: { display: '"Source Serif 4", Georgia, serif', body: '"Source Serif 4", Georgia, serif', note: "Source Serif" },
-  Quiet:    { display: '"Spectral", Georgia, serif', body: '"Spectral", Georgia, serif', note: "Spectral throughout" },
+  Literary: { display: 'Georgia, "Times New Roman", serif', body: 'Georgia, "Times New Roman", serif', note: "Georgia" },
+  Newsroom: { display: '"Times New Roman", Times, serif', body: '"Times New Roman", Times, serif', note: "Times" },
+  Quiet:    { display: 'ui-serif, Georgia, Cambria, "Times New Roman", serif', body: 'ui-serif, Georgia, Cambria, "Times New Roman", serif', note: "System serif" },
 };
 
 function TweaksLayer({ theme }) {
@@ -248,12 +248,15 @@ function CampaignSwitcher({ campaigns, activeId, onSelect, onAdd }) {
           border: "1px solid var(--hair-2)", background: "var(--paper-2)", color: "var(--ink)",
           borderRadius: 999, padding: "6px 12px", height: 34 }}>
         <span style={{ width: 7, height: 7, borderRadius: 99, background: "var(--accent)" }} />
-        <span style={{ fontFamily: "var(--font-display)", fontSize: 15, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{active && active.name}</span>
+        <span style={{ fontFamily: "var(--font-display)", fontSize: 15, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{active ? active.name : "No campaign"}</span>
         <Icon name="chevD" size={14} style={{ color: "var(--ink-3)" }} />
       </button>
       {open && (
         <div className="card" style={{ position: "absolute", top: 42, right: 0, width: 248, padding: 6, zIndex: 60, boxShadow: "var(--shadow-lg)", maxHeight: "70vh", overflowY: "auto" }}>
           <div className="eyebrow" style={{ padding: "6px 10px 4px" }}>Campaign · guidelines</div>
+          {!campaigns.length && (
+            <div className="muted" style={{ padding: "8px 10px", fontSize: 13.5 }}>No campaigns yet.</div>
+          )}
           {campaigns.map((c) => {
             const on = c.id === activeId;
             return (
@@ -283,9 +286,486 @@ function CampaignSwitcher({ campaigns, activeId, onSelect, onAdd }) {
   );
 }
 
+function DesktopOnboarding() {
+  const [open, setOpen] = React.useState(false);
+  const [setupMode, setSetupMode] = React.useState("ollama");
+  const [status, setStatus] = React.useState(null);
+  const [models, setModels] = React.useState([]);
+  const [dockerModels, setDockerModels] = React.useState([]);
+  const [model, setModel] = React.useState("llama3.2");
+  const [dockerBaseUrl, setDockerBaseUrl] = React.useState("http://localhost:12434/engines/v1");
+  const [cloudProvider, setCloudProvider] = React.useState("openai");
+  const [cloudBaseUrl, setCloudBaseUrl] = React.useState("");
+  const [apiKey, setApiKey] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const [message, setMessage] = React.useState("");
+  const [savedSettings, setSavedSettings] = React.useState(null);
+  const [profileName, setProfileName] = React.useState("");
+  const [taskDefaults, setTaskDefaults] = React.useState({});
+
+  const desktop = window.KINGS_DESKTOP;
+  const setupCompleteKey = "kingspress.desktopSetupComplete";
+  const modelOptions = ["llama3.2", "mistral", "qwen2.5:7b", "gemma3:4b"];
+  const cloudModels = {
+    openai: ["gpt-4o-mini", "gpt-4.1-mini", "gpt-4o"],
+    anthropic: ["claude-haiku-4-5", "claude-sonnet-4-5"],
+    gemini: ["gemini-2.5-flash", "gemini-2.5-pro"],
+    xai: ["grok-4.3", "grok-3-mini"],
+    "openai-compatible": ["local-model"],
+  };
+  const taskOptions = [
+    { id: "gather", label: "Gather" },
+    { id: "weave", label: "Weave" },
+    { id: "draft", label: "Draft" },
+    { id: "review", label: "Review" },
+    { id: "revision", label: "Revision" },
+    { id: "outputs", label: "Outputs" },
+    { id: "utility", label: "Utility" },
+    { id: "mediaPrompt", label: "Media prompts" },
+    { id: "file", label: "File extraction" },
+  ];
+
+  const providerLabel = (provider) => ({
+    openai: "OpenAI / ChatGPT",
+    anthropic: "Anthropic",
+    gemini: "Gemini",
+    xai: "xAI / Grok",
+    ollama: "Ollama",
+    "openai-compatible": "OpenAI-compatible",
+  }[provider] || provider || "Provider");
+
+  const profileIdFor = (profile) =>
+    String([profile.provider, profile.baseUrl || "", profile.model].join("-"))
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 80) || "llm-profile";
+
+  const profilesFromSettings = (settings) => {
+    if (settings && Array.isArray(settings.profiles) && settings.profiles.length) return settings.profiles;
+    if (settings && settings.provider && settings.model) {
+      return [{
+        id: "default",
+        label: "Default",
+        provider: settings.provider,
+        model: settings.model,
+        baseUrl: settings.baseUrl,
+        apiKey: settings.apiKey,
+      }];
+    }
+    return [];
+  };
+
+  const activeProfileFromSettings = (settings) => {
+    const profiles = profilesFromSettings(settings);
+    return profiles.find((p) => p.id === settings?.defaultProfileId) || profiles[0] || null;
+  };
+
+  React.useEffect(() => {
+    if (!desktop || !desktop.isDesktop()) return;
+    let active = true;
+    let unlisten = null;
+    refresh({ syncSetupOpen: true }).catch(() => {
+      if (active && window.localStorage.getItem(setupCompleteKey) !== "true") setOpen(true);
+    });
+
+    desktop.onShowModelSetup((() => {
+      if (!active) return;
+      setOpen(true);
+      refresh();
+    })).then((fn) => {
+      unlisten = fn;
+      if (!active && typeof unlisten === "function") unlisten();
+    }).catch(() => {});
+
+    const openFromDesk = () => {
+      if (!active) return;
+      setOpen(true);
+      refresh();
+    };
+    window.addEventListener("kingspress:open-model-setup", openFromDesk);
+
+    return () => {
+      active = false;
+      if (typeof unlisten === "function") unlisten();
+      window.removeEventListener("kingspress:open-model-setup", openFromDesk);
+    };
+  }, []);
+
+  const isDockerModelRunnerSettings = (saved) =>
+    !!(saved && saved.provider === "openai-compatible" && saved.baseUrl && saved.baseUrl.includes("12434"));
+
+  const fetchOpenAICompatibleModels = async (baseUrl) => {
+    const res = await fetch("/api/llm/models", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider: "openai-compatible", baseUrl }),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || "Could not list models.");
+    return json.models || [];
+  };
+
+  const savedModelChoiceComplete = (saved, ollamaStatus, ollamaModels, savedDockerModels) => {
+    const active = activeProfileFromSettings(saved);
+    if (!active || !active.provider || !active.model) return false;
+    if (active.provider === "ollama") {
+      return !!(ollamaStatus && ollamaStatus.installed && ollamaStatus.running && (ollamaModels || []).includes(active.model));
+    }
+    if (isDockerModelRunnerSettings(active)) {
+      return !!(active.baseUrl && (savedDockerModels || []).includes(active.model));
+    }
+    if (active.provider === "openai-compatible") {
+      return !!(active.baseUrl && active.apiKey);
+    }
+    return !!active.apiKey;
+  };
+
+  const refresh = async (options) => {
+    if (!desktop || !desktop.isDesktop()) return;
+    try {
+      await desktop.initLocalDatabase().catch(() => null);
+      const [s, list, saved] = await Promise.all([
+        desktop.ollamaStatus().catch((e) => ({ installed: false, running: false, message: e.message })),
+        desktop.listOllamaModels().catch(() => []),
+        desktop.getModelChoice().catch(() => null),
+      ]);
+      setStatus(s);
+      setModels(list || []);
+      let savedDockerModels = [];
+      const activeSaved = activeProfileFromSettings(saved);
+      if (isDockerModelRunnerSettings(activeSaved)) {
+        savedDockerModels = await fetchOpenAICompatibleModels(activeSaved.baseUrl).catch(() => []);
+        setDockerModels(savedDockerModels);
+      }
+      const hasSavedModelChoice = savedModelChoiceComplete(saved, s, list || [], savedDockerModels);
+      setSavedSettings(saved);
+      setTaskDefaults((saved && saved.taskDefaults) || {});
+      if (activeSaved && activeSaved.provider) {
+        if (activeSaved.provider === "ollama") setSetupMode("ollama");
+        else if (isDockerModelRunnerSettings(activeSaved)) setSetupMode("docker");
+        else {
+          setSetupMode("cloud");
+          setCloudProvider(activeSaved.provider);
+        }
+      }
+      if (activeSaved && activeSaved.baseUrl) {
+        if (activeSaved.provider === "openai-compatible" && activeSaved.baseUrl.includes("12434")) setDockerBaseUrl(activeSaved.baseUrl);
+        else setCloudBaseUrl(activeSaved.baseUrl);
+      }
+      if (activeSaved && activeSaved.apiKey) setApiKey(activeSaved.apiKey);
+      if (activeSaved && activeSaved.model) {
+        setModel(activeSaved.model);
+        setProfileName(activeSaved.label || providerLabel(activeSaved.provider) + " " + activeSaved.model);
+      }
+      else if (list && list.length) setModel(list[0]);
+      if (options && options.syncSetupOpen) {
+        if (hasSavedModelChoice) {
+          window.localStorage.setItem(setupCompleteKey, "true");
+          setOpen(false);
+        } else {
+          window.localStorage.removeItem(setupCompleteKey);
+          setOpen(true);
+        }
+      }
+      setMessage("");
+      return saved;
+    } catch (e) {
+      setMessage((e && e.message) || "Desktop setup check failed.");
+      if (options && options.syncSetupOpen && window.localStorage.getItem(setupCompleteKey) !== "true") setOpen(true);
+      return null;
+    }
+  };
+
+  const withoutEmptyOptionals = (value) => {
+    if (Array.isArray(value)) return value.map(withoutEmptyOptionals).filter((item) => item !== undefined);
+    if (value && typeof value === "object") {
+      const out = {};
+      Object.entries(value).forEach(([key, child]) => {
+        const cleaned = withoutEmptyOptionals(child);
+        if (cleaned !== undefined && cleaned !== "") out[key] = cleaned;
+      });
+      return out;
+    }
+    return value === undefined ? undefined : value;
+  };
+
+  const pullModel = async () => {
+    if (!model.trim()) return;
+    setBusy(true); setMessage("Downloading " + model + ". This can take a while.");
+    try {
+      await desktop.pullOllamaModel(model.trim());
+      await refresh();
+      setMessage("Model is ready.");
+    } catch (e) {
+      setMessage((e && e.message) || "Could not download the model.");
+    }
+    setBusy(false);
+  };
+
+  const startOllama = async () => {
+    setBusy(true); setMessage("Starting Ollama.");
+    try {
+      await desktop.startOllama();
+      await refresh();
+      setMessage("Ollama is running.");
+    } catch (e) {
+      setMessage((e && e.message) || "Could not start Ollama.");
+    }
+    setBusy(false);
+  };
+
+  const openOllamaDownload = async () => {
+    setBusy(true); setMessage("Opening the Ollama installer page.");
+    try {
+      await desktop.openOllamaDownload();
+      setMessage("Install Ollama, then click Check again.");
+    } catch (e) {
+      setMessage((e && e.message) || "Could not open the Ollama download page.");
+    }
+    setBusy(false);
+  };
+
+  const checkAgain = async () => {
+    setBusy(true); setMessage("Checking local model setup.");
+    try {
+      await refresh();
+      setMessage("Setup status updated.");
+    } catch (e) {
+      setMessage((e && e.message) || "Could not refresh setup status.");
+    }
+    setBusy(false);
+  };
+
+  const listDockerModels = async () => {
+    setBusy(true); setMessage("Checking Docker Model Runner.");
+    try {
+      const listed = await fetchOpenAICompatibleModels(dockerBaseUrl);
+      setDockerModels(listed);
+      if (listed.length) setModel(listed[0]);
+      setProfileName("");
+      setMessage(listed.length ? "Docker models loaded." : "Docker Model Runner responded, but no models were listed.");
+    } catch (e) {
+      setDockerModels([]);
+      setMessage((e && e.message) || "Could not reach Docker Model Runner.");
+    }
+    setBusy(false);
+  };
+
+  const finish = async () => {
+    setBusy(true);
+    try {
+      const picked = model.trim();
+      if (!picked) throw new Error("Choose a model first.");
+      let nextProfile = null;
+      if (setupMode === "ollama") {
+        if (!installed || !running || !models.includes(picked)) throw new Error("Install or start Ollama, then pull the selected model.");
+        nextProfile = { provider: "ollama", model: picked, baseUrl: "http://127.0.0.1:11434" };
+      } else if (setupMode === "docker") {
+        if (!dockerModels.includes(picked)) throw new Error("List Docker models, then choose one of the available models.");
+        nextProfile = {
+          provider: "openai-compatible",
+          model: picked,
+          baseUrl: dockerBaseUrl.trim() || "http://localhost:12434/engines/v1",
+        };
+      } else {
+        const key = apiKey.trim();
+        if (!key) throw new Error("Add an API key for the selected cloud provider.");
+        nextProfile = {
+          provider: cloudProvider,
+          model: picked,
+          baseUrl: cloudProvider === "openai-compatible" ? cloudBaseUrl.trim() : undefined,
+          apiKey: key,
+        };
+      }
+      nextProfile.id = profileIdFor(nextProfile);
+      nextProfile.label = profileName.trim() || providerLabel(nextProfile.provider) + " " + nextProfile.model;
+      const priorProfiles = profilesFromSettings(savedSettings);
+      const profiles = priorProfiles.filter((p) => p.id !== nextProfile.id).concat(nextProfile);
+      const priorDefaultId = savedSettings && savedSettings.defaultProfileId;
+      const currentTaskDefaults = taskDefaults || {};
+      const nextTaskDefaults = Object.fromEntries(taskOptions.map((task) => {
+        const current = currentTaskDefaults[task.id];
+        return [task.id, (!current || current === priorDefaultId) ? nextProfile.id : current];
+      }));
+      const nextSettings = {
+        provider: nextProfile.provider,
+        model: nextProfile.model,
+        baseUrl: nextProfile.baseUrl,
+        apiKey: nextProfile.apiKey,
+        profiles,
+        defaultProfileId: nextProfile.id,
+        taskDefaults: nextTaskDefaults,
+      };
+      const cleanedSettings = withoutEmptyOptionals(nextSettings);
+      await desktop.saveLLMSettings(cleanedSettings);
+      setSavedSettings(cleanedSettings);
+      setTaskDefaults(nextTaskDefaults);
+      window.localStorage.setItem(setupCompleteKey, "true");
+      setOpen(false);
+    } catch (e) {
+      setMessage((e && e.message) || (typeof e === "string" ? e : "Could not save the model choice."));
+    }
+    setBusy(false);
+  };
+
+  const saveTaskDefaults = async () => {
+    const profiles = profilesFromSettings(savedSettings);
+    if (!profiles.length) return;
+    setBusy(true);
+    try {
+      const defaultProfile = activeProfileFromSettings(savedSettings) || profiles[0];
+      const nextSettings = {
+        ...(savedSettings || {}),
+        provider: defaultProfile.provider,
+        model: defaultProfile.model,
+        baseUrl: defaultProfile.baseUrl,
+        apiKey: defaultProfile.apiKey,
+        profiles,
+        defaultProfileId: (savedSettings && savedSettings.defaultProfileId) || defaultProfile.id,
+        taskDefaults,
+      };
+      const cleanedSettings = withoutEmptyOptionals(nextSettings);
+      await desktop.saveLLMSettings(cleanedSettings);
+      setSavedSettings(cleanedSettings);
+      setMessage("Task defaults saved.");
+    } catch (e) {
+      setMessage((e && e.message) || (typeof e === "string" ? e : "Could not save task defaults."));
+    }
+    setBusy(false);
+  };
+
+  if (!open) return null;
+  const installed = !!(status && status.installed);
+  const running = !!(status && status.running);
+  const hasModel = models.includes(model);
+  const canUseModel = setupMode === "ollama"
+    ? installed && running && hasModel && !!model.trim()
+    : setupMode === "docker"
+      ? !!model.trim() && !!dockerBaseUrl.trim() && dockerModels.includes(model.trim())
+      : !!model.trim() && !!apiKey.trim() && (cloudProvider !== "openai-compatible" || !!cloudBaseUrl.trim());
+  const savedProfiles = profilesFromSettings(savedSettings);
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "oklch(0 0 0 / 0.28)", display: "grid", placeItems: "center", padding: 24 }}>
+      <div className="card" style={{ width: "min(760px, 100%)", maxHeight: "calc(100vh - 48px)", overflow: "auto", padding: "24px 26px", boxShadow: "var(--shadow-lg)" }}>
+        <div className="eyebrow" style={{ marginBottom: 8 }}>King's Press desktop setup</div>
+        <h2 style={{ fontSize: 30, marginBottom: 10 }}>Choose your writing model</h2>
+        <p className="muted" style={{ fontSize: 15.5, lineHeight: 1.55 }}>
+          King's Press keeps your editorial database local. Use a local model by default, or add a cloud API key when you want hosted compute.
+        </p>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 16 }}>
+          <button className={"btn " + (setupMode === "ollama" ? "primary" : "ghost")} onClick={() => { setSetupMode("ollama"); if (models.length) setModel(models[0]); setProfileName(""); }} disabled={busy}>Ollama</button>
+          <button className={"btn " + (setupMode === "docker" ? "primary" : "ghost")} onClick={() => { setSetupMode("docker"); setModel(dockerModels.length ? dockerModels[0] : ""); setProfileName(""); }} disabled={busy}>Docker Model Runner</button>
+          <button className={"btn " + (setupMode === "cloud" ? "primary" : "ghost")} onClick={() => { setSetupMode("cloud"); setModel((cloudModels[cloudProvider] || [""])[0]); setProfileName(""); }} disabled={busy}>Cloud API key</button>
+        </div>
+        {setupMode === "ollama" && (
+          <>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 18 }}>
+          <div className="card" style={{ padding: 12, borderRadius: "var(--radius)" }}>
+            <div className="mono" style={{ fontSize: 11, color: "var(--ink-3)" }}>OLLAMA</div>
+            <div style={{ fontSize: 15 }}>{installed ? (running ? "Installed and running" : "Installed, not running") : "Not detected"}</div>
+          </div>
+          <div className="card" style={{ padding: 12, borderRadius: "var(--radius)" }}>
+            <div className="mono" style={{ fontSize: 11, color: "var(--ink-3)" }}>LOCAL MODELS</div>
+            <div style={{ fontSize: 15 }}>{models.length ? models.join(", ") : "None found yet"}</div>
+          </div>
+        </div>
+            {!installed && (
+          <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <p style={{ margin: 0, fontSize: 14.5 }}>Ollama is not installed yet.</p>
+            <button className="btn" disabled={busy} onClick={openOllamaDownload}><Icon name="globe" size={14} /> Install Ollama</button>
+            <button className="btn ghost" disabled={busy} onClick={checkAgain}><Icon name="check" size={14} /> Check again</button>
+          </div>
+            )}
+            {installed && !running && (
+          <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <p style={{ margin: 0, fontSize: 14.5 }}>Ollama is installed but not running.</p>
+            <button className="btn" disabled={busy} onClick={startOllama}><Icon name="play" size={14} /> Start Ollama</button>
+            <button className="btn ghost" disabled={busy} onClick={checkAgain}><Icon name="check" size={14} /> Check again</button>
+          </div>
+            )}
+            {installed && running && !hasModel && (
+          <p style={{ marginTop: 14, fontSize: 14.5 }}>Pull the selected model before finishing setup.</p>
+            )}
+          </>
+        )}
+        {setupMode === "docker" && (
+          <div style={{ marginTop: 18 }}>
+            <label className="eyebrow" style={{ display: "block", marginBottom: 6 }}>Docker Model Runner URL</label>
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(220px, 1fr) auto", gap: 8 }}>
+              <input className="field" value={dockerBaseUrl} onChange={(e) => setDockerBaseUrl(e.target.value)} />
+              <button className="btn" disabled={busy || !dockerBaseUrl.trim()} onClick={listDockerModels}><Icon name="check" size={14} /> List models</button>
+            </div>
+            <p className="muted" style={{ marginTop: 8, fontSize: 13.5 }}>Use Docker Desktop's host endpoint, usually http://localhost:12434/engines/v1.</p>
+          </div>
+        )}
+        {setupMode === "cloud" && (
+          <div style={{ marginTop: 18, display: "grid", gap: 10 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(160px, 0.6fr) minmax(220px, 1fr)", gap: 8 }}>
+              <select className="field" value={cloudProvider} onChange={(e) => { setCloudProvider(e.target.value); setModel((cloudModels[e.target.value] || [""])[0]); setProfileName(""); }}>
+                <option value="openai">OpenAI / ChatGPT</option>
+                <option value="anthropic">Anthropic</option>
+                <option value="gemini">Gemini</option>
+                <option value="xai">xAI / Grok</option>
+                <option value="openai-compatible">OpenAI-compatible</option>
+              </select>
+              <input className="field" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="API key" />
+            </div>
+            {cloudProvider === "openai-compatible" && (
+              <input className="field" value={cloudBaseUrl} onChange={(e) => setCloudBaseUrl(e.target.value)} placeholder="https://provider.example/v1" />
+            )}
+          </div>
+        )}
+        <label className="eyebrow" style={{ display: "block", marginTop: 18, marginBottom: 6 }}>Model</label>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(180px, 1fr) auto auto", gap: 8 }}>
+          <input className="field" value={model} onChange={(e) => setModel(e.target.value)} list="desktop-model-options" placeholder={setupMode === "cloud" ? "model name" : "llama3.2"} />
+          <datalist id="desktop-model-options">{(setupMode === "docker" ? dockerModels : setupMode === "cloud" ? (cloudModels[cloudProvider] || []) : modelOptions).map((m) => <option key={m} value={m} />)}</datalist>
+          <button className="btn" disabled={busy || setupMode !== "ollama" || !installed || !running || hasModel} onClick={pullModel}><Icon name="doc" size={14} /> Pull</button>
+          <button className="btn primary" disabled={busy || !canUseModel} onClick={finish}>Use model</button>
+        </div>
+        <label className="eyebrow" style={{ display: "block", marginTop: 14, marginBottom: 6 }}>Profile name</label>
+        <input className="field" value={profileName} onChange={(e) => setProfileName(e.target.value)} placeholder={providerLabel(setupMode === "cloud" ? cloudProvider : setupMode === "docker" ? "openai-compatible" : "ollama") + " " + (model || "model")} />
+        {!!savedProfiles.length && (
+          <div style={{ marginTop: 18, borderTop: "1px solid var(--line)", paddingTop: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 10 }}>
+              <div>
+                <div className="eyebrow">Task defaults</div>
+                <p className="muted" style={{ margin: "4px 0 0", fontSize: 13.5 }}>Pick which linked profile each workflow uses.</p>
+              </div>
+              <button className="btn sm" disabled={busy} onClick={saveTaskDefaults}><Icon name="check" size={14} /> Save defaults</button>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
+              {taskOptions.map((task) => (
+                <label key={task.id} style={{ display: "grid", gap: 5 }}>
+                  <span className="eyebrow">{task.label}</span>
+                  <select
+                    className="field"
+                    value={taskDefaults[task.id] || (savedSettings && savedSettings.defaultProfileId) || savedProfiles[0].id}
+                    onChange={(e) => setTaskDefaults({ ...taskDefaults, [task.id]: e.target.value })}
+                  >
+                    {savedProfiles.map((profile) => (
+                      <option key={profile.id} value={profile.id}>
+                        {(profile.label || providerLabel(profile.provider)) + " · " + profile.model}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+        {message && <p style={{ marginTop: 12, color: "var(--accent-ink)", fontSize: 14 }}>{message}</p>}
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const state = useStore();
   const [view, setView] = React.useState("library");
+  const [desktopNotice, setDesktopNotice] = React.useState(null);
+  const [backupBusy, setBackupBusy] = React.useState(false);
   const isMobile = window.useIsMobile();
   const role = state.role || "author";
 
@@ -293,22 +773,44 @@ function App() {
   const activeCampaign = campaigns.find((c) => c.id === state.activeCampaignId) || campaigns[0];
   const refs = (activeCampaign && activeCampaign.references) || {};
   const refCtx = window.AI.refContext(refs);
-  const campaignPieces = state.pieces.filter((p) => p.campaignId === state.activeCampaignId);
+  const campaignPieces = activeCampaign ? state.pieces.filter((p) => p.campaignId === activeCampaign.id) : [];
 
   const active = state.pieces.find((p) => p.id === state.activePieceId);
   const inWorkspace = view === "workspace" && active;
+  const hasDesktopBridge = !!(window.KINGS_DESKTOP && window.KINGS_DESKTOP.isDesktop && window.KINGS_DESKTOP.isDesktop());
 
   const openPiece = (id) => { window.Store.setActive(id); setView("workspace"); };
   const goLibrary = () => { setView("library"); window.Store.setActive(null); };
+  const openModelSetup = () => window.dispatchEvent(new Event("kingspress:open-model-setup"));
+  const createFirstCampaign = () => {
+    const name = prompt("Campaign name", "King's Press");
+    if (name && name.trim()) {
+      window.Store.addCampaign(name.trim());
+      setView("library");
+    }
+  };
+  const createDesktopBackup = async () => {
+    if (!hasDesktopBridge || backupBusy) return;
+    setBackupBusy(true);
+    setDesktopNotice(null);
+    try {
+      const result = await window.KINGS_DESKTOP.createLocalBackup();
+      setDesktopNotice({ type: "ok", text: "Backup created" + (result && result.path ? ": " + result.path : ".") });
+    } catch (e) {
+      setDesktopNotice({ type: "err", text: (e && e.message) || "Could not create backup." });
+    }
+    setBackupBusy(false);
+  };
 
   return (
     <div className="app">
       <div className="topbar">
         <div className="brand" onClick={goLibrary}>
-          <span className="mark">Pillar <span className="em">Press</span></span>
+          <span className="mark">King's <span className="em">Press</span></span>
           <span className="sub">Editorial Desk</span>
         </div>
         <nav className="topnav">
+          <button className={view === "desk" ? "active" : ""} onClick={() => setView("desk")}>Desk</button>
           <button className={view === "library" ? "active" : ""} onClick={goLibrary}>Library</button>
           <button className={view === "book" ? "active" : ""} onClick={() => setView("book")}>Book</button>
           <button className={view === "gather" ? "active" : ""} onClick={() => setView("gather")}>Gather</button>
@@ -320,35 +822,72 @@ function App() {
         <CampaignSwitcher campaigns={campaigns} activeId={state.activeCampaignId}
           onSelect={(id) => window.Store.setActiveCampaign(id)} onAdd={(n) => window.Store.addCampaign(n)} />
         {!isMobile && <RoleSwitch role={role} onChange={(r) => window.Store.setRole(r)} />}
+        {hasDesktopBridge && (
+          <>
+            <button className="icon-btn" onClick={createDesktopBackup} title="Create local backup" disabled={backupBusy}>
+              {backupBusy ? <Spinner size={15} /> : <Icon name="db" size={16} />}
+            </button>
+            <button className="icon-btn" onClick={openModelSetup} title="Model settings">
+              <Icon name="key" size={16} />
+            </button>
+          </>
+        )}
         <button className="icon-btn" onClick={() => window.Store.toggleTheme()} title="Toggle light / dark">
           <Icon name={state.theme === "dark" ? "sun" : "moon"} size={16} />
         </button>
       </div>
 
-      {view === "references" && <References refs={refs} role={role} campaignName={activeCampaign && activeCampaign.name} />}
-      {view === "weave" && (
+      {!activeCampaign && (
+        <EmptyState
+          icon="book"
+          title="Create your first campaign"
+          body="King’s Press starts empty now. Add only the campaigns you actually use, then write pieces, references, Gather sources, and Studio assets inside that campaign."
+          action={<button className="btn primary" style={{ marginTop: 18 }} onClick={createFirstCampaign}><Icon name="plus" size={15} /> New campaign</button>}
+        />
+      )}
+
+      {activeCampaign && view === "references" && <References refs={refs} role={role} campaignName={activeCampaign && activeCampaign.name} />}
+      {activeCampaign && view === "desk" && (
+        <Desk campaignId={activeCampaign.id} onOpenPiece={openPiece} />
+      )}
+      {activeCampaign && view === "weave" && (
         <Weave weave={window.Store.getWeave()} refCtx={refCtx} onOpenPiece={openPiece} />
       )}
-      {view === "gather" && (
-        <Gather campaignId={state.activeCampaignId} refCtx={refCtx} onGoWeave={() => setView("weave")} />
+      {activeCampaign && view === "gather" && (
+        <Gather campaignId={activeCampaign.id} refCtx={refCtx} onGoWeave={() => setView("weave")} />
       )}
-      {view === "studio" && (
-        <Studio campaignId={state.activeCampaignId} pieces={campaignPieces} onOpenPiece={openPiece} />
+      {activeCampaign && view === "studio" && (
+        <Studio campaignId={activeCampaign.id} pieces={campaignPieces} onOpenPiece={openPiece} />
       )}
-      {view === "book" && (
+      {activeCampaign && view === "book" && (
         <BookWriter campaigns={campaigns} allPieces={state.pieces} role={role}
           onOpenPiece={openPiece} onActivateCampaign={(id) => window.Store.setActiveCampaign(id)} />
       )}
-      {view === "library" && (
+      {activeCampaign && view === "library" && (
         <Library pieces={campaignPieces} campaignName={activeCampaign && activeCampaign.name} onOpen={openPiece}
           onNew={() => { window.Store.createPiece("Untitled piece"); setView("workspace"); }}
           onDelete={(id) => window.Store.deletePiece(id)} />
       )}
-      {inWorkspace && <Workspace piece={active} refs={refs} onBack={goLibrary} onGoStudio={() => setView("studio")} />}
-      {view === "workspace" && !active && (
+      {activeCampaign && inWorkspace && <Workspace piece={active} refs={refs} onBack={goLibrary} onGoStudio={() => setView("studio")} />}
+      {activeCampaign && view === "workspace" && !active && (
         <EmptyState icon="doc" title="No piece open" body="Head back to the Library to open or start one." />
       )}
+      {desktopNotice && (
+        <div style={{
+          position: "fixed", right: 18, bottom: 18, zIndex: 180, maxWidth: "min(520px, calc(100vw - 36px))",
+          padding: "10px 13px", borderRadius: "var(--radius)", boxShadow: "var(--shadow-lg)",
+          border: "1px solid var(--hair)", background: "var(--paper-2)",
+          color: desktopNotice.type === "err" ? "var(--sev-must)" : "var(--ink)",
+          fontSize: 13.5, lineHeight: 1.45,
+        }}>
+          {desktopNotice.text}
+          <button className="icon-btn" style={{ width: 24, height: 24, marginLeft: 8, verticalAlign: "middle" }} onClick={() => setDesktopNotice(null)} title="Dismiss">
+            <Icon name="xLogo" size={13} />
+          </button>
+        </div>
+      )}
       <TweaksLayer theme={state.theme} />
+      <DesktopOnboarding />
     </div>
   );
 }

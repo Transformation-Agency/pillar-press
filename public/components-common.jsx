@@ -160,7 +160,7 @@ function useIsMobile(bp = 760) {
 }
 
 /* Read an uploaded file into research text. Text-like files are decoded in the
-   browser; PDFs, images, and .docx go to /api/extract (Claude / mammoth). */
+   browser; PDFs, images, and .docx go to /api/extract (LLM fallback / mammoth). */
 const UPLOAD_TEXT_EXT = ["txt", "md", "markdown", "csv", "tsv", "json", "log", "html", "htm", "xml", "yaml", "yml", "rtf"];
 async function extractFileText(file) {
   const ext = (file.name.split(".").pop() || "").toLowerCase();

@@ -1,0 +1,49 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "King's Press Editorial Desk",
+  "version": "0.1.0",
+  "identifier": "com.kingspress.editorialdesk",
+  "build": {
+    "beforeDevCommand": "npm run desktop:web",
+    "devUrl": "http://localhost:3000",
+    "beforeBuildCommand": "npm run desktop:web:build",
+    "frontendDist": "../public"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "King's Press Editorial Desk",
+        "width": 1280,
+        "height": 840,
+        "minWidth": 1024,
+        "minHeight": 700,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "Productivity",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "shortDescription": "Local-first editorial desk for King's Press",
+    "longDescription": "King's Press Editorial Desk is a local-first AI-assisted publishing and editorial operations workstation.",
+    "macOS": {
+      "signingIdentity": "-"
+    },
+    "resources": [
+      "resources/desktop-server",
+      "resources/node"
+    ]
+  }
+}

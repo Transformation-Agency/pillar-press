@@ -1,4 +1,4 @@
-import { ai, extractJSON, repairJSON, type AI } from "@/lib/anthropic";
+import { ai, extractJSON, repairJSON, type AI } from "@/lib/llm";
 
 export interface ImagePromptInput {
   /** The author's seed (typed text, or the output's media recommendation). */

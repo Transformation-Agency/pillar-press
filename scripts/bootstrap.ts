@@ -1,7 +1,7 @@
 /**
- * Dev bootstrap: ensure a workspace exists for a user id, seeded with the 11
- * default campaigns + their references. Idempotent. Used for local end-to-end
- * testing with the x-debug-user auth seam.
+ * Dev bootstrap: ensure a workspace exists for a user id. Idempotent. Used for
+ * local end-to-end testing with the x-debug-user auth seam. Campaigns are no
+ * longer seeded by default; create only the campaigns a test actually needs.
  *
  *   DATABASE_URL=... DEV_USER=dev-user npx tsx scripts/bootstrap.ts
  */

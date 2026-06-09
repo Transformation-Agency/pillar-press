@@ -1,0 +1,1 @@
+{"main-local-editorial-desk":{"identifier":"main-local-editorial-desk","description":"Allows the main King’s Press desktop webview to use local-first setup commands.","remote":{"urls":["http://127.0.0.1:*","http://localhost:*"]},"local":true,"windows":["main"],"permissions":["core:default","desktop-setup"]}}

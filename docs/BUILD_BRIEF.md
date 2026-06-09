@@ -1,27 +1,30 @@
-# BUILD_BRIEF.md — Pillar Press backend scope
+# BUILD_BRIEF.md — King's Press desktop scope
 
 This is the complete feature scope. For each feature: what it does, **where the logic
-already lives** in `prototype-reference/`, and the **server work** to do. Port prompts and
-rules verbatim; build the persistence and auth around them.
+already lived** in `prototype-reference/`, and the desktop/local-first work needed to keep
+the product shippable. Preserve prompts and rules unless the product owner explicitly asks
+to change editorial behavior.
 
 ---
 
 ## 0. Platform & cross-cutting
 
-- **Stack:** Next.js App Router (Vercel), Postgres + Drizzle, Zod. Mirror `server/`.
-- **Auth:** real provider behind `server/lib/auth.ts`. Two roles: **author** (full) and
-  **assistant** (can view/edit drafts, outputs, and media, but **cannot edit References**).
-  Enforce the assistant restriction server-side on reference write routes.
-- **Anthropic:** the prototype calls a browser helper `window.claude.complete(...)`
-  (model `claude-haiku-4-5`, 1024-token output cap). Replace with a **server-side Anthropic
-  client** using `ANTHROPIC_API_KEY`. You may use a larger `max_tokens` server-side, but
-  **keep the same prompts and JSON output schemas** (see `ai.js`, `gates.js`,
-  `generators.js`, `weave.js`). The chunking exists because of the small cap — if you raise
-  the cap you may simplify it, but behavior/outputs must match.
+- **Stack:** Tauri desktop shell + packaged Next.js App Router server + SQLite local
+  database + local app-data file storage. Hosted Postgres/Supabase compatibility can remain,
+  but it is not the default desktop runtime.
+- **Auth:** local-first desktop mode resolves a single local owner/workspace without a cloud
+  auth provider. UI roles still model **author** (full) and **assistant** (can view/edit
+  drafts, outputs, and media, but **cannot edit References**) and server routes should
+  continue enforcing the assistant restriction where role checks apply.
+- **LLM providers:** model calls run server-side through the provider-neutral LLM layer
+  (`LLM_PROVIDER=ollama|openai-compatible|openai|anthropic|gemini|xai`). Desktop setup saves
+  local Ollama, Docker Model Runner, or optional cloud provider choices into local app-data
+  settings. Anthropic compatibility remains for existing env files, but local models are the
+  default product posture. **Keep the same prompts and JSON output schemas**.
 - **Resilient parsing:** keep `ai.js`'s `extractJSON` + `repairJSON` (truncation recovery)
   server-side; the model output is not always clean JSON.
-- **Everything is scoped** to user/workspace and (for pieces/media/references) to a
-  **campaign**. No cross-user/-campaign leakage.
+- **Everything is scoped** to the local workspace and (for pieces/media/references) to a
+  **campaign**. Hosted mode must still avoid cross-user/-campaign leakage.
 
 ---
 
@@ -55,8 +58,10 @@ The editorial source of truth every AI pass reads: **strategy + throughlines**, 
 **two voice registers**, **clarity rules**, **red lines**, **self-vision**, **gate spec**.
 Editable in place; the gates/generators/weave must always read the **current** version.
 
-- Source of truth: `store.js` `SEED_REFERENCES` (full default content) and
-  `ai.js` `refContext()` (the exact serialization passed into prompts — **reuse it**).
+- Source of truth: user-created campaign references and `ai.js` `refContext()`
+  (the exact serialization passed into prompts — **reuse it**). The former
+  prototype campaign list and bulky default references are not seeded in the
+  desktop product.
 - **Server:** store the references document per campaign (JSONB is fine). A
   `buildRefContext(references)` server util must produce the **same string** `refContext()`
   produces. Reference writes are author-only.
@@ -69,8 +74,8 @@ findings at three severities (**Must-fix / Consider / Note**), grouped by gate.
 - Source of truth: `gates.js` — `GATES` array with each gate's **exact prompt**, the
   per-gate JSON schema (strategy/audience/tone/rigor/stress/clarity/self each have a
   specific shape), `runGate()`, and `SEVERITY`. `ai.js` `refContext` feeds the system prompt.
-- **Server:** `POST /api/pieces/:id/review` runs all 7 gates **in order**, each one Anthropic
-  call with the gate prompt + ref context, persists results into the piece's `packet`
+- **Server:** `POST /api/pieces/:id/review` runs all 7 gates **in order**, each one configured
+  LLM call with the gate prompt + ref context, persists results into the piece's `packet`
   incrementally (so a UI can stream/poll progress), then sets status `Draft → Reviewed`.
   Use one call per gate (keeps each output bounded). Return the packet. Findings carry an
   `anchor` (verbatim quote) used by the UI to jump to the passage — preserve it.
@@ -132,33 +137,48 @@ Generate **images**, **image→video animation**, **avatar/talking-head video**,
 (TTS)**, and produce **video synced to ElevenLabs audio** (avatar lip-sync or animation with
 the audio as soundtrack). Media is campaign-scoped and attachable to a piece.
 
-- **The production backend for this is already written** in `server/` (the reference
-  implementation): `server/lib/hedra.ts`, `server/lib/elevenlabs.ts`, validation, errors,
-  the `media_jobs` schema/migration, and routes for models, credits, assets upload,
-  **generate** (incl. the ElevenLabs→Hedra audio-sync step), user-scoped **status** polling,
-  voices, and media list/delete. Finish wiring `auth.ts`/`db.ts`, deploy, and connect the UI.
-- The **front-end** Studio is built (`screen-studio.jsx`, `studio.js`, `media-components.jsx`);
-  its generation is **simulated**. Swap the simulated `runJob`/`speak` for
-  `fetch('/api/hedra/generate')` + poll `'/api/hedra/status/:id'`. The model/voice catalogs
-  in `studio.js` are fallbacks — prefer the live `/api/hedra/models` (don't hardcode a model).
+- Media runs through the existing server route handlers and local-first storage/database
+  branches: `lib/hedra.ts`, `lib/elevenlabs.ts`, validation, errors, `media_jobs`, routes
+  for models, credits, assets upload, **generate** (incl. the ElevenLabs→Hedra audio-sync
+  step), user-scoped **status** polling, voices, and media list/delete.
+- Studio provider status is capability-driven. `/api/media/providers` reports which
+  providers are configured for image, video/avatar, and audio without returning secrets.
+  OpenAI, xAI/Grok, and custom OpenAI-compatible image endpoints can join the image
+  composer; OpenAI and ElevenLabs can provide voice; Hedra remains the video/avatar provider.
+- The front-end Studio should call `fetch('/api/hedra/generate')` and poll
+  `'/api/hedra/status/:id'`. The model/voice catalogs in `studio.js` are fallbacks — prefer
+  the live `/api/hedra/models` when the optional cloud keys are configured.
 - Async: poll `status` every ~3s; stop on completed/failed/canceled; persist output URLs.
   Treat Hedra URLs as possibly temporary — refresh from status, don't assume permanence.
 
 ## 10. Settings
 
-Per-user/workspace: Google Drive link (folder id + tokens), and — only relevant in the
-prototype — Hedra/Eleven keys. **In production the provider keys are server env vars, not
-user settings.** Keep a `settings` concept for Drive folder + non-secret prefs.
+Per-user/workspace: local desktop model/provider profiles, per-task LLM defaults,
+Google Drive link (folder id + tokens when hosted Drive is used), and non-secret
+preferences. Desktop setup may save optional provider API keys in the native app
+data settings file; local backups must redact them. Hosted/server deployments
+can still use environment variables instead.
 
 ---
 
 ## Acceptance criteria (whole app)
 
-- Builds + deploys on Vercel; no secret reachable client-side.
-- Gate review, revision, platform outputs, and weave all run server-side with the **same
-  prompts and output shapes** as the prototype, persisted per piece.
+- `npm run desktop:build` produces a branded King’s Press `.app` and DMG.
+- The packaged app launches from the app icon, starts its local server, initializes SQLite,
+  starts with no default campaigns, serves the UI, and does not require Supabase/Postgres.
+- The desktop browser shell boots from local packaged JS and system fonts; it does not
+  require CDN access for React, Babel, or typography.
+- First-run setup lets a normal user install/use Ollama, start an existing Ollama install,
+  choose an installed/pulled local model, use Docker Model Runner models, or save an
+  optional hosted provider API key. The desk UI also lets the user reopen model settings,
+  manage multiple provider profiles, and choose per-task defaults.
+- Gate review, revision, platform outputs, Gather summaries, and Weave all run through the
+  provider-neutral LLM layer with the **same prompts and output shapes** as the prototype.
 - Campaigns isolate references + pieces + media; assistant role can't edit references.
-- Media generation (image, animation, avatar voiced video) works through `/api/hedra/*`
-  with the ElevenLabs audio-sync path; jobs persist and poll to completion.
-- Drive export works server-side; download fallback intact.
-- Authorization enforced + tested; no cross-user/-campaign reads.
+- Local storage replaces Supabase Storage in desktop mode; local Drive/export fallback works.
+- Gather schedules are durable and run due jobs in the desktop background process.
+- Local backups include SQLite data, local files, redacted settings, and a manifest.
+- `npm run typecheck`, `npm test`, `cargo test --manifest-path src-tauri/Cargo.toml`, and
+  `npm run desktop:verify-release` pass.
+- Developer ID signing/notarization is supported for public distribution. Before
+  release, run a clean-machine installer smoke and the signed release verifier.

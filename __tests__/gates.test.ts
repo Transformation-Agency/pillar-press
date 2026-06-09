@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { GATES, PREAMBLE, SEVERITY, runGate, type GateResult } from "@/lib/gates";
-import type { AI } from "@/lib/anthropic";
+import type { AI } from "@/lib/llm";
 
 // A fake AI that records the prompts/systems it was called with and returns a
 // canned JSON object. Proves the gate logic is PURE — no DB, no network.

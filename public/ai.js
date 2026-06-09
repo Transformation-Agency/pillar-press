@@ -1,6 +1,6 @@
 /* ============================================================
-   AI — wrapper around window.claude.complete with JSON parsing.
-   Plain JS. Exposes window.AI.
+   AI helpers — JSON parsing + reference context only.
+   Model calls are server-side through /api routes.
    ============================================================ */
 (function () {
 
@@ -66,34 +66,6 @@
     return null;
   }
 
-  async function raw(messages, system) {
-    const msgs = system
-      ? [{ role: "user", content: system },
-         { role: "assistant", content: "Understood. I will follow these instructions exactly and reply only in the specified format." },
-         ...messages]
-      : messages;
-    return await window.claude.complete({ messages: msgs });
-  }
-
-  // Call expecting JSON. Falls back to truncation repair, then a repair round-trip.
-  async function json(prompt, { system } = {}) {
-    const messages = [{ role: "user", content: prompt }];
-    let out = await raw(messages, system);
-    let parsed = extractJSON(out) || repairJSON(out);
-    if (parsed) return parsed;
-    // repair attempt
-    messages.push({ role: "assistant", content: out });
-    messages.push({ role: "user", content: "Return ONLY valid JSON matching the schema. Be concise so it fits. No prose, no code fences." });
-    out = await raw(messages, system);
-    parsed = extractJSON(out) || repairJSON(out);
-    if (parsed) return parsed;
-    throw new Error("Could not parse JSON from model output.");
-  }
-
-  async function text(prompt, { system } = {}) {
-    return await raw([{ role: "user", content: prompt }], system);
-  }
-
   // Build a compact reference context block the gates/generators read.
   function refContext(refs) {
     const r = refs || (window.Store && window.Store.activeReferences()) || {};
@@ -126,5 +98,5 @@
     return lines.join("\n");
   }
 
-  window.AI = { json, text, extractJSON, repairJSON, refContext };
+  window.AI = { extractJSON, repairJSON, refContext };
 })();

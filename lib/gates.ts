@@ -13,7 +13,7 @@
  * can fill its rail gate-by-gate (the review route persists piece.packet[gateId]
  * incrementally after each gate).
  */
-import type { AI } from "@/lib/anthropic";
+import type { AI } from "@/lib/llm";
 
 export type Severity = "must" | "consider" | "note";
 

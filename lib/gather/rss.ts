@@ -6,7 +6,7 @@ const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_
 
 export async function runRss(feedUrl: string, max = 10): Promise<GatherItem[]> {
   if (!/^https?:\/\//i.test(feedUrl)) throw new GatherError(400, "bad_request", "Feed URL must be http(s).");
-  const xml = await fetchText(feedUrl, { headers: { "User-Agent": "PillarPress/1.0 (+gather)" } });
+  const xml = await fetchText(feedUrl, { headers: { "User-Agent": "KingsPress/1.0 (+gather)" } });
   const doc = parser.parse(xml);
 
   // RSS 2.0

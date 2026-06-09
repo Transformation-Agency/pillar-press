@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { requireUser } from "@/lib/auth";
 import { db, settings, type Setting } from "@/lib/db";
+import { getOrCreateLocalSettings, updateLocalSettings, type LocalSetting } from "@/lib/local/database";
+import { isLocalFirstMode } from "@/lib/local/mode";
 import { toErrorResponse } from "@/lib/errors";
 import {
   updateSettingsSchema,
@@ -40,9 +42,25 @@ function toView(row: Setting): SettingsView {
   };
 }
 
+function toLocalView(row: LocalSetting): SettingsView {
+  return {
+    id: row.id,
+    driveFolderId: row.driveFolderId ?? null,
+    prefs: row.prefs as Prefs,
+    driveLinked: Boolean(row.driveRefreshToken),
+    createdAt: new Date(row.createdAt),
+    updatedAt: new Date(row.updatedAt),
+  };
+}
+
 export async function GET() {
   try {
     const user = await requireUser();
+    if (isLocalFirstMode()) {
+      return NextResponse.json({
+        settings: toLocalView(getOrCreateLocalSettings(user.id, user.workspaceId ?? "local-workspace")),
+      });
+    }
 
     const [existing] = await db.select().from(settings).where(scope(user)).limit(1);
     if (existing) return NextResponse.json({ settings: toView(existing) });
@@ -67,6 +85,10 @@ export async function PUT(req: Request) {
   try {
     const user = await requireUser();
     const body = updateSettingsSchema.parse(await req.json());
+    if (isLocalFirstMode()) {
+      const updated = updateLocalSettings(user.id, user.workspaceId ?? "local-workspace", body);
+      return NextResponse.json({ settings: toLocalView(updated) });
+    }
 
     // Only the non-secret, client-owned columns may be written here.
     const patch: Partial<Setting> = { updatedAt: new Date() };
