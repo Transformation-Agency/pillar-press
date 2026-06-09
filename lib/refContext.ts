@@ -4,7 +4,7 @@
  * Builds a compact reference-context block that the gates/generators read.
  * The output of buildRefContext MUST be BYTE-IDENTICAL to what ai.js produces
  * for the same references document (THROUGHLINES / Strategy note / AUDIENCES /
- * REGISTERS / CLARITY RULES / RED LINES / SELF-VISION blocks, in this exact
+ * REGISTERS / CLARITY RULES / RED LINES / SELF-VISION / GATE PREFERENCES blocks, in this exact
  * order, with the same punctuation, prefixes, and leading "\n" separators).
  *
  * The shape mirrors the references `doc` (see DATA_MODEL.md / SEED_REFERENCES
@@ -45,8 +45,11 @@ export interface ReferencesDoc {
   selfVision?: {
     body?: string;
   };
-  // Other fields (title, gateSpec, etc.) may be present on the doc but are not
-  // consumed by refContext(); they are intentionally ignored here.
+  gateSpec?: {
+    body?: string;
+  };
+  // Other fields may be present on the doc but are not consumed by refContext();
+  // they are intentionally ignored here.
   [key: string]: unknown;
 }
 
@@ -87,6 +90,9 @@ export function buildRefContext(references?: ReferencesDoc | null): string {
   }
   if (r.selfVision && r.selfVision.body) {
     lines.push("\nSELF-VISION (public identity):\n" + r.selfVision.body);
+  }
+  if (r.gateSpec && r.gateSpec.body) {
+    lines.push("\nGATE PREFERENCES:\n" + r.gateSpec.body);
   }
   return lines.join("\n");
 }

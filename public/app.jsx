@@ -223,7 +223,7 @@ function RoleSwitch({ role, onChange }) {
   return (
     <div style={{ display: "flex", gap: 2, background: "var(--paper-sunk)", borderRadius: 999, padding: 3 }}>
       {[["author", "Author"], ["assistant", "Assistant"]].map(([id, l]) => (
-        <button key={id} onClick={() => onChange(id)} className="mono" title={id === "assistant" ? "Assistant can edit drafts & outputs, but not References" : "Full access"}
+        <button key={id} onClick={() => onChange(id)} className="mono" title={id === "assistant" ? "Assistant can edit drafts and outputs, but not Preferences" : "Full access"}
           style={{ fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", padding: "5px 11px", borderRadius: 999, border: "none", cursor: "pointer",
             background: role === id ? "var(--paper-2)" : "transparent", color: role === id ? "var(--ink)" : "var(--ink-3)",
             boxShadow: role === id ? "var(--shadow-sm)" : "none" }}>{l}</button>
@@ -766,12 +766,13 @@ function App() {
   const [view, setView] = React.useState("library");
   const [desktopNotice, setDesktopNotice] = React.useState(null);
   const [backupBusy, setBackupBusy] = React.useState(false);
+  const [setupOpen, setSetupOpen] = React.useState(false);
   const isMobile = window.useIsMobile();
   const role = state.role || "author";
 
   const campaigns = state.campaigns || [];
   const activeCampaign = campaigns.find((c) => c.id === state.activeCampaignId) || campaigns[0];
-  const refs = (activeCampaign && activeCampaign.references) || {};
+  const refs = window.Store.activeReferences ? window.Store.activeReferences() : ((activeCampaign && activeCampaign.references) || {});
   const refCtx = window.AI.refContext(refs);
   const campaignPieces = activeCampaign ? state.pieces.filter((p) => p.campaignId === activeCampaign.id) : [];
 
@@ -782,6 +783,14 @@ function App() {
   const openPiece = (id) => { window.Store.setActive(id); setView("workspace"); };
   const goLibrary = () => { setView("library"); window.Store.setActive(null); };
   const openModelSetup = () => window.dispatchEvent(new Event("kingspress:open-model-setup"));
+  React.useEffect(() => {
+    let cancelled = false;
+    Promise.resolve(window.Store.ready).then(() => {
+      if (cancelled) return;
+      if (!window.Store.getPref("setupHelperCompleteV1", false)) setSetupOpen(true);
+    });
+    return () => { cancelled = true; };
+  }, []);
   const createFirstCampaign = () => {
     const name = prompt("Campaign name", "King's Press");
     if (name && name.trim()) {
@@ -816,12 +825,15 @@ function App() {
           <button className={view === "gather" ? "active" : ""} onClick={() => setView("gather")}>Gather</button>
           <button className={view === "weave" ? "active" : ""} onClick={() => setView("weave")}>Weave</button>
           <button className={view === "studio" ? "active" : ""} onClick={() => setView("studio")}>Studio</button>
-          <button className={view === "references" ? "active" : ""} onClick={() => setView("references")}>References</button>
+          <button className={view === "references" ? "active" : ""} onClick={() => setView("references")}>Preferences</button>
         </nav>
         <div className="spacer" />
         <CampaignSwitcher campaigns={campaigns} activeId={state.activeCampaignId}
           onSelect={(id) => window.Store.setActiveCampaign(id)} onAdd={(n) => window.Store.addCampaign(n)} />
         {!isMobile && <RoleSwitch role={role} onChange={(r) => window.Store.setRole(r)} />}
+        <button className="btn sm" onClick={() => setSetupOpen(true)} title="Setup provider, campaign, and preferences">
+          <Icon name="gear" size={13} /> Setup
+        </button>
         {hasDesktopBridge && (
           <>
             <button className="icon-btn" onClick={createDesktopBackup} title="Create local backup" disabled={backupBusy}>
@@ -841,7 +853,7 @@ function App() {
         <EmptyState
           icon="book"
           title="Create your first campaign"
-          body="King’s Press starts empty now. Add only the campaigns you actually use, then write pieces, references, Gather sources, and Studio assets inside that campaign."
+          body="King’s Press starts empty now. Add only the campaigns you actually use, then write pieces, preferences, Gather sources, and Studio assets inside that campaign."
           action={<button className="btn primary" style={{ marginTop: 18 }} onClick={createFirstCampaign}><Icon name="plus" size={15} /> New campaign</button>}
         />
       )}
@@ -887,6 +899,14 @@ function App() {
         </div>
       )}
       <TweaksLayer theme={state.theme} />
+      {window.SetupHelper && (
+        <SetupHelper
+          open={setupOpen}
+          onClose={() => setSetupOpen(false)}
+          onOpenProviderSetup={openModelSetup}
+          onComplete={() => { window.Store.setPref("setupHelperCompleteV1", true); setSetupOpen(false); }}
+        />
+      )}
       <DesktopOnboarding />
     </div>
   );

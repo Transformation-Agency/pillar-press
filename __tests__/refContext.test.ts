@@ -63,6 +63,9 @@ const REFERENCE_FIXTURE = {
   selfVision: {
     body: "The author is a builder who writes: technically fluent but not a hype-man, warm but exacting, more interested in good questions than hot takes. Optimistic about technology in service of human relationship and judgment. Reads as a person thinking in public, not a brand performing authority. Self-alignment gate flags anything that contradicts this — false bravado, manufactured outrage, borrowed jargon, or certainty the author wouldn't actually claim.",
   },
+  gateSpec: {
+    body: "Run the gates with standard strictness. Be especially hard on unsupported claims and generic voice drift.",
+  },
 };
 
 const GOLDEN = [
@@ -105,6 +108,9 @@ const GOLDEN = [
   "",
   "SELF-VISION (public identity):",
   "The author is a builder who writes: technically fluent but not a hype-man, warm but exacting, more interested in good questions than hot takes. Optimistic about technology in service of human relationship and judgment. Reads as a person thinking in public, not a brand performing authority. Self-alignment gate flags anything that contradicts this — false bravado, manufactured outrage, borrowed jargon, or certainty the author wouldn't actually claim.",
+  "",
+  "GATE PREFERENCES:",
+  "Run the gates with standard strictness. Be especially hard on unsupported claims and generic voice drift.",
 ].join("\n");
 
 describe("buildRefContext", () => {
@@ -143,5 +149,9 @@ describe("buildRefContext", () => {
 
   it("omits SELF-VISION when body is missing", () => {
     expect(buildRefContext({ selfVision: {} })).toBe("");
+  });
+
+  it("omits GATE PREFERENCES when body is missing", () => {
+    expect(buildRefContext({ gateSpec: {} })).toBe("");
   });
 });

@@ -95,6 +95,9 @@
     if (r.selfVision && r.selfVision.body) {
       lines.push("\nSELF-VISION (public identity):\n" + r.selfVision.body);
     }
+    if (r.gateSpec && r.gateSpec.body) {
+      lines.push("\nGATE PREFERENCES:\n" + r.gateSpec.body);
+    }
     return lines.join("\n");
   }
 

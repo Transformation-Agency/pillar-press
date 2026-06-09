@@ -61,6 +61,7 @@
 
   // tracks which campaigns have had their per-campaign data hydrated
   const loadedCampaigns = new Set();
+  const pendingCampaignCreates = new Map();
 
   function emit() { listeners.forEach((l) => l(state)); }
 
@@ -85,6 +86,35 @@
 
   function ensureCampaign(id) {
     return (state.campaigns || []).find((c) => c.id === id) || null;
+  }
+
+  function replaceCampaignId(tempId, realId) {
+    if (!tempId || !realId || tempId === realId) return;
+    const c = ensureCampaign(tempId);
+    if (!c) return;
+    c.id = realId;
+    if (state.activeCampaignId === tempId) state.activeCampaignId = realId;
+    if (state.settings && state.settings.prefs && state.settings.prefs.activeCampaignId === tempId) {
+      state.settings.prefs.activeCampaignId = realId;
+    }
+    (state.pieces || []).forEach((p) => { if (p.campaignId === tempId) p.campaignId = realId; });
+    (state.gatherSources || []).forEach((s) => { if (s.campaignId === tempId) s.campaignId = realId; });
+    (state.gatherItems || []).forEach((i) => { if (i.campaignId === tempId) i.campaignId = realId; });
+    (state.gatherSummaries || []).forEach((s) => { if (s.campaignId === tempId) s.campaignId = realId; });
+    (state.media || []).forEach((m) => { if (m.campaignId === tempId) m.campaignId = realId; });
+    if (loadedCampaigns.has(tempId)) {
+      loadedCampaigns.delete(tempId);
+      loadedCampaigns.add(realId);
+    }
+  }
+
+  function replacePieceId(tempId, realId) {
+    if (!tempId || !realId || tempId === realId) return;
+    const p = (state.pieces || []).find((x) => x.id === tempId);
+    if (!p) return;
+    p.id = realId;
+    if (state.activePieceId === tempId) state.activePieceId = realId;
+    (state.media || []).forEach((m) => { if (m.pieceId === tempId) m.pieceId = realId; });
   }
 
   /* ---- per-campaign hydration (references + pieces + gather + media) ---- */
@@ -275,9 +305,24 @@
       loadedCampaigns.add(id); // brand-new, nothing to fetch
       if (activate) { state.activeCampaignId = id; state.activePieceId = null; }
       emit();
-      bg(apiSend("POST", "/campaigns", { id, name: name || "New campaign" }), "POST /campaigns");
+      const created = apiSend("POST", "/campaigns", { name: name || "New campaign" }).then((res) => {
+        const serverCampaign = res && res.campaign;
+        if (!serverCampaign || !serverCampaign.id) return ensureCampaign(id);
+        replaceCampaignId(id, serverCampaign.id);
+        const c = ensureCampaign(serverCampaign.id);
+        if (c) Object.assign(c, { name: serverCampaign.name || c.name, slug: serverCampaign.slug || c.slug });
+        emit();
+        persistPrefs();
+        return c || ensureCampaign(serverCampaign.id);
+      });
+      pendingCampaignCreates.set(id, created);
+      created.then(() => pendingCampaignCreates.delete(id), () => pendingCampaignCreates.delete(id));
+      bg(created, "POST /campaigns");
       persistPrefs();
       return id;
+    },
+    whenCampaignSaved(id) {
+      return pendingCampaignCreates.get(id) || Promise.resolve(api.getCampaign(id));
     },
     // Hydrate a campaign's references + pieces (+ gather/media) on demand WITHOUT
     // making it the active campaign — used by the Book Writer to load a book
@@ -448,7 +493,14 @@
       state.pieces.unshift(p);
       state.activePieceId = p.id;
       emit();
-      bg(apiSend("POST", "/campaigns/" + cid + "/pieces", { id, title: p.title, original: "" }), "POST pieces");
+      bg(apiSend("POST", "/campaigns/" + cid + "/pieces", { title: p.title, original: "" }).then((res) => {
+        const serverPiece = res && res.piece;
+        if (!serverPiece || !serverPiece.id) return;
+        replacePieceId(id, serverPiece.id);
+        const current = api.getPiece(serverPiece.id);
+        if (current) Object.assign(current, normPiece(serverPiece));
+        emit();
+      }), "POST pieces");
       return p;
     },
     updatePiece(id, patch) {
