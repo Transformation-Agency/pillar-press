@@ -41,6 +41,20 @@ const ONBOARDING_ACTION_STATUSES = (ONBOARDING_RUNTIME && ONBOARDING_RUNTIME.ACT
   FAILED: "failed",
   SKIPPED: "skipped",
 };
+const ONBOARDING_METRIC_EVENTS = (ONBOARDING_RUNTIME && ONBOARDING_RUNTIME.METRIC_EVENTS) || {
+  STARTED: "onboarding_started",
+  STEP_VIEWED: "step_viewed",
+  ANSWER_CAPTURED: "answer_captured",
+  SKIPPED: "onboarding_skipped",
+  COMPLETED: "onboarding_completed",
+};
+
+function createSetupSessionId() {
+  try {
+    if (window.crypto && typeof window.crypto.randomUUID === "function") return "onb-" + window.crypto.randomUUID();
+  } catch (_err) {}
+  return "onb-" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+}
 
 function OnboardingBrand() {
   return (
@@ -275,6 +289,277 @@ function SetupStatusChip({ label }) {
   );
 }
 
+function InlineModelSetup({ status, onSaved }) {
+  const desktop = window.KINGS_DESKTOP;
+  const hasDesktop = !!(desktop && desktop.isDesktop && desktop.isDesktop());
+  const [mode, setMode] = React.useState("cloud");
+  const [provider, setProvider] = React.useState((status && status.provider && status.provider !== "ollama") ? status.provider : "openai");
+  const [baseUrl, setBaseUrl] = React.useState("");
+  const [apiKey, setApiKey] = React.useState("");
+  const [model, setModel] = React.useState((status && status.model) || "gpt-4o-mini");
+  const [profileName, setProfileName] = React.useState("");
+  const [listedModels, setListedModels] = React.useState([]);
+  const [ollamaStatus, setOllamaStatus] = React.useState(null);
+  const [message, setMessage] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+
+  const cloudModels = {
+    openai: ["gpt-4o-mini", "gpt-4.1-mini", "gpt-4o"],
+    anthropic: ["claude-haiku-4-5", "claude-sonnet-4-5"],
+    gemini: ["gemini-2.5-flash", "gemini-2.5-pro"],
+    xai: ["grok-4.3", "grok-3-mini"],
+    "openai-compatible": ["local-model"],
+  };
+  const ollamaModels = ["llama3.2", "mistral", "qwen2.5:7b", "gemma3:4b"];
+  const dockerUrl = "http://localhost:12434/engines/v1";
+
+  const providerLabel = (value) => ({
+    openai: "OpenAI / ChatGPT",
+    anthropic: "Anthropic",
+    gemini: "Gemini",
+    xai: "xAI / Grok",
+    ollama: "Ollama",
+    "openai-compatible": "OpenAI-compatible",
+  }[value] || value || "Provider");
+  const providerBaseUrl = (value) => ({
+    openai: "https://api.openai.com/v1",
+    xai: "https://api.x.ai/v1",
+    gemini: "https://generativelanguage.googleapis.com/v1beta",
+    anthropic: "https://api.anthropic.com/v1",
+  }[value] || "");
+  const profileIdFor = (profile) =>
+    String([profile.provider, profile.baseUrl || "", profile.model].join("-"))
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 80) || "llm-profile";
+
+  React.useEffect(() => {
+    if (!hasDesktop || !desktop.ollamaStatus) return;
+    desktop.ollamaStatus().then(setOllamaStatus).catch(() => setOllamaStatus(null));
+  }, [hasDesktop]);
+
+  function applyMode(nextMode) {
+    setMode(nextMode);
+    setMessage("");
+    if (nextMode === "ollama") {
+      setProvider("ollama");
+      setModel("llama3.2");
+      return;
+    }
+    if (nextMode === "docker") {
+      setProvider("openai-compatible");
+      setBaseUrl(dockerUrl);
+      setModel("");
+      return;
+    }
+    setProvider("openai");
+    setBaseUrl("");
+    setModel("gpt-4o-mini");
+  }
+
+  function currentConfig() {
+    if (mode === "ollama") return { provider: "ollama", model: model.trim(), baseUrl: "http://127.0.0.1:11434" };
+    if (mode === "docker") return { provider: "openai-compatible", model: model.trim(), baseUrl: baseUrl.trim() || dockerUrl };
+    return {
+      provider,
+      model: model.trim(),
+      apiKey: apiKey.trim(),
+      baseUrl: provider === "openai-compatible" ? baseUrl.trim() : providerBaseUrl(provider),
+    };
+  }
+
+  async function listModels() {
+    const config = currentConfig();
+    setBusy(true);
+    setMessage("Looking for models.");
+    try {
+      if (config.provider === "openai-compatible" && !config.baseUrl) throw new Error("Add a base URL first.");
+      if (["openai", "anthropic", "gemini", "xai"].includes(config.provider) && !config.apiKey) throw new Error("Paste an API key first.");
+      const response = await fetch("/api/llm/models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(config),
+      });
+      const body = await response.json().catch(() => null);
+      if (!response.ok) throw new Error((body && body.error) || "Could not load models.");
+      const models = body && Array.isArray(body.models) ? body.models : [];
+      setListedModels(models);
+      if (models[0]) setModel(models[0]);
+      setMessage(models.length ? "Models loaded." : "Provider responded, but no models were listed. You can still type one.");
+    } catch (error) {
+      setMessage((error && error.message) || "Could not load models. You can still type one.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function pullModel() {
+    if (!hasDesktop || !desktop.pullOllamaModel) {
+      setMessage("Open the desktop app to pull Ollama models.");
+      return;
+    }
+    setBusy(true);
+    setMessage("Pulling " + model + ". This can take a while.");
+    try {
+      await desktop.pullOllamaModel(model.trim());
+      setMessage("Model is ready.");
+    } catch (error) {
+      setMessage((error && error.message) || "Could not pull the model.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function testModel() {
+    const config = currentConfig();
+    if (!config.model) {
+      setMessage("Choose or type a model first.");
+      return;
+    }
+    setBusy(true);
+    setMessage("Testing " + providerLabel(config.provider) + ".");
+    try {
+      const response = await fetch("/api/llm/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(config),
+      });
+      const body = await response.json().catch(() => null);
+      if (!response.ok) throw new Error((body && body.error) || "The model test failed.");
+      setMessage("Test passed.");
+    } catch (error) {
+      setMessage((error && error.message) || "The model test failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveModel() {
+    const config = currentConfig();
+    if (!config.model) {
+      setMessage("Choose or type a model first.");
+      return;
+    }
+    if (["openai", "anthropic", "gemini", "xai"].includes(config.provider) && !config.apiKey) {
+      setMessage("Paste an API key first.");
+      return;
+    }
+    if (config.provider === "openai-compatible" && !config.baseUrl) {
+      setMessage("Add a base URL first.");
+      return;
+    }
+    if (!hasDesktop || !desktop.saveLLMSettings) {
+      setMessage("Model settings can be saved from the desktop app. You can still test this provider here.");
+      return;
+    }
+    setBusy(true);
+    setMessage("Saving model settings.");
+    try {
+      const profile = Object.assign({}, config);
+      profile.id = profileIdFor(profile);
+      profile.label = profileName.trim() || providerLabel(profile.provider) + " " + profile.model;
+      const taskDefaults = Object.fromEntries(["gather", "weave", "draft", "review", "revision", "outputs", "utility", "mediaPrompt", "file"].map((task) => [task, profile.id]));
+      const settings = {
+        provider: profile.provider,
+        model: profile.model,
+        baseUrl: profile.baseUrl,
+        apiKey: profile.apiKey,
+        profiles: [profile],
+        defaultProfileId: profile.id,
+        taskDefaults,
+      };
+      await desktop.saveLLMSettings(settings);
+      setMessage("Model saved.");
+      if (onSaved) onSaved(profile);
+      if (window.KP_ONBOARDING_ACTIONS && window.KP_ONBOARDING_ACTIONS.notifyProviderSetupSaved) {
+        window.KP_ONBOARDING_ACTIONS.notifyProviderSetupSaved({ profile });
+      }
+    } catch (error) {
+      setMessage((error && error.message) || "Could not save the model.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const options = mode === "ollama" ? ollamaModels : (listedModels.length ? listedModels : (cloudModels[provider] || []));
+  const canList = mode !== "ollama";
+  const currentStatus = status && status.provider && status.model
+    ? providerLabel(status.provider) + " · " + status.model
+    : "Not connected";
+
+  return (
+    <div className="kp-inline-model-setup">
+      <div className="kp-inline-model-head">
+        <span aria-hidden="true" className="kp-inline-model-icon"><Icon name="db" size={31} /></span>
+        <div>
+          <h3>AI & models</h3>
+          <p>Choose the models King's Press can use to think and create.</p>
+        </div>
+        <SetupStatusChip label={currentStatus} />
+      </div>
+      <div className="kp-inline-model-tabs" role="group" aria-label="Model source">
+        <button type="button" className={mode === "ollama" ? "active" : ""} onClick={() => applyMode("ollama")}>Ollama</button>
+        <button type="button" className={mode === "docker" ? "active" : ""} onClick={() => applyMode("docker")}>Docker Model Runner</button>
+        <button type="button" className={mode === "cloud" ? "active" : ""} onClick={() => applyMode("cloud")}>Cloud API key</button>
+      </div>
+      <div className="kp-inline-model-fields">
+        {mode === "cloud" && (
+          <>
+            <label>
+              <span>Provider</span>
+              <select className="kp-setup-input" value={provider} onChange={(event) => {
+                const next = event.target.value;
+                setProvider(next);
+                setModel((cloudModels[next] || [""])[0]);
+                setBaseUrl(next === "openai-compatible" ? baseUrl : "");
+              }}>
+                <option value="openai">OpenAI / ChatGPT</option>
+                <option value="anthropic">Anthropic</option>
+                <option value="gemini">Gemini</option>
+                <option value="xai">xAI / Grok</option>
+                <option value="openai-compatible">OpenAI-compatible</option>
+              </select>
+            </label>
+            <label>
+              <span>API key</span>
+              <input className="kp-setup-input" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Paste your API key" />
+            </label>
+          </>
+        )}
+        {(mode === "docker" || provider === "openai-compatible") && (
+          <label className="kp-inline-model-wide">
+            <span>Base URL</span>
+            <input className="kp-setup-input" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder={mode === "docker" ? dockerUrl : "https://provider.example/v1"} />
+          </label>
+        )}
+        {mode === "ollama" && (
+          <div className="kp-inline-model-local">
+            <strong>{ollamaStatus && ollamaStatus.running ? "Ollama is running" : "Ollama local model"}</strong>
+            <span>{hasDesktop ? "Use an existing local model or pull one below." : "Use the desktop app to start or pull local models."}</span>
+          </div>
+        )}
+        <label>
+          <span>Model</span>
+          <input className="kp-setup-input" value={model} onChange={(event) => setModel(event.target.value)} list="kp-inline-model-options" placeholder="model name" />
+          <datalist id="kp-inline-model-options">{options.map((item) => <option key={item} value={item} />)}</datalist>
+        </label>
+        <label>
+          <span>Profile name</span>
+          <input className="kp-setup-input" value={profileName} onChange={(event) => setProfileName(event.target.value)} placeholder={providerLabel(provider) + " " + (model || "model")} />
+        </label>
+      </div>
+      <div className="kp-inline-model-actions">
+        {mode === "ollama" && <button className="kp-setup-outline" type="button" disabled={busy || !model.trim()} onClick={pullModel}>Pull</button>}
+        {canList && <button className="kp-setup-outline" type="button" disabled={busy} onClick={listModels}>List models</button>}
+        <button className="kp-setup-outline" type="button" disabled={busy || !model.trim()} onClick={testModel}>Test</button>
+        <button className="kp-setup-primary" type="button" disabled={busy || !model.trim()} onClick={saveModel}>{busy ? "Working..." : "Use model"}</button>
+      </div>
+      {message && <p className="kp-inline-model-message" role="status">{message}</p>}
+    </div>
+  );
+}
+
 function SetupPanelRow({ icon, title, description, status, action, onClick, disabled }) {
   return (
     <div style={{
@@ -367,6 +652,8 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
   const transcriptHandlerRef = React.useRef(null);
   const listenSessionRef = React.useRef(null);
   const setupStartedAtRef = React.useRef(Date.now());
+  const metricsSessionIdRef = React.useRef(createSetupSessionId());
+  const lastStepMetricRef = React.useRef(null);
   const state = window.Store.getState();
   const campaigns = state.campaigns || [];
   const activeCampaign = window.Store.activeCampaign && window.Store.activeCampaign();
@@ -410,6 +697,9 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
   React.useEffect(() => {
     if (!open) return;
     setupStartedAtRef.current = Date.now();
+    metricsSessionIdRef.current = createSetupSessionId();
+    lastStepMetricRef.current = null;
+    recordMetric(ONBOARDING_METRIC_EVENTS.STARTED, { stepId: "connect" });
     const refs = window.Store.activeReferences ? window.Store.activeReferences() : {};
     const throughline = refs.strategy && refs.strategy.throughlines && refs.strategy.throughlines[0];
     const audience = refs.audiences && refs.audiences.list && refs.audiences.list[0];
@@ -429,6 +719,14 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
       gateSpec: (refs.gateSpec && refs.gateSpec.body) || "",
     });
   }, [open, activeCampaign && activeCampaign.id]);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const stepId = (ONBOARDING_STEPS[step] && ONBOARDING_STEPS[step].id) || "connect";
+    if (lastStepMetricRef.current === stepId) return;
+    lastStepMetricRef.current = stepId;
+    recordMetric(ONBOARDING_METRIC_EVENTS.STEP_VIEWED, { stepId });
+  }, [open, step]);
 
   React.useEffect(() => {
     if (!open) {
@@ -488,7 +786,15 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     setStep(ONBOARDING_RUNTIME ? ONBOARDING_RUNTIME.clampStepIndex(next) : Math.max(0, Math.min(3, next)));
   }
 
-  function applyPlatformAnswer(text) {
+  function recordMetric(type, payload) {
+    if (!ONBOARDING_ACTION_REGISTRY || !ONBOARDING_ACTION_REGISTRY.recordMetric) return;
+    ONBOARDING_ACTION_REGISTRY.recordMetric(type, Object.assign({
+      sessionId: metricsSessionIdRef.current,
+      durationMs: Date.now() - setupStartedAtRef.current,
+    }, payload || {}));
+  }
+
+  function applyPlatformAnswer(text, inputMethod) {
     const clean = String(text || "").trim();
     if (!clean) return null;
     setSetupAnswer(clean);
@@ -517,6 +823,13 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     } else if (!campaignName.trim()) {
       setCampaignName(focusName || "First focus");
     }
+    recordMetric(ONBOARDING_METRIC_EVENTS.ANSWER_CAPTURED, {
+      stepId: "focus",
+      inputMethod: inputMethod || "typed",
+      answerKind: "communication_platforms",
+      conversational: true,
+      answerAccepted: true,
+    });
     return { focusName };
   }
 
@@ -539,7 +852,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     });
   }
 
-  async function interpretProfileAnswer(text) {
+  async function interpretProfileAnswer(text, inputMethod) {
     const clean = String(text || "").trim();
     if (!clean) return;
     setProfileAnswer(clean);
@@ -567,6 +880,13 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
         recordAction(ONBOARDING_ACTIONS.EXTRACT_SETUP_PROFILE, ONBOARDING_ACTION_STATUSES.SUCCEEDED, { data: { fallback: "local" } });
       }
       mergeProfileIntoPreferences(profile);
+      recordMetric(ONBOARDING_METRIC_EVENTS.ANSWER_CAPTURED, {
+        stepId: "preferences",
+        inputMethod: inputMethod || "typed",
+        answerKind: "voice_profile",
+        conversational: true,
+        answerAccepted: true,
+      });
     } catch (e) {
       const profile = ONBOARDING_PROFILE.buildProfileDraft({
         transcript: clean,
@@ -609,11 +929,11 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
       return;
     }
     if (step === 2) {
-      applyPlatformAnswer(clean);
+      applyPlatformAnswer(clean, "voice");
       return;
     }
     if (step === 3) {
-      interpretProfileAnswer(clean);
+      interpretProfileAnswer(clean, "voice");
     }
   }
 
@@ -729,11 +1049,19 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
       return activeCampaign.id;
     }
     const name = clean || "Untitled focus";
+    const existing = campaigns.find((campaign) => campaign && campaign.name === name);
+    if (existing) {
+      if (window.Store.setActiveCampaign) window.Store.setActiveCampaign(existing.id);
+      const activation = { campaignId: existing.id, campaignName: existing.name || name, reused: true };
+      setFocusActivation(activation);
+      recordAction(ONBOARDING_ACTIONS.SAVE_FOCUS, ONBOARDING_ACTION_STATUSES.SUCCEEDED, { data: activation });
+      return existing.id;
+    }
     setBusy(true);
     recordAction(ONBOARDING_ACTIONS.SAVE_FOCUS, ONBOARDING_ACTION_STATUSES.PENDING);
     try {
       if (ONBOARDING_ACTION_REGISTRY && ONBOARDING_ACTION_REGISTRY.saveFocus) {
-        const result = await ONBOARDING_ACTION_REGISTRY.saveFocus(name, { activeCampaign });
+        const result = await ONBOARDING_ACTION_REGISTRY.saveFocus(name, { activeCampaign, campaigns });
         if (result.status === ONBOARDING_ACTION_STATUSES.FAILED) throw new Error(result.error);
         recordAction(ONBOARDING_ACTIONS.SAVE_FOCUS, ONBOARDING_ACTION_STATUSES.SUCCEEDED, result);
         const activation = {
@@ -876,6 +1204,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
         const result = await ONBOARDING_ACTION_REGISTRY.completeOnboarding({
           firstValueComplete: true,
           firstValue,
+          sessionId: metricsSessionIdRef.current,
         });
         if (result.status === ONBOARDING_ACTION_STATUSES.FAILED) throw new Error(result.error);
         recordAction(ONBOARDING_ACTIONS.COMPLETE_ONBOARDING, ONBOARDING_ACTION_STATUSES.SUCCEEDED, result);
@@ -895,6 +1224,10 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
 
   const skip = () => {
     recordAction(ONBOARDING_ACTIONS.SKIP_ONBOARDING, ONBOARDING_ACTION_STATUSES.SKIPPED);
+    recordMetric(ONBOARDING_METRIC_EVENTS.SKIPPED, {
+      skippedReason: "user_skipped_setup",
+      firstValueComplete: false,
+    });
     const action = ONBOARDING_ACTION_REGISTRY && ONBOARDING_ACTION_REGISTRY.skipOnboarding
       ? ONBOARDING_ACTION_REGISTRY.skipOnboarding()
       : Promise.resolve(null);
@@ -1150,6 +1483,123 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
           color: #766A63;
           font-size: 12.5px;
         }
+        .kp-inline-model-setup {
+          padding: 42px 46px;
+          display: grid;
+          gap: 22px;
+        }
+        .kp-inline-model-head {
+          display: grid;
+          grid-template-columns: 88px minmax(0, 1fr) auto;
+          align-items: center;
+          gap: 24px;
+        }
+        .kp-inline-model-icon {
+          width: 72px;
+          height: 72px;
+          border-radius: 999px;
+          display: grid;
+          place-items: center;
+          background: rgba(216, 206, 195, 0.34);
+          color: #2A211E;
+        }
+        .kp-inline-model-head h3 {
+          margin: 0;
+          font-family: var(--font-serif);
+          font-size: 26px;
+          font-weight: 500;
+          color: #2A211E;
+        }
+        .kp-inline-model-head p {
+          margin: 11px 0 0;
+          max-width: 520px;
+          color: #766A63;
+          font-size: 18px;
+          line-height: 1.5;
+        }
+        .kp-inline-model-tabs {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          padding-left: 112px;
+        }
+        .kp-inline-model-tabs button {
+          min-height: 42px;
+          border: 1px solid #D8CEC3;
+          border-radius: 999px;
+          background: rgba(255, 252, 246, 0.72);
+          color: #766A63;
+          padding: 0 16px;
+          font: 15.5px var(--font-serif);
+          cursor: pointer;
+        }
+        .kp-inline-model-tabs button.active {
+          background: #A74732;
+          border-color: #A74732;
+          color: white;
+        }
+        .kp-inline-model-tabs button:focus-visible {
+          outline: 3px solid rgba(167, 71, 50, 0.22);
+          outline-offset: 2px;
+        }
+        .kp-inline-model-fields {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 14px;
+          padding-left: 112px;
+        }
+        .kp-inline-model-fields label {
+          display: grid;
+          gap: 7px;
+        }
+        .kp-inline-model-fields label > span {
+          color: #766A63;
+          font-size: 12px;
+          letter-spacing: 0.18em;
+          text-transform: uppercase;
+        }
+        .kp-inline-model-wide {
+          grid-column: 1 / -1;
+        }
+        .kp-inline-model-local {
+          grid-column: 1 / -1;
+          border: 1px solid #D8CEC3;
+          border-radius: 10px;
+          background: rgba(247, 242, 235, 0.52);
+          padding: 14px 16px;
+          display: grid;
+          gap: 3px;
+        }
+        .kp-inline-model-local strong {
+          font: 18px var(--font-serif);
+          color: #2A211E;
+        }
+        .kp-inline-model-local span {
+          color: #766A63;
+          font-size: 14.5px;
+          line-height: 1.4;
+        }
+        .kp-inline-model-actions {
+          padding-left: 112px;
+          display: flex;
+          flex-wrap: wrap;
+          justify-content: flex-end;
+          gap: 9px;
+        }
+        .kp-inline-model-actions .kp-setup-primary,
+        .kp-inline-model-actions .kp-setup-outline {
+          min-height: 48px;
+        }
+        .kp-inline-model-actions .kp-setup-primary {
+          min-width: 150px;
+          font-size: 18px;
+        }
+        .kp-inline-model-message {
+          margin: -4px 0 0 112px;
+          color: #A74732;
+          font-size: 14.5px;
+          line-height: 1.45;
+        }
         .kp-host-error {
           margin: 18px 0 0;
           color: #A74732;
@@ -1265,6 +1715,14 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
             position: static;
           }
           .kp-setup-row { grid-template-columns: 1fr !important; }
+          .kp-inline-model-setup { padding: 30px 24px; }
+          .kp-inline-model-head { grid-template-columns: 1fr; }
+          .kp-inline-model-tabs,
+          .kp-inline-model-fields,
+          .kp-inline-model-actions,
+          .kp-inline-model-message { padding-left: 0; margin-left: 0; }
+          .kp-inline-model-fields { grid-template-columns: 1fr; }
+          .kp-inline-model-actions { justify-content: flex-start; }
         }
       `}</style>
       <div style={{ width: "min(1120px, calc(100% - 72px))", margin: "0 auto", padding: "44px 0 34px" }}>
@@ -1283,7 +1741,14 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
               border: "1px solid #D8CEC3", borderRadius: 10, background: "rgba(255, 252, 246, 0.68)",
               overflow: "hidden",
             }}>
-              {connectRows.map((item) => (
+              <InlineModelSetup
+                status={providerStatus}
+                onSaved={(profile) => setProviderStatus((current) => Object.assign({}, current || {}, {
+                  provider: profile && profile.provider,
+                  model: profile && profile.model,
+                }))}
+              />
+              {connectRows.filter((item) => item.id !== "models").map((item) => (
                 <SetupPanelRow
                   key={item.id}
                   icon={item.icon}
@@ -1381,7 +1846,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
               question={ONBOARDING_COPY.FIRST_PLATFORM_QUESTION || "Where do you communicate most?"}
               value={setupAnswer}
               onChange={setSetupAnswer}
-              onSubmit={() => applyPlatformAnswer(setupAnswer)}
+              onSubmit={() => applyPlatformAnswer(setupAnswer, "typed")}
               onListen={listenForAnswer}
               listening={listening}
               transcript={platformAnswerCaptured ? setupTranscript : ""}
@@ -1431,7 +1896,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
               busy={busy}
               onPrimary={() => {
                 const applied = setupAnswer.trim() && !platformAnswerCaptured
-                  ? applyPlatformAnswer(setupAnswer)
+                  ? applyPlatformAnswer(setupAnswer, "typed")
                   : null;
                 ensureFocus(applied && applied.focusName).then(() => goToStep(3)).catch(() => null);
               }}
@@ -1455,13 +1920,13 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
               question="Tell me how this desk should sound for you."
               value={profileAnswer}
               onChange={setProfileAnswer}
-              onSubmit={() => interpretProfileAnswer(profileAnswer)}
               onListen={listenForAnswer}
               listening={listening}
               disabled={profileBusy}
               transcript={step === 3 ? setupTranscript : ""}
               placeholder="e.g. Clear, useful, direct. I write for independent operators and want drafts that preserve my point of view."
               actionLabel={profileBusy ? "Interpreting" : "Use for defaults"}
+              onSubmit={() => interpretProfileAnswer(profileAnswer, "typed")}
             />
             <div style={{ height: 28 }} />
             <SetupProfileReview profile={setupProfileDraft} />

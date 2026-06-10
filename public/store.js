@@ -259,6 +259,12 @@
       state.settings.prefs = Object.assign({}, state.settings.prefs || {}, { [key]: value });
       emit(); persistPrefs({ [key]: value });
     },
+    setPrefs(patch) {
+      if (!patch || typeof patch !== "object") return;
+      if (!state.settings) state.settings = {};
+      state.settings.prefs = Object.assign({}, state.settings.prefs || {}, patch);
+      emit(); persistPrefs(patch);
+    },
 
     /* ---- Desk chat session (thread state, persisted as one scoped blob) ---- */
     getDesk() {

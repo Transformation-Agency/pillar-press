@@ -920,6 +920,8 @@ function App() {
   const [desktopNotice, setDesktopNotice] = React.useState(null);
   const [backupBusy, setBackupBusy] = React.useState(false);
   const [setupOpen, setSetupOpen] = React.useState(false);
+  const [sentimentOpen, setSentimentOpen] = React.useState(false);
+  const [sentimentBusy, setSentimentBusy] = React.useState(false);
   const [campaignCreateOpen, setCampaignCreateOpen] = React.useState(false);
   const isMobile = window.useIsMobile();
   const role = state.role || "author";
@@ -939,6 +941,9 @@ function App() {
   const firstValuePref = (window.KP_CONVERSATIONAL_ONBOARDING &&
     window.KP_CONVERSATIONAL_ONBOARDING.flags &&
     window.KP_CONVERSATIONAL_ONBOARDING.flags.firstValuePref) || "onboardingFirstValueEventV1";
+  const sentimentPref = (window.KP_CONVERSATIONAL_ONBOARDING &&
+    window.KP_CONVERSATIONAL_ONBOARDING.flags &&
+    window.KP_CONVERSATIONAL_ONBOARDING.flags.sentimentPref) || "onboardingSentimentV1";
 
   const openPiece = (id) => { window.Store.setActive(id); setView("workspace"); };
   const goLibrary = () => { setView("library"); window.Store.setActive(null); };
@@ -960,6 +965,40 @@ function App() {
     }
     setSetupOpen(false);
     setView(result.routeTarget || (result.campaignId ? "desk" : "library"));
+    if (!window.Store.getPref(sentimentPref, null)) setSentimentOpen(true);
+  };
+  const submitSentiment = async (rating) => {
+    setSentimentBusy(true);
+    try {
+      if (window.KP_ONBOARDING_ACTIONS && window.KP_ONBOARDING_ACTIONS.submitSentiment) {
+        await window.KP_ONBOARDING_ACTIONS.submitSentiment(rating, {
+          sessionId: "post-setup",
+          firstValueComplete: true,
+        });
+      } else {
+        window.Store.setPref(sentimentPref, {
+          version: 1,
+          rating,
+          submittedAt: new Date().toISOString(),
+          source: "post_onboarding_prompt",
+        });
+      }
+      setSentimentOpen(false);
+    } finally {
+      setSentimentBusy(false);
+    }
+  };
+  const dismissSentiment = () => {
+    if (window.KP_ONBOARDING_ACTIONS && window.KP_ONBOARDING_ACTIONS.dismissSentiment) {
+      window.KP_ONBOARDING_ACTIONS.dismissSentiment({ sessionId: "post-setup" });
+    } else {
+      window.Store.setPref(sentimentPref, {
+        version: 1,
+        dismissedAt: new Date().toISOString(),
+        source: "post_onboarding_prompt",
+      });
+    }
+    setSentimentOpen(false);
   };
   const createCampaign = (name) => {
     const clean = String(name || "").trim();
@@ -1066,6 +1105,36 @@ function App() {
           <button className="icon-btn" style={{ width: 24, height: 24, marginLeft: 8, verticalAlign: "middle" }} onClick={() => setDesktopNotice(null)} title="Dismiss">
             <Icon name="xLogo" size={13} />
           </button>
+        </div>
+      )}
+      {sentimentOpen && (
+        <div role="dialog" aria-label="Setup usefulness rating" style={{
+          position: "fixed", right: 18, bottom: 18, zIndex: 181, width: "min(390px, calc(100vw - 36px))",
+          padding: 18, borderRadius: 14, boxShadow: "var(--shadow-lg)",
+          border: "1px solid var(--hair)", background: "var(--paper-2)", color: "var(--ink)",
+        }}>
+          <h2 style={{ margin: 0, fontFamily: "var(--font-display)", fontSize: 22, fontWeight: 500 }}>
+            Was setup useful?
+          </h2>
+          <p style={{ margin: "8px 0 14px", color: "var(--muted)", lineHeight: 1.45 }}>
+            One quick rating helps tune the onboarding without sending anything outside this app.
+          </p>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {[1, 2, 3, 4, 5].map((rating) => (
+              <button
+                key={rating}
+                className="btn sm"
+                disabled={sentimentBusy}
+                onClick={() => submitSentiment(rating)}
+                aria-label={"Rate setup " + rating + " out of 5"}
+              >
+                {rating}
+              </button>
+            ))}
+            <button className="btn sm ghost" disabled={sentimentBusy} onClick={dismissSentiment}>
+              Not now
+            </button>
+          </div>
         </div>
       )}
       <TweaksLayer theme={state.theme} />

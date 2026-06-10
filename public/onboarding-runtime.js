@@ -6,6 +6,8 @@
 
   const RUNTIME_VERSION = "2026-06-10.kings-press-conversational-runtime.v1";
   const PACK_VERSION = "2026-06-10.kings-press-pack.v1";
+  const METRICS_VERSION = 1;
+  const MAX_METRICS_EVENTS = 120;
 
   const STEP_IDS = ["connect", "welcome", "focus", "preferences"];
 
@@ -81,6 +83,8 @@
     SAVE_PREFERENCES: "save_preferences",
     COMPLETE_ONBOARDING: "complete_onboarding",
     SKIP_ONBOARDING: "skip_onboarding",
+    RECORD_METRIC: "record_metric",
+    SUBMIT_SENTIMENT: "submit_sentiment",
   };
 
   const ACTION_STATUSES = {
@@ -95,6 +99,20 @@
     onboardingCompletePref: "setupHelperCompleteV1",
     computeSetupLocalStorageKey: "kingspress.desktopSetupComplete",
     firstValuePref: "onboardingFirstValueEventV1",
+    metricsEventsPref: "onboardingMetricsEventsV1",
+    metricsSummaryPref: "onboardingMetricsSummaryV1",
+    sentimentPref: "onboardingSentimentV1",
+  };
+
+  const METRIC_EVENTS = {
+    STARTED: "onboarding_started",
+    STEP_VIEWED: "step_viewed",
+    ANSWER_CAPTURED: "answer_captured",
+    SKIPPED: "onboarding_skipped",
+    FIRST_VALUE_COMPLETED: "first_value_completed",
+    COMPLETED: "onboarding_completed",
+    SENTIMENT_SUBMITTED: "sentiment_submitted",
+    SENTIMENT_DISMISSED: "sentiment_dismissed",
   };
 
   const trust = {
@@ -202,6 +220,16 @@
     },
     [ACTION_INTENTS.SKIP_ONBOARDING]: {
       label: "Skip setup",
+      requiresApproval: false,
+      persistentEffect: "settings_prefs",
+    },
+    [ACTION_INTENTS.RECORD_METRIC]: {
+      label: "Record onboarding metric",
+      requiresApproval: false,
+      persistentEffect: "settings_prefs",
+    },
+    [ACTION_INTENTS.SUBMIT_SENTIMENT]: {
+      label: "Submit onboarding sentiment",
       requiresApproval: false,
       persistentEffect: "settings_prefs",
     },
@@ -375,12 +403,123 @@
     };
   }
 
+  function safeMetricString(value, maxLength) {
+    const clean = String(value || "").trim();
+    if (!clean) return "";
+    return clean
+      .replace(/Bearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer [redacted]")
+      .replace(/api[_-]?key[=:]\s*[^&\s]+/gi, "api_key=[redacted]")
+      .replace(/password[=:]\s*[^&\s]+/gi, "password=[redacted]")
+      .slice(0, maxLength || 120);
+  }
+
+  function clampRating(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return null;
+    return Math.max(1, Math.min(5, Math.round(n)));
+  }
+
+  function buildMetricsEvent(type, input) {
+    const current = input || {};
+    const eventType = safeMetricString(type || current.type, 80) || METRIC_EVENTS.STEP_VIEWED;
+    const stepId = current.stepId ? getStepById(current.stepId).id : null;
+    const rating = clampRating(current.rating);
+    const durationMs = Number(current.durationMs);
+    return {
+      id: current.id || ("metric-" + Math.random().toString(36).slice(2, 10) + "-" + Date.now().toString(36)),
+      version: METRICS_VERSION,
+      type: eventType,
+      at: current.at || new Date().toISOString(),
+      sessionId: safeMetricString(current.sessionId, 96),
+      stepId,
+      stepIndex: stepId ? getStepIndex(stepId) : null,
+      inputMethod: safeMetricString(current.inputMethod, 32) || null,
+      answerKind: safeMetricString(current.answerKind, 64) || null,
+      conversational: current.conversational === undefined ? null : !!current.conversational,
+      answerAccepted: current.answerAccepted === undefined ? null : !!current.answerAccepted,
+      firstValueComplete: current.firstValueComplete === undefined ? null : !!current.firstValueComplete,
+      routeTarget: safeMetricString(current.routeTarget, 64) || null,
+      campaignId: safeMetricString(current.campaignId, 96) || null,
+      skippedReason: safeMetricString(current.skippedReason, 96) || null,
+      rating,
+      durationMs: Number.isFinite(durationMs) ? Math.max(0, Math.round(durationMs)) : null,
+    };
+  }
+
+  function appendMetricsEvent(events, event, maxEvents) {
+    const list = Array.isArray(events) ? events.slice() : [];
+    const next = buildMetricsEvent(event && event.type, event);
+    list.push(next);
+    return list.slice(-Math.max(1, Number(maxEvents || MAX_METRICS_EVENTS)));
+  }
+
+  function median(values) {
+    const sorted = values.filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
+    if (!sorted.length) return null;
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+  }
+
+  function rate(part, total) {
+    return total > 0 ? Math.round((part / total) * 1000) / 1000 : null;
+  }
+
+  function deriveMetricsSummary(events) {
+    const list = Array.isArray(events) ? events : [];
+    const count = (type) => list.filter((event) => event && event.type === type).length;
+    const starts = count(METRIC_EVENTS.STARTED);
+    const completed = count(METRIC_EVENTS.COMPLETED);
+    const skipped = count(METRIC_EVENTS.SKIPPED);
+    const sessionIds = new Set();
+    const activatedSessions = new Set();
+    let anonymousActivationSeen = false;
+    list.forEach((event) => {
+      if (event && event.sessionId) sessionIds.add(event.sessionId);
+      if (!event || !(event.type === METRIC_EVENTS.FIRST_VALUE_COMPLETED || event.firstValueComplete === true)) return;
+      if (event.sessionId) activatedSessions.add(event.sessionId);
+      else anonymousActivationSeen = true;
+    });
+    const activations = activatedSessions.size + (anonymousActivationSeen ? 1 : 0);
+    const answers = list.filter((event) => event && event.type === METRIC_EVENTS.ANSWER_CAPTURED);
+    const conversationalAnswers = answers.filter((event) => event.conversational !== false);
+    const acceptedConversationalAnswers = conversationalAnswers.filter((event) => event.answerAccepted !== false);
+    const ratings = list
+      .filter((event) => event && event.type === METRIC_EVENTS.SENTIMENT_SUBMITTED && Number.isFinite(Number(event.rating)))
+      .map((event) => Number(event.rating));
+    const durations = list
+      .filter((event) => event && event.type === METRIC_EVENTS.COMPLETED && Number.isFinite(Number(event.durationMs)))
+      .map((event) => Number(event.durationMs));
+    const totalSessions = Math.max(starts, completed + skipped, sessionIds.size, 0);
+    const averageSentiment = ratings.length
+      ? Math.round((ratings.reduce((sum, value) => sum + value, 0) / ratings.length) * 10) / 10
+      : null;
+    return {
+      version: METRICS_VERSION,
+      updatedAt: new Date().toISOString(),
+      sessionsStarted: starts,
+      sessionsCompleted: completed,
+      sessionsSkipped: skipped,
+      firstValueActivations: activations,
+      completionRate: rate(completed, totalSessions),
+      activationRate: rate(activations, totalSessions),
+      medianDurationMs: median(durations),
+      conversationalAnswers: conversationalAnswers.length,
+      conversationalAnswerSuccessRate: rate(acceptedConversationalAnswers.length, conversationalAnswers.length),
+      sentimentResponses: ratings.length,
+      averageSentiment,
+      latestEventType: list.length ? list[list.length - 1].type : null,
+    };
+  }
+
   window.KP_CONVERSATIONAL_ONBOARDING = {
     RUNTIME_VERSION,
     PACK_VERSION,
     STEP_IDS,
     ACTION_INTENTS,
     ACTION_STATUSES,
+    METRIC_EVENTS,
+    METRICS_VERSION,
+    MAX_METRICS_EVENTS,
     flags,
     pack,
     steps,
@@ -400,5 +539,8 @@
     getConnectItems,
     deriveCompletionStatus,
     buildFirstValueEvent,
+    buildMetricsEvent,
+    appendMetricsEvent,
+    deriveMetricsSummary,
   };
 })();

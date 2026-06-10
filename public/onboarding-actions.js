@@ -11,6 +11,16 @@
     SKIPPED: "skipped",
   };
   const flags = runtime.flags || { onboardingCompletePref: "setupHelperCompleteV1" };
+  const METRIC_EVENTS = runtime.METRIC_EVENTS || {
+    STARTED: "onboarding_started",
+    STEP_VIEWED: "step_viewed",
+    ANSWER_CAPTURED: "answer_captured",
+    SKIPPED: "onboarding_skipped",
+    FIRST_VALUE_COMPLETED: "first_value_completed",
+    COMPLETED: "onboarding_completed",
+    SENTIMENT_SUBMITTED: "sentiment_submitted",
+    SENTIMENT_DISMISSED: "sentiment_dismissed",
+  };
 
   const EVENTS = {
     PROVIDER_SETUP_OPENED: "kingspress:onboarding-provider-setup-opened",
@@ -43,6 +53,17 @@
 
   function skipped(intent, data) {
     return normalize(intent, STATUSES.SKIPPED, { data: data || null, error: null });
+  }
+
+  function setStorePrefs(Store, patch) {
+    if (!Store || !patch || typeof patch !== "object") return;
+    if (typeof Store.setPrefs === "function") {
+      Store.setPrefs(patch);
+      return;
+    }
+    if (typeof Store.setPref === "function") {
+      Object.keys(patch).forEach((key) => Store.setPref(key, patch[key]));
+    }
   }
 
   function providerSafeDetail(settings) {
@@ -122,12 +143,18 @@
   async function saveFocus(name, options) {
     const intent = INTENTS.SAVE_FOCUS || "save_focus";
     try {
+      const Store = window.Store;
       const activeCampaign = options && options.activeCampaign;
+      const campaigns = (options && options.campaigns) || [];
       const clean = String(name || "").trim();
       if (activeCampaign && (!clean || clean === activeCampaign.name)) {
         return succeeded(intent, { campaignId: activeCampaign.id, reused: true });
       }
-      const Store = window.Store;
+      const existing = clean && campaigns.find((campaign) => campaign && campaign.name === clean);
+      if (existing) {
+        if (Store && typeof Store.setActiveCampaign === "function") Store.setActiveCampaign(existing.id);
+        return succeeded(intent, { campaignId: existing.id, reused: true });
+      }
       if (!Store || typeof Store.addCampaign !== "function") throw new Error("Local store is not ready.");
       const tempId = Store.addCampaign(clean || "Untitled focus");
       const saved = Store.whenCampaignSaved ? await Store.whenCampaignSaved(tempId) : null;
@@ -177,6 +204,74 @@
     }
   }
 
+  function persistMetricsEvent(eventInput, extraPrefs) {
+    const intent = INTENTS.RECORD_METRIC || "record_metric";
+    try {
+      const Store = window.Store;
+      if (!Store || typeof Store.setPref !== "function" || typeof Store.getPref !== "function") {
+        throw new Error("Local store is not ready.");
+      }
+      const event = runtime.buildMetricsEvent
+        ? runtime.buildMetricsEvent(eventInput && eventInput.type, eventInput)
+        : Object.assign({ version: 1, at: new Date().toISOString() }, eventInput || {});
+      const key = flags.metricsEventsPref || "onboardingMetricsEventsV1";
+      const current = Store.getPref(key, []);
+      const events = runtime.appendMetricsEvent
+        ? runtime.appendMetricsEvent(current, event, runtime.MAX_METRICS_EVENTS)
+        : (Array.isArray(current) ? current.concat(event).slice(-120) : [event]);
+      const summary = runtime.deriveMetricsSummary
+        ? runtime.deriveMetricsSummary(events)
+        : { version: 1, updatedAt: new Date().toISOString(), latestEventType: event.type || null };
+      setStorePrefs(Store, Object.assign({}, extraPrefs || {}, {
+        [key]: events,
+        [flags.metricsSummaryPref || "onboardingMetricsSummaryV1"]: summary,
+      }));
+      return succeeded(intent, { event, summary });
+    } catch (error) {
+      return failed(intent, error, "Could not record onboarding metric.");
+    }
+  }
+
+  function recordMetric(type, payload) {
+    return persistMetricsEvent(Object.assign({}, payload || {}, { type }));
+  }
+
+  async function submitSentiment(rating, payload) {
+    const intent = INTENTS.SUBMIT_SENTIMENT || "submit_sentiment";
+    try {
+      const n = Math.max(1, Math.min(5, Math.round(Number(rating))));
+      if (!Number.isFinite(n)) throw new Error("Choose a rating from 1 to 5.");
+      const Store = window.Store;
+      if (!Store || typeof Store.setPref !== "function") throw new Error("Local store is not ready.");
+      const sentiment = {
+        version: 1,
+        rating: n,
+        submittedAt: new Date().toISOString(),
+        source: "post_onboarding_prompt",
+      };
+      const metric = persistMetricsEvent(Object.assign({}, payload || {}, {
+        type: METRIC_EVENTS.SENTIMENT_SUBMITTED,
+        rating: n,
+      }), { [flags.sentimentPref || "onboardingSentimentV1"]: sentiment });
+      if (metric.status === STATUSES.FAILED) throw new Error(metric.error);
+      return succeeded(intent, Object.assign({}, sentiment, { summary: metric.data && metric.data.summary }));
+    } catch (error) {
+      return failed(intent, error, "Could not save onboarding rating.");
+    }
+  }
+
+  function dismissSentiment(payload) {
+    const dismissed = {
+      version: 1,
+      dismissedAt: new Date().toISOString(),
+      source: "post_onboarding_prompt",
+    };
+    const metric = persistMetricsEvent(Object.assign({}, payload || {}, {
+      type: METRIC_EVENTS.SENTIMENT_DISMISSED,
+    }), { [flags.sentimentPref || "onboardingSentimentV1"]: dismissed });
+    return metric;
+  }
+
   async function completeOnboarding(options) {
     const intent = INTENTS.COMPLETE_ONBOARDING || "complete_onboarding";
     try {
@@ -192,9 +287,23 @@
             version: 1,
             completedAt: new Date().toISOString(),
             complete: true,
-          };
+        };
         Store.setPref(flags.firstValuePref || "onboardingFirstValueEventV1", firstValueEvent);
+        persistMetricsEvent(Object.assign({}, firstValueEvent, {
+          type: METRIC_EVENTS.FIRST_VALUE_COMPLETED,
+          sessionId: options.sessionId,
+          durationMs: firstValueEvent.setupDurationMs,
+          firstValueComplete: firstValueEvent.complete,
+        }));
       }
+      persistMetricsEvent({
+        type: METRIC_EVENTS.COMPLETED,
+        sessionId: options && options.sessionId,
+        durationMs: firstValueEvent && firstValueEvent.setupDurationMs,
+        firstValueComplete: !!(firstValueEvent && firstValueEvent.complete),
+        routeTarget: firstValueEvent && firstValueEvent.routeTarget,
+        campaignId: firstValueEvent && firstValueEvent.campaignId,
+      });
       return succeeded(intent, {
         onboardingComplete: true,
         firstValueComplete: !!(firstValueEvent && firstValueEvent.complete),
@@ -211,6 +320,11 @@
       if (window.Store && typeof window.Store.setPref === "function") {
         window.Store.setPref(flags.onboardingCompletePref, true);
       }
+      persistMetricsEvent({
+        type: METRIC_EVENTS.SKIPPED,
+        skippedReason: "user_skipped_setup",
+        firstValueComplete: false,
+      });
       return skipped(intent, { onboardingComplete: true });
     } catch (error) {
       return failed(intent, error, "Could not skip setup.");
@@ -256,6 +370,10 @@
     saveFocus,
     savePreferences,
     extractSetupProfile,
+    persistMetricsEvent,
+    recordMetric,
+    submitSentiment,
+    dismissSentiment,
     completeOnboarding,
     skipOnboarding,
     onProviderSetupSaved,

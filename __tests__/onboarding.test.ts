@@ -362,6 +362,108 @@ describe("browser onboarding runtime contract", () => {
     });
   });
 
+  it("builds safe local metrics events without raw secret fragments", () => {
+    const runtime = loadBrowserRuntime();
+    const event = runtime.buildMetricsEvent(runtime.METRIC_EVENTS.ANSWER_CAPTURED, {
+      sessionId: "session-1",
+      stepId: "focus",
+      inputMethod: "voice",
+      answerKind: "platforms api_key=abc123",
+      conversational: true,
+      answerAccepted: true,
+      durationMs: 1234,
+    });
+
+    expect(event).toMatchObject({
+      version: 1,
+      type: "answer_captured",
+      sessionId: "session-1",
+      stepId: "focus",
+      stepIndex: 2,
+      inputMethod: "voice",
+      conversational: true,
+      answerAccepted: true,
+      durationMs: 1234,
+    });
+    expect(event.answerKind).toContain("[redacted]");
+  });
+
+  it("derives local onboarding success metrics from events", () => {
+    const runtime = loadBrowserRuntime();
+    const events = [
+      runtime.buildMetricsEvent(runtime.METRIC_EVENTS.STARTED, { sessionId: "a" }),
+      runtime.buildMetricsEvent(runtime.METRIC_EVENTS.ANSWER_CAPTURED, {
+        sessionId: "a",
+        stepId: "focus",
+        inputMethod: "typed",
+        conversational: true,
+        answerAccepted: true,
+      }),
+      runtime.buildMetricsEvent(runtime.METRIC_EVENTS.FIRST_VALUE_COMPLETED, {
+        sessionId: "a",
+        firstValueComplete: true,
+      }),
+      runtime.buildMetricsEvent(runtime.METRIC_EVENTS.COMPLETED, {
+        sessionId: "a",
+        durationMs: 240000,
+        firstValueComplete: true,
+      }),
+      runtime.buildMetricsEvent(runtime.METRIC_EVENTS.SENTIMENT_SUBMITTED, {
+        sessionId: "a",
+        rating: 5,
+      }),
+    ];
+
+    expect(runtime.deriveMetricsSummary(events)).toMatchObject({
+      sessionsStarted: 1,
+      sessionsCompleted: 1,
+      firstValueActivations: 1,
+      completionRate: 1,
+      activationRate: 1,
+      medianDurationMs: 240000,
+      conversationalAnswers: 1,
+      conversationalAnswerSuccessRate: 1,
+      sentimentResponses: 1,
+      averageSentiment: 5,
+    });
+  });
+
+  it("keeps activation rate bounded when event history is partial", () => {
+    const runtime = loadBrowserRuntime();
+    const events = [
+      runtime.buildMetricsEvent(runtime.METRIC_EVENTS.STARTED, { sessionId: "a" }),
+      runtime.buildMetricsEvent(runtime.METRIC_EVENTS.FIRST_VALUE_COMPLETED, {
+        sessionId: "a",
+        firstValueComplete: true,
+      }),
+      runtime.buildMetricsEvent(runtime.METRIC_EVENTS.FIRST_VALUE_COMPLETED, {
+        sessionId: "b",
+        firstValueComplete: true,
+      }),
+    ];
+
+    expect(runtime.deriveMetricsSummary(events)).toMatchObject({
+      sessionsStarted: 1,
+      firstValueActivations: 2,
+      activationRate: 1,
+    });
+  });
+
+  it("caps persisted metric events", () => {
+    const runtime = loadBrowserRuntime();
+    let events: any[] = [];
+    for (let i = 0; i < 5; i += 1) {
+      events = runtime.appendMetricsEvent(events, {
+        type: runtime.METRIC_EVENTS.STEP_VIEWED,
+        sessionId: "s",
+        stepId: "connect",
+      }, 3);
+    }
+
+    expect(events).toHaveLength(3);
+    expect(events.every((event) => event.type === "step_viewed")).toBe(true);
+  });
+
   it("provides short conversation prompts and suggestions for every visible step", () => {
     const runtime = loadBrowserRuntime();
 
@@ -509,10 +611,41 @@ describe("browser onboarding action registry", () => {
     expect(saved).toBe(false);
   });
 
+  it("reuses an existing focus name instead of creating a duplicate campaign", async () => {
+    const window = loadBrowserActions();
+    let created = false;
+    let activeId = "";
+    window.Store = {
+      addCampaign: () => {
+        created = true;
+        return "new-campaign";
+      },
+      setActiveCampaign: (id: string) => {
+        activeId = id;
+      },
+    };
+
+    const result = await window.KP_ONBOARDING_ACTIONS.saveFocus("Untitled focus", {
+      campaigns: [{ id: "existing-campaign", name: "Untitled focus" }],
+    });
+
+    expect(result).toMatchObject({
+      intent: "save_focus",
+      status: "succeeded",
+      data: {
+        campaignId: "existing-campaign",
+        reused: true,
+      },
+    });
+    expect(created).toBe(false);
+    expect(activeId).toBe("existing-campaign");
+  });
+
   it("persists onboarding completion and rich first-value metadata", async () => {
     const window = loadBrowserActions();
     const prefs: Record<string, unknown> = {};
     window.Store = {
+      getPref: (key: string, fallback: unknown) => Object.prototype.hasOwnProperty.call(prefs, key) ? prefs[key] : fallback,
       setPref: (key: string, value: unknown) => {
         prefs[key] = value;
       },
@@ -547,6 +680,63 @@ describe("browser onboarding action registry", () => {
       preferencesSaved: true,
       routeTarget: "desk",
       setupDurationMs: 90000,
+    });
+    expect(prefs.onboardingMetricsSummaryV1).toMatchObject({
+      sessionsCompleted: 1,
+      firstValueActivations: 1,
+      medianDurationMs: 90000,
+    });
+  });
+
+  it("persists capped local metrics and sentiment rating", async () => {
+    const window = loadBrowserActions();
+    const prefs: Record<string, any> = {};
+    window.Store = {
+      getPref: (key: string, fallback: unknown) => Object.prototype.hasOwnProperty.call(prefs, key) ? prefs[key] : fallback,
+      setPref: (key: string, value: unknown) => {
+        prefs[key] = value;
+      },
+    };
+
+    for (let i = 0; i < 125; i += 1) {
+      window.KP_ONBOARDING_ACTIONS.recordMetric("step_viewed", { stepId: "connect", sessionId: "s" });
+    }
+    const result = await window.KP_ONBOARDING_ACTIONS.submitSentiment(4, { sessionId: "s" });
+
+    expect(result).toMatchObject({
+      intent: "submit_sentiment",
+      status: "succeeded",
+      data: { rating: 4 },
+    });
+    expect(prefs.onboardingMetricsEventsV1.length).toBeLessThanOrEqual(120);
+    expect(prefs.onboardingSentimentV1).toMatchObject({ rating: 4 });
+    expect(prefs.onboardingMetricsSummaryV1).toMatchObject({
+      sentimentResponses: 1,
+      averageSentiment: 4,
+      latestEventType: "sentiment_submitted",
+    });
+  });
+
+  it("persists sentiment dismissal without a rating", () => {
+    const window = loadBrowserActions();
+    const prefs: Record<string, any> = {};
+    window.Store = {
+      getPref: (key: string, fallback: unknown) => Object.prototype.hasOwnProperty.call(prefs, key) ? prefs[key] : fallback,
+      setPref: (key: string, value: unknown) => {
+        prefs[key] = value;
+      },
+    };
+
+    const result = window.KP_ONBOARDING_ACTIONS.dismissSentiment({ sessionId: "s" });
+
+    expect(result).toMatchObject({
+      intent: "record_metric",
+      status: "succeeded",
+    });
+    expect(prefs.onboardingSentimentV1).toHaveProperty("dismissedAt");
+    expect(prefs.onboardingMetricsSummaryV1).toMatchObject({
+      latestEventType: "sentiment_dismissed",
+      sentimentResponses: 0,
     });
   });
 
