@@ -139,6 +139,8 @@
     STARTED: "onboarding_started",
     STEP_VIEWED: "step_viewed",
     ANSWER_CAPTURED: "answer_captured",
+    ANSWER_REPAIRED: "answer_repaired",
+    FALLBACK_USED: "fallback_used",
     SKIPPED: "onboarding_skipped",
     FIRST_VALUE_COMPLETED: "first_value_completed",
     COMPLETED: "onboarding_completed",
@@ -479,6 +481,10 @@
       stepIndex: stepId ? getStepIndex(stepId) : null,
       inputMethod: safeMetricString(current.inputMethod, 32) || null,
       answerKind: safeMetricString(current.answerKind, 64) || null,
+      repairReason: safeMetricString(current.repairReason || current.reason, 96) || null,
+      repairIntent: safeMetricString(current.repairIntent || current.intent, 64) || null,
+      fallbackKind: safeMetricString(current.fallbackKind, 96) || null,
+      fallbackReason: safeMetricString(current.fallbackReason || current.reason, 160) || null,
       conversational: current.conversational === undefined ? null : !!current.conversational,
       answerAccepted: current.answerAccepted === undefined ? null : !!current.answerAccepted,
       firstValueComplete: current.firstValueComplete === undefined ? null : !!current.firstValueComplete,
@@ -527,6 +533,8 @@
     });
     const activations = activatedSessions.size + (anonymousActivationSeen ? 1 : 0);
     const answers = list.filter((event) => event && event.type === METRIC_EVENTS.ANSWER_CAPTURED);
+    const repairs = list.filter((event) => event && event.type === METRIC_EVENTS.ANSWER_REPAIRED);
+    const fallbacks = list.filter((event) => event && event.type === METRIC_EVENTS.FALLBACK_USED);
     const conversationalAnswers = answers.filter((event) => event.conversational !== false);
     const acceptedConversationalAnswers = conversationalAnswers.filter((event) => event.answerAccepted !== false);
     const ratings = list
@@ -551,6 +559,10 @@
       medianDurationMs: median(durations),
       conversationalAnswers: conversationalAnswers.length,
       conversationalAnswerSuccessRate: rate(acceptedConversationalAnswers.length, conversationalAnswers.length),
+      repairsShown: repairs.length,
+      fallbacksUsed: fallbacks.length,
+      repairRate: rate(repairs.length, conversationalAnswers.length + repairs.length),
+      fallbackRate: rate(fallbacks.length, totalSessions || list.length),
       sentimentResponses: ratings.length,
       averageSentiment,
       latestEventType: list.length ? list[list.length - 1].type : null,

@@ -402,8 +402,10 @@ Current implementation already persists:
 - `onboardingSentimentV1`
 - `onboardingAssistantHandoffV1`
 
-The next implementation pass should add repair/fallback events and correlate sentiment with the
-setup session id.
+Current implementation records `answer_repaired` and `fallback_used` locally. These events are
+redacted, folded into `onboardingMetricsSummaryV1`, and are emitted when deterministic repair
+choices are shown, speech falls back to typing, audio setup fails, or profile extraction falls
+back to local interpretation. Sentiment already records through the onboarding metric stream.
 
 ## Engineering Slices
 
@@ -494,5 +496,5 @@ A production release candidate must pass:
 
 Do not redesign the just-released onboarding again before production feedback.
 
-The next build should extract the manifest and add repair/fallback analytics. That gives the team
-the reusable platform layer without destabilizing the shipped DMG.
+The next build should focus on end-to-end desktop proof: clean install, first-run setup, provider
+or intentional deferral, first focus, preferences saved, Desk handoff, and signed release checks.

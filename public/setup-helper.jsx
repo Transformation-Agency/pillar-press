@@ -1174,6 +1174,15 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
       message: repairMessageFor(slotId, stepId, repair) || "I am not sure what you meant. Choose one of these, or type a clearer answer.",
     }));
     setSetupError("");
+    recordMetric(ONBOARDING_METRIC_EVENTS.ANSWER_REPAIRED || "answer_repaired", {
+      stepId,
+      inputMethod: repair && repair.inputMethod,
+      answerKind: repair && repair.slotId ? repair.slotId : slotId,
+      repairReason: repair && repair.needsRepair ? "unclear_or_repair_intent" : "repair_requested",
+      repairIntent: repair && repair.intent,
+      conversational: true,
+      answerAccepted: false,
+    });
   }
 
   function applyPlatformAnswer(text, inputMethod) {
@@ -1404,6 +1413,13 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
           currentDraft: setupProfileDraft,
         });
         recordAction(ONBOARDING_ACTIONS.EXTRACT_SETUP_PROFILE, ONBOARDING_ACTION_STATUSES.SUCCEEDED, { data: { fallback: "local" } });
+        recordMetric(ONBOARDING_METRIC_EVENTS.FALLBACK_USED || "fallback_used", {
+          stepId: "preferences",
+          fallbackKind: "local_profile_extraction",
+          fallbackReason: "server_profile_unavailable",
+          inputMethod: inputMethod || "typed",
+          conversational: true,
+        });
       }
       mergeProfileIntoPreferences(profile);
       setConversationState((current) => ONBOARDING_CONVERSATION.captureAnswer(
@@ -1434,6 +1450,13 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
       );
       recordAction(ONBOARDING_ACTIONS.EXTRACT_SETUP_PROFILE, ONBOARDING_ACTION_STATUSES.FAILED, {
         error: (e && e.message) || "Could not interpret setup answer. I kept your text for manual editing.",
+      });
+      recordMetric(ONBOARDING_METRIC_EVENTS.FALLBACK_USED || "fallback_used", {
+        stepId: "preferences",
+        fallbackKind: "local_profile_extraction",
+        fallbackReason: "server_profile_failed",
+        inputMethod: inputMethod || "typed",
+        conversational: true,
       });
     } finally {
       setProfileBusy(false);
@@ -1542,6 +1565,13 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
       listenSessionRef.current = null;
       setListening(false);
       setSetupError("Speech recognition is not available here. You can type instead.");
+      recordMetric(ONBOARDING_METRIC_EVENTS.FALLBACK_USED || "fallback_used", {
+        stepId: (ONBOARDING_STEPS[step] && ONBOARDING_STEPS[step].id) || "intro",
+        fallbackKind: "typing",
+        fallbackReason: "speech_recognition_unavailable",
+        inputMethod: "voice",
+        conversational: true,
+      });
       return;
     }
     listenSessionRef.current = session;
@@ -1610,6 +1640,13 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
       const message = (e && e.message) || "Audio setup failed. You can continue by typing.";
       setAudioError(message);
       recordAction(ONBOARDING_ACTIONS.REQUEST_VOICE, ONBOARDING_ACTION_STATUSES.FAILED, { error: message });
+      recordMetric(ONBOARDING_METRIC_EVENTS.FALLBACK_USED || "fallback_used", {
+        stepId: "voice",
+        fallbackKind: "typing",
+        fallbackReason: "audio_setup_failed",
+        inputMethod: "voice",
+        conversational: true,
+      });
     }
   }
 

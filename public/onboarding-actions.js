@@ -15,6 +15,8 @@
     STARTED: "onboarding_started",
     STEP_VIEWED: "step_viewed",
     ANSWER_CAPTURED: "answer_captured",
+    ANSWER_REPAIRED: "answer_repaired",
+    FALLBACK_USED: "fallback_used",
     SKIPPED: "onboarding_skipped",
     FIRST_VALUE_COMPLETED: "first_value_completed",
     COMPLETED: "onboarding_completed",

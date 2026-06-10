@@ -459,6 +459,18 @@ describe("browser onboarding runtime contract", () => {
         sessionId: "a",
         rating: 5,
       }),
+      runtime.buildMetricsEvent(runtime.METRIC_EVENTS.ANSWER_REPAIRED, {
+        sessionId: "a",
+        stepId: "intro",
+        repairReason: "unclear api_key=abc123",
+        repairIntent: "unclear",
+      }),
+      runtime.buildMetricsEvent(runtime.METRIC_EVENTS.FALLBACK_USED, {
+        sessionId: "a",
+        stepId: "voice",
+        fallbackKind: "typing",
+        fallbackReason: "speech_recognition_unavailable",
+      }),
     ];
 
     expect(runtime.deriveMetricsSummary(events)).toMatchObject({
@@ -470,9 +482,14 @@ describe("browser onboarding runtime contract", () => {
       medianDurationMs: 240000,
       conversationalAnswers: 1,
       conversationalAnswerSuccessRate: 1,
+      repairsShown: 1,
+      fallbacksUsed: 1,
+      repairRate: 0.5,
+      fallbackRate: 1,
       sentimentResponses: 1,
       averageSentiment: 5,
     });
+    expect(events[5].repairReason).toContain("[redacted]");
   });
 
   it("keeps activation rate bounded when event history is partial", () => {
@@ -992,6 +1009,46 @@ describe("browser onboarding action registry", () => {
       sentimentResponses: 1,
       averageSentiment: 4,
       latestEventType: "sentiment_submitted",
+    });
+  });
+
+  it("persists repair and fallback metrics into the local summary", () => {
+    const window = loadBrowserActions();
+    const prefs: Record<string, any> = {};
+    window.Store = {
+      getPref: (key: string, fallback: unknown) => Object.prototype.hasOwnProperty.call(prefs, key) ? prefs[key] : fallback,
+      setPref: (key: string, value: unknown) => {
+        prefs[key] = value;
+      },
+    };
+
+    const repaired = window.KP_ONBOARDING_ACTIONS.recordMetric("answer_repaired", {
+      sessionId: "s",
+      stepId: "intro",
+      repairReason: "unclear answer",
+      repairIntent: "unclear",
+      conversational: true,
+      answerAccepted: false,
+    });
+    const fallback = window.KP_ONBOARDING_ACTIONS.recordMetric("fallback_used", {
+      sessionId: "s",
+      stepId: "voice",
+      fallbackKind: "typing",
+      fallbackReason: "speech_recognition_unavailable",
+    });
+
+    expect(repaired).toMatchObject({ intent: "record_metric", status: "succeeded" });
+    expect(fallback).toMatchObject({ intent: "record_metric", status: "succeeded" });
+    expect(prefs.onboardingMetricsEventsV1).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "answer_repaired", repairReason: "unclear answer" }),
+        expect.objectContaining({ type: "fallback_used", fallbackKind: "typing" }),
+      ])
+    );
+    expect(prefs.onboardingMetricsSummaryV1).toMatchObject({
+      repairsShown: 1,
+      fallbacksUsed: 1,
+      latestEventType: "fallback_used",
     });
   });
 
