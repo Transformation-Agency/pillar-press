@@ -410,6 +410,19 @@ function DesktopOnboarding() {
     return profiles.find((p) => p.id === settings?.defaultProfileId) || profiles[0] || null;
   };
 
+  const notifyModelSetupSaved = (settings, profile) => {
+    if (window.KP_ONBOARDING_ACTIONS && window.KP_ONBOARDING_ACTIONS.notifyProviderSetupSaved) {
+      window.KP_ONBOARDING_ACTIONS.notifyProviderSetupSaved({ profile: profile || activeProfileFromSettings(settings) || settings });
+    }
+  };
+
+  const closeModelSetup = () => {
+    if (window.KP_ONBOARDING_ACTIONS && window.KP_ONBOARDING_ACTIONS.notifyProviderSetupClosed) {
+      window.KP_ONBOARDING_ACTIONS.notifyProviderSetupClosed({ saved: false });
+    }
+    setOpen(false);
+  };
+
   React.useEffect(() => {
     if (!desktop || !desktop.isDesktop()) return;
     let active = true;
@@ -728,6 +741,7 @@ function DesktopOnboarding() {
       setSavedSettings(cleanedSettings);
       setTaskDefaults(nextTaskDefaults);
       window.localStorage.setItem(setupCompleteKey, "true");
+      notifyModelSetupSaved(cleanedSettings, nextProfile);
       setOpen(false);
     } catch (e) {
       setMessage((e && e.message) || (typeof e === "string" ? e : "Could not save the model choice."));
@@ -782,7 +796,7 @@ function DesktopOnboarding() {
             King's Press keeps your editorial database local. Use a local model by default, or add a cloud API key when you want hosted compute.
           </p>
         </div>
-        <button className="icon-btn" onClick={() => setOpen(false)} title="Close setup"><Icon name="xLogo" size={15} /></button>
+        <button className="icon-btn" onClick={closeModelSetup} title="Close setup"><Icon name="xLogo" size={15} /></button>
       </div>
       <div className="scroll-y" style={{ flex: 1, minHeight: 0, padding: "28px clamp(20px, 4vw, 56px) 40px" }}>
         <div style={{ maxWidth: 980, margin: "0 auto" }}>

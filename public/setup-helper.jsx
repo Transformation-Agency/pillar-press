@@ -8,6 +8,7 @@ const ONBOARDING_AUDIO = window.KP_ONBOARDING_AUDIO || {
   speakText: () => Promise.resolve(),
 };
 const ONBOARDING_RUNTIME = window.KP_CONVERSATIONAL_ONBOARDING || null;
+const ONBOARDING_ACTION_REGISTRY = window.KP_ONBOARDING_ACTIONS || null;
 const ONBOARDING_STEPS = (ONBOARDING_RUNTIME && ONBOARDING_RUNTIME.steps) || [
   { id: "connect", label: "Connect" },
   { id: "welcome", label: "Welcome" },
@@ -189,10 +190,29 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
 
   React.useEffect(() => {
     if (!open) return;
+    if (ONBOARDING_ACTION_REGISTRY && ONBOARDING_ACTION_REGISTRY.providerStatus) {
+      ONBOARDING_ACTION_REGISTRY.providerStatus().then((result) => {
+        setProviderStatus(result && result.status === ONBOARDING_ACTION_STATUSES.SUCCEEDED ? result.data : null);
+      });
+      return;
+    }
     fetch("/api/llm/status", { headers: { Accept: "application/json" } })
       .then((r) => r.json().then((data) => ({ ok: r.ok, data })).catch(() => ({ ok: false, data: null })))
       .then(({ ok, data }) => setProviderStatus(ok ? data : null))
       .catch(() => setProviderStatus(null));
+  }, [open]);
+
+  React.useEffect(() => {
+    if (!open || !ONBOARDING_ACTION_REGISTRY || !ONBOARDING_ACTION_REGISTRY.onProviderSetupSaved) return undefined;
+    return ONBOARDING_ACTION_REGISTRY.onProviderSetupSaved((detail) => {
+      const safe = detail || {};
+      recordAction(ONBOARDING_ACTIONS.OPEN_PROVIDER_SETUP, ONBOARDING_ACTION_STATUSES.SUCCEEDED, { data: safe });
+      setProviderStatus((current) => Object.assign({}, current || {}, {
+        provider: safe.provider || (current && current.provider),
+        model: safe.model || (current && current.model),
+      }));
+      setSetupError("");
+    });
   }, [open]);
 
   React.useEffect(() => {
@@ -250,7 +270,14 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
   function runConnectAction(item) {
     if (item.id === "models") {
       recordAction(ONBOARDING_ACTIONS.OPEN_PROVIDER_SETUP, ONBOARDING_ACTION_STATUSES.PENDING);
-      if (onOpenProviderSetup) onOpenProviderSetup();
+      const action = ONBOARDING_ACTION_REGISTRY && ONBOARDING_ACTION_REGISTRY.openProviderSetup
+        ? ONBOARDING_ACTION_REGISTRY.openProviderSetup({ onOpenProviderSetup })
+        : Promise.resolve(null);
+      action.then((result) => {
+        if (!result) return;
+        recordAction(result.intent || ONBOARDING_ACTIONS.OPEN_PROVIDER_SETUP, result.status, result);
+        if (result.status === ONBOARDING_ACTION_STATUSES.FAILED) setSetupError(result.error || "Could not open model setup.");
+      });
       return;
     }
     if (item.id === "voice") {
@@ -258,9 +285,12 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
       return;
     }
     if (item.id === "integrations") {
-      setIntegrationsTouched(true);
-      recordAction(ONBOARDING_ACTIONS.EXPLORE_INTEGRATIONS, ONBOARDING_ACTION_STATUSES.SKIPPED, {
-        data: { reason: "explored_later" },
+      const action = ONBOARDING_ACTION_REGISTRY && ONBOARDING_ACTION_REGISTRY.exploreIntegrations
+        ? ONBOARDING_ACTION_REGISTRY.exploreIntegrations()
+        : Promise.resolve({ status: ONBOARDING_ACTION_STATUSES.SKIPPED, data: { reason: "connect_later" } });
+      action.then((result) => {
+        setIntegrationsTouched(true);
+        recordAction(ONBOARDING_ACTIONS.EXPLORE_INTEGRATIONS, result.status || ONBOARDING_ACTION_STATUSES.SKIPPED, result);
       });
     }
   }
@@ -269,17 +299,23 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     setAudioError("");
     recordAction(ONBOARDING_ACTIONS.REQUEST_VOICE, ONBOARDING_ACTION_STATUSES.PENDING);
     setAudioState("requesting_microphone");
+    const result = ONBOARDING_ACTION_REGISTRY && ONBOARDING_ACTION_REGISTRY.requestVoice
+      ? await ONBOARDING_ACTION_REGISTRY.requestVoice()
+      : null;
     try {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error("Microphone access is not available here.");
-      }
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stream.getTracks().forEach((track) => track.stop());
-      if (hasDesktopBridge && window.KINGS_DESKTOP.startVoiceSession) {
-        await window.KINGS_DESKTOP.startVoiceSession();
+      if (result && result.status === ONBOARDING_ACTION_STATUSES.FAILED) throw new Error(result.error);
+      if (!result) {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          throw new Error("Microphone access is not available here.");
+        }
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach((track) => track.stop());
+        if (hasDesktopBridge && window.KINGS_DESKTOP.startVoiceSession) {
+          await window.KINGS_DESKTOP.startVoiceSession();
+        }
       }
       setAudioState("audio_ready");
-      recordAction(ONBOARDING_ACTIONS.REQUEST_VOICE, ONBOARDING_ACTION_STATUSES.SUCCEEDED);
+      recordAction(ONBOARDING_ACTIONS.REQUEST_VOICE, ONBOARDING_ACTION_STATUSES.SUCCEEDED, result || undefined);
     } catch (e) {
       setAudioState("error");
       const message = (e && e.message) || "Audio setup failed. You can continue by typing.";
@@ -304,6 +340,12 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     setBusy(true);
     recordAction(ONBOARDING_ACTIONS.SAVE_FOCUS, ONBOARDING_ACTION_STATUSES.PENDING);
     try {
+      if (ONBOARDING_ACTION_REGISTRY && ONBOARDING_ACTION_REGISTRY.saveFocus) {
+        const result = await ONBOARDING_ACTION_REGISTRY.saveFocus(name, { activeCampaign });
+        if (result.status === ONBOARDING_ACTION_STATUSES.FAILED) throw new Error(result.error);
+        recordAction(ONBOARDING_ACTIONS.SAVE_FOCUS, ONBOARDING_ACTION_STATUSES.SUCCEEDED, result);
+        return result.data && result.data.campaignId;
+      }
       const tempId = window.Store.addCampaign(name);
       if (window.Store.whenCampaignSaved) await window.Store.whenCampaignSaved(tempId);
       recordAction(ONBOARDING_ACTIONS.SAVE_FOCUS, ONBOARDING_ACTION_STATUSES.SUCCEEDED, { data: { campaignId: tempId } });
@@ -356,9 +398,12 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
       selfVision: Object.assign({}, refs.selfVision || {}, { body: prefDraft.selfVision }),
       gateSpec: Object.assign({}, refs.gateSpec || {}, { body: prefDraft.gateSpec }),
     };
-    const saved = window.Store.updateReferences(patch);
+    const saved = ONBOARDING_ACTION_REGISTRY && ONBOARDING_ACTION_REGISTRY.savePreferences
+      ? ONBOARDING_ACTION_REGISTRY.savePreferences(patch)
+      : window.Store.updateReferences(patch);
     return Promise.resolve(saved).then((result) => {
-      recordAction(ONBOARDING_ACTIONS.SAVE_PREFERENCES, ONBOARDING_ACTION_STATUSES.SUCCEEDED);
+      if (result && result.status === ONBOARDING_ACTION_STATUSES.FAILED) throw new Error(result.error);
+      recordAction(ONBOARDING_ACTIONS.SAVE_PREFERENCES, ONBOARDING_ACTION_STATUSES.SUCCEEDED, result || undefined);
       return result;
     }).catch((e) => {
       const message = (e && e.message) || "Could not save preferences.";
@@ -374,7 +419,13 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     try {
       if (!activeCampaign && campaignName.trim()) await ensureFocus();
       await savePreferences();
-      recordAction(ONBOARDING_ACTIONS.COMPLETE_ONBOARDING, ONBOARDING_ACTION_STATUSES.SUCCEEDED);
+      if (ONBOARDING_ACTION_REGISTRY && ONBOARDING_ACTION_REGISTRY.completeOnboarding) {
+        const result = await ONBOARDING_ACTION_REGISTRY.completeOnboarding({ firstValueComplete: true });
+        if (result.status === ONBOARDING_ACTION_STATUSES.FAILED) throw new Error(result.error);
+        recordAction(ONBOARDING_ACTIONS.COMPLETE_ONBOARDING, ONBOARDING_ACTION_STATUSES.SUCCEEDED, result);
+      } else {
+        recordAction(ONBOARDING_ACTIONS.COMPLETE_ONBOARDING, ONBOARDING_ACTION_STATUSES.SUCCEEDED);
+      }
       if (onComplete) onComplete();
     } catch (e) {
       const message = (e && e.message) || "Could not finish setup.";
@@ -387,8 +438,13 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
 
   const skip = () => {
     recordAction(ONBOARDING_ACTIONS.SKIP_ONBOARDING, ONBOARDING_ACTION_STATUSES.SKIPPED);
-    window.Store.setPref(ONBOARDING_FLAGS.onboardingCompletePref, true);
-    if (onClose) onClose();
+    const action = ONBOARDING_ACTION_REGISTRY && ONBOARDING_ACTION_REGISTRY.skipOnboarding
+      ? ONBOARDING_ACTION_REGISTRY.skipOnboarding()
+      : Promise.resolve(null);
+    action.finally(() => {
+      if (!ONBOARDING_ACTION_REGISTRY) window.Store.setPref(ONBOARDING_FLAGS.onboardingCompletePref, true);
+      if (onClose) onClose();
+    });
   };
 
   return (
@@ -511,7 +567,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
                   status={item.status}
                   action={item.label}
                   onClick={() => runConnectAction(item)}
-                  disabled={(item.id === "models" && !hasDesktopBridge) || item.pending}
+                  disabled={item.pending}
                 />
               ))}
             </section>

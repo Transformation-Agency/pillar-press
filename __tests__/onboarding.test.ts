@@ -18,6 +18,48 @@ function loadBrowserRuntime() {
   return window.KP_CONVERSATIONAL_ONBOARDING as any;
 }
 
+function createTestWindow() {
+  const listeners: Record<string, Array<(event: any) => void>> = {};
+  const window = {
+    KP_ONBOARDING_COPY: {
+      AUDIO_INTRO_COPY_VERSION: "test-copy-v1",
+      FIRST_PLATFORM_QUESTION: "Where do you communicate most?",
+      getAudioReadyPrompt: () => "Audio is connected.",
+      getPressIntroScript: () => "I'm King's Press.",
+    },
+    KINGS_DESKTOP: {
+      isDesktop: () => true,
+    },
+    addEventListener: (name: string, handler: (event: any) => void) => {
+      listeners[name] = listeners[name] || [];
+      listeners[name].push(handler);
+    },
+    removeEventListener: (name: string, handler: (event: any) => void) => {
+      listeners[name] = (listeners[name] || []).filter((item) => item !== handler);
+    },
+    dispatchEvent: (event: any) => {
+      (listeners[event.type] || []).forEach((handler) => handler(event));
+      return true;
+    },
+  } as Record<string, any>;
+  return window;
+}
+
+function loadBrowserActions() {
+  const window = createTestWindow();
+  const runtimeSource = readFileSync(new URL("../public/onboarding-runtime.js", import.meta.url), "utf8");
+  const actionsSource = readFileSync(new URL("../public/onboarding-actions.js", import.meta.url), "utf8");
+  function CustomEvent(type: string, init?: { detail?: unknown }) {
+    return { type, detail: init?.detail };
+  }
+  function Event(type: string) {
+    return { type };
+  }
+  runInNewContext(runtimeSource, { window, Date });
+  runInNewContext(actionsSource, { window, Date, CustomEvent, Event, navigator: {}, fetch: undefined });
+  return window;
+}
+
 describe("audio intro consent classifier", () => {
   it("classifies common affirmative and skip phrases locally", () => {
     expect(classifyIntroConsent("yes, introduce yourself")).toBe("yes");
@@ -144,6 +186,74 @@ describe("browser onboarding runtime contract", () => {
       onboardingComplete: true,
       computeReady: false,
       canEnterWorkspace: true,
+    });
+  });
+});
+
+describe("browser onboarding action registry", () => {
+  it("redacts sensitive provider error fragments", () => {
+    const window = loadBrowserActions();
+    const registry = window.KP_ONBOARDING_ACTIONS;
+
+    expect(registry.cleanError("Bearer sk-test api_key=abc password=hunter2")).toBe(
+      "Bearer [redacted] api_key=[redacted] password=[redacted]"
+    );
+  });
+
+  it("emits only sanitized provider setup saved details", () => {
+    const window = loadBrowserActions();
+    const registry = window.KP_ONBOARDING_ACTIONS;
+    let received: any = null;
+
+    registry.onProviderSetupSaved((detail: any) => {
+      received = detail;
+    });
+    registry.notifyProviderSetupSaved({
+      profile: {
+        id: "openai-gpt",
+        label: "OpenAI GPT",
+        provider: "openai",
+        model: "gpt-4o-mini",
+        apiKey: "sk-secret",
+        baseUrl: "https://user:pass@example.test/v1",
+      },
+    });
+
+    expect(received).toEqual({
+      id: "openai-gpt",
+      label: "OpenAI GPT",
+      provider: "openai",
+      model: "gpt-4o-mini",
+    });
+  });
+
+  it("opens provider setup only in desktop and reports web-preview failure", async () => {
+    const desktopWindow = loadBrowserActions();
+    let opened = false;
+
+    const desktopResult = await desktopWindow.KP_ONBOARDING_ACTIONS.openProviderSetup({
+      onOpenProviderSetup: () => {
+        opened = true;
+      },
+    });
+    expect(opened).toBe(true);
+    expect(desktopResult).toMatchObject({
+      intent: "open_provider_setup",
+      status: "pending",
+      data: { opened: true },
+    });
+
+    const webWindow = loadBrowserActions();
+    webWindow.KINGS_DESKTOP.isDesktop = () => false;
+    const webResult = await webWindow.KP_ONBOARDING_ACTIONS.openProviderSetup({
+      onOpenProviderSetup: () => {
+        throw new Error("should not open");
+      },
+    });
+    expect(webResult).toMatchObject({
+      intent: "open_provider_setup",
+      status: "failed",
+      error: "Model setup is available in the desktop app.",
     });
   });
 });
