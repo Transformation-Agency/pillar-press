@@ -49,10 +49,10 @@ const ONBOARDING_CONVERSATION = window.KP_ONBOARDING_CONVERSATION || {
     }
     : {
       slotId: "communication_platforms",
-      question: ONBOARDING_COPY.FIRST_PLATFORM_QUESTION || "Where do you communicate most?",
-      helper: "Answer naturally. I will turn this into setup defaults.",
-      placeholder: "e.g. LinkedIn, Substack, scripts, and book chapters.",
-      actionLabel: "Capture answer",
+      question: "What are you working on first?",
+      helper: "Name the first project or campaign King's Press should organize for you.",
+      placeholder: "e.g. Launch plan, book draft, newsletter, or research brief.",
+      actionLabel: "Use answer",
       progressText: "",
     },
   captureAnswer: (state) => state || {},
@@ -242,11 +242,6 @@ function SetupConversationCanvas({ conversation, mode, onModeChange, actionResul
       };
     })
     .filter(Boolean);
-  const results = Object.values(actionResults || {})
-    .filter(Boolean)
-    .sort((a, b) => (a.updatedAt || 0) - (b.updatedAt || 0))
-    .slice(-3);
-
   return (
     <section className="kp-conversation-canvas" aria-label="King's Press setup conversation">
       <div className="kp-conversation-toolbar">
@@ -282,14 +277,9 @@ function SetupConversationCanvas({ conversation, mode, onModeChange, actionResul
           </div>
         ))}
       </div>
-      {(!!results.length || setupError) && (
+      {setupError && (
         <div className="kp-conversation-status" aria-live="polite">
-          {results.map((result) => (
-            <span key={(result.intent || "action") + (result.updatedAt || "")} data-status={result.status}>
-              {getActionStatusLabel(result.status)}: {(result.intent || "setup").replace(/_/g, " ")}
-            </span>
-          ))}
-          {setupError && <strong role="alert">{setupError}</strong>}
+          <strong role="alert">{setupError}</strong>
         </div>
       )}
     </section>
@@ -2797,32 +2787,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
 
         {step === 3 && (
           <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError} conversationState={conversationState} onBack={() => goToStep(2)}>
-            <SetupAnswerComposer
-              question={focusPrompt && focusPrompt.question}
-              helper={focusPrompt && focusPrompt.helper}
-              value={setupAnswer}
-              onChange={setSetupAnswer}
-              onSubmit={() => applyPlatformAnswer(setupAnswer, "typed")}
-              onListen={listenForAnswer}
-              listening={listening}
-              transcript={platformAnswerCaptured ? setupTranscript : ""}
-              placeholder={focusPrompt && focusPrompt.placeholder}
-              actionLabel={focusPrompt && focusPrompt.actionLabel}
-              repair={repairState && repairState.slotId === ONBOARDING_CONVERSATION.SLOT_IDS.COMMUNICATION_PLATFORMS ? repairState : null}
-              onRepairChoose={(suggestion) => {
-                const next = (suggestion && suggestion.value) || "";
-                setSetupAnswer(next);
-                const result = applyPlatformAnswer(next, "button");
-                if (result && result.skipped) goToStep(4);
-              }}
-            />
-            {platformAnswerCaptured && (
-              <p style={{ margin: "14px 0 0", color: "#5E7A46", fontSize: 15 }}>
-                Got it. I used that to shape your first focus and setup notes.
-              </p>
-            )}
-            <div style={{ height: 34 }} />
-            <SetupField label="First project or campaign name" helper="You can rename this anytime.">
+            <SetupField label="First project or campaign name" helper="Name the first place King's Press should organize drafts, sources, and notes.">
               <input
                 className="kp-setup-input"
                 value={campaignName}
@@ -2832,7 +2797,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
                 style={{ fontFamily: "var(--font-serif)", fontSize: 25, height: 75 }}
               />
             </SetupField>
-            <div style={{ marginTop: 62 }}>
+            <div style={{ marginTop: 38 }}>
               <h2 style={{ margin: 0, fontFamily: "var(--font-serif)", fontSize: 25, fontWeight: 500 }}>Quick picks</h2>
               <p style={{ margin: "10px 0 28px", color: "#766A63", fontSize: 18 }}>Start with one of your recent focuses.</p>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 22 }}>
@@ -2859,14 +2824,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
               primary="Continue"
               busy={busy}
               onPrimary={() => {
-                const applied = setupAnswer.trim() && !platformAnswerCaptured
-                  ? applyPlatformAnswer(setupAnswer, "typed")
-                  : null;
-                if (applied && (applied.skipped || applied.needsRepair)) {
-                  if (applied.skipped) goToStep(4);
-                  return;
-                }
-                ensureFocus(applied && applied.focusName).then(() => goToStep(4)).catch(() => null);
+                ensureFocus().then(() => goToStep(4)).catch(() => null);
               }}
             />
             {setupError && (

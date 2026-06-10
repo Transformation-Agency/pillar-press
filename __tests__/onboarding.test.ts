@@ -672,7 +672,7 @@ describe("browser onboarding conversation controller", () => {
     });
     expect(conversation.promptForStep("focus", state)).toMatchObject({
       slotId: "communication_platforms",
-      question: "Where do you communicate most?",
+      question: "What are you working on first?",
       progressText: "0 of 2 setup answers captured",
     });
     expect(conversation.promptForStep("preferences", state)).toMatchObject({
@@ -883,7 +883,7 @@ describe("browser onboarding action registry", () => {
       transcript: {
         version: "test-conversation",
         turns: [
-          { role: "assistant", text: "Where do you communicate most?" },
+          { role: "assistant", text: "What are you working on first?" },
           { role: "user", text: "LinkedIn and Substack", inputMethod: "typed" },
         ],
         permissions: {
@@ -917,7 +917,7 @@ describe("browser onboarding action registry", () => {
       version: "test-conversation",
       source: "kings_press_setup",
       turns: [
-        { role: "assistant", text: "Where do you communicate most?" },
+        { role: "assistant", text: "What are you working on first?" },
         { role: "user", text: "LinkedIn and Substack", inputMethod: "typed" },
       ],
     });
