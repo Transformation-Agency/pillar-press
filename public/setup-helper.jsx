@@ -1662,17 +1662,22 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
         setupDurationMs,
         completedFrom: skipPreferences ? "preferences_skipped" : "preferences_saved",
       };
+      const setupTranscriptPayload = ONBOARDING_CONVERSATION && ONBOARDING_CONVERSATION.transcriptForState
+        ? ONBOARDING_CONVERSATION.transcriptForState(conversationState)
+        : null;
       let completionPayload = {
         routeTarget: firstValue.routeTarget,
         campaignId: focusId,
         campaignName: firstValue.campaignName,
         firstValue,
+        transcript: setupTranscriptPayload,
         sessionId: metricsSessionIdRef.current,
       };
       if (ONBOARDING_ACTION_REGISTRY && ONBOARDING_ACTION_REGISTRY.completeOnboarding) {
         const result = await ONBOARDING_ACTION_REGISTRY.completeOnboarding({
           firstValueComplete: !!(focusId && preferencesSaved),
           firstValue,
+          transcript: setupTranscriptPayload,
           sessionId: metricsSessionIdRef.current,
         });
         if (result.status === ONBOARDING_ACTION_STATUSES.FAILED) throw new Error(result.error);

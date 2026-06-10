@@ -287,6 +287,15 @@
       Store.setPref(flags.onboardingCompletePref, true);
       markDesktopSetupComplete();
       let firstValueEvent = null;
+      const transcript = options && options.transcript && typeof options.transcript === "object"
+        ? Object.assign({}, options.transcript, {
+          persistedAt: new Date().toISOString(),
+          source: "kings_press_setup",
+        })
+        : null;
+      if (transcript) {
+        Store.setPref(flags.transcriptPref || "onboardingSetupTranscriptV1", transcript);
+      }
       if (options && options.firstValueComplete) {
         firstValueEvent = runtime.buildFirstValueEvent
           ? runtime.buildFirstValueEvent(options.firstValue || options)
@@ -304,6 +313,23 @@
           firstValueComplete: firstValueEvent.complete,
         }));
       }
+      const handoff = {
+        version: 1,
+        createdAt: new Date().toISOString(),
+        source: "kings_press_setup",
+        sessionId: options && options.sessionId,
+        activation: firstValueEvent,
+        routeTarget: (firstValueEvent && firstValueEvent.routeTarget) || (options && options.routeTarget) || "desk",
+        campaignId: (firstValueEvent && firstValueEvent.campaignId) || (options && options.campaignId) || null,
+        campaignName: (firstValueEvent && firstValueEvent.campaignName) || (options && options.campaignName) || "",
+        providerReady: !!(firstValueEvent && firstValueEvent.providerReady),
+        transcriptPref: flags.transcriptPref || "onboardingSetupTranscriptV1",
+        transcriptTurnCount: transcript && Array.isArray(transcript.turns) ? transcript.turns.length : 0,
+        nextAssistantMode: firstValueEvent && firstValueEvent.providerReady
+          ? "live_assistant_ready"
+          : "scripted_assistant_until_provider_ready",
+      };
+      Store.setPref(flags.handoffPref || "onboardingAssistantHandoffV1", handoff);
       persistMetricsEvent({
         type: METRIC_EVENTS.COMPLETED,
         sessionId: options && options.sessionId,
@@ -316,6 +342,8 @@
         onboardingComplete: true,
         firstValueComplete: !!(firstValueEvent && firstValueEvent.complete),
         firstValueEvent,
+        handoff,
+        transcript,
         sessionId: options && options.sessionId,
       });
     } catch (error) {

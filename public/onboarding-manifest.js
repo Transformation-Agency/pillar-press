@@ -171,6 +171,8 @@
       onboardingCompletePref: "setupHelperCompleteV1",
       computeSetupLocalStorageKey: "kingspress.desktopSetupComplete",
       firstValuePref: "onboardingFirstValueEventV1",
+      transcriptPref: "onboardingSetupTranscriptV1",
+      handoffPref: "onboardingAssistantHandoffV1",
       metricsEventsPref: "onboardingMetricsEventsV1",
       metricsSummaryPref: "onboardingMetricsSummaryV1",
       sentimentPref: "onboardingSentimentV1",

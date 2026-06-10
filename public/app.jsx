@@ -945,6 +945,9 @@ function App() {
   const sentimentPref = (window.KP_CONVERSATIONAL_ONBOARDING &&
     window.KP_CONVERSATIONAL_ONBOARDING.flags &&
     window.KP_CONVERSATIONAL_ONBOARDING.flags.sentimentPref) || "onboardingSentimentV1";
+  const handoffPref = (window.KP_CONVERSATIONAL_ONBOARDING &&
+    window.KP_CONVERSATIONAL_ONBOARDING.flags &&
+    window.KP_CONVERSATIONAL_ONBOARDING.flags.handoffPref) || "onboardingAssistantHandoffV1";
 
   const openPiece = (id) => { window.Store.setActive(id); setView("workspace"); };
   const goLibrary = () => { setView("library"); window.Store.setActive(null); };
@@ -960,13 +963,20 @@ function App() {
   }, []);
   const completeSetup = (payload) => {
     const result = payload || {};
+    const handoff = window.Store.getPref(handoffPref, null);
     window.Store.setPref(setupCompletePref, true);
-    setLastSetupResult(result);
+    setLastSetupResult(Object.assign({}, result, { handoff }));
     if (result.campaignId && window.Store.getCampaign && window.Store.getCampaign(result.campaignId)) {
       window.Store.setActiveCampaign(result.campaignId);
     }
     setSetupOpen(false);
     setView(result.routeTarget || (result.campaignId ? "desk" : "library"));
+    if (handoff && handoff.transcriptTurnCount) {
+      setDesktopNotice({
+        type: "ok",
+        text: "Setup saved. Your setup conversation is ready for the desk.",
+      });
+    }
     if (!window.Store.getPref(sentimentPref, null)) setSentimentOpen(true);
   };
   const submitSentiment = async (rating) => {

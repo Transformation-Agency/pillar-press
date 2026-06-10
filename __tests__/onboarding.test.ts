@@ -592,6 +592,37 @@ describe("browser onboarding conversation controller", () => {
     expect(voice.slots.communication_platforms.inputMethod).toBe("voice");
   });
 
+  it("builds a redacted setup transcript for assistant handoff", () => {
+    const conversation = loadBrowserConversation();
+    let state = conversation.createState();
+
+    state = conversation.captureAnswer(state, conversation.SLOT_IDS.INTRO_CONSENT, "yes, guide me", "button");
+    state = conversation.captureAnswer(state, conversation.SLOT_IDS.VOICE_SETUP, "api_key=sk-secret-1234567890", "typed");
+    state = conversation.captureAnswer(state, conversation.SLOT_IDS.COMMUNICATION_PLATFORMS, "LinkedIn and Substack", "typed");
+
+    const transcript = conversation.transcriptForState(state);
+
+    expect(transcript).toMatchObject({
+      complete: false,
+      currentSlot: "voice_profile",
+      permissions: {
+        mayUseSavedMemory: false,
+        mayUseWebResearch: false,
+        mayPublishOrSend: false,
+      },
+    });
+    expect(transcript.turns.map((turn: any) => turn.role)).toEqual([
+      "assistant",
+      "user",
+      "assistant",
+      "user",
+      "assistant",
+      "user",
+    ]);
+    expect(JSON.stringify(transcript)).not.toContain("sk-secret");
+    expect(JSON.stringify(transcript)).toContain("[redacted]");
+  });
+
   it("exposes one prompt for each conversational setup step", () => {
     const conversation = loadBrowserConversation();
     const state = conversation.createState();
@@ -811,6 +842,18 @@ describe("browser onboarding action registry", () => {
         setupDurationMs: 90000,
         completedAt: "2026-06-10T00:00:00.000Z",
       },
+      transcript: {
+        version: "test-conversation",
+        turns: [
+          { role: "assistant", text: "Where do you communicate most?" },
+          { role: "user", text: "LinkedIn and Substack", inputMethod: "typed" },
+        ],
+        permissions: {
+          mayUseSavedMemory: false,
+          mayUseWebResearch: false,
+          mayPublishOrSend: false,
+        },
+      },
     });
 
     expect(result).toMatchObject({
@@ -831,6 +874,24 @@ describe("browser onboarding action registry", () => {
       preferencesSaved: true,
       routeTarget: "desk",
       setupDurationMs: 90000,
+    });
+    expect(prefs.onboardingSetupTranscriptV1).toMatchObject({
+      version: "test-conversation",
+      source: "kings_press_setup",
+      turns: [
+        { role: "assistant", text: "Where do you communicate most?" },
+        { role: "user", text: "LinkedIn and Substack", inputMethod: "typed" },
+      ],
+    });
+    expect(prefs.onboardingAssistantHandoffV1).toMatchObject({
+      source: "kings_press_setup",
+      sessionId: "session-activation",
+      campaignId: "camp_1",
+      campaignName: "Launch plan",
+      providerReady: true,
+      transcriptPref: "onboardingSetupTranscriptV1",
+      transcriptTurnCount: 2,
+      nextAssistantMode: "live_assistant_ready",
     });
     expect(prefs.onboardingMetricsSummaryV1).toMatchObject({
       sessionsCompleted: 1,

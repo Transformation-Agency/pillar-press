@@ -81,6 +81,14 @@
     return maxLength ? text.slice(0, maxLength) : text;
   }
 
+  function redactSensitiveText(value) {
+    return String(value || "")
+      .replace(/Bearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer [redacted]")
+      .replace(/sk-[A-Za-z0-9._-]{12,}/gi, "sk-[redacted]")
+      .replace(/api[_-]?key[=:]?\s*[^&\s]+/gi, "api_key=[redacted]")
+      .replace(/password[=:]?\s*[^&\s]+/gi, "password=[redacted]");
+  }
+
   function defaultSlot(id) {
     return {
       id,
@@ -150,14 +158,16 @@
     const state = createState(stateInput);
     const clean = cleanText(answer, 5000);
     if (!slotPrompts[slotId] || !clean) return state;
+    const safeAnswer = cleanText(redactSensitiveText(clean), 5000);
     const slots = Object.assign({}, state.slots, {
       [slotId]: {
         id: slotId,
         status: "answered",
         inputMethod: cleanText(inputMethod || "typed", 32) || "typed",
         answeredAt: new Date().toISOString(),
-        answerLength: clean.length,
-        answerPreview: cleanText(clean, 120),
+        answerLength: safeAnswer.length,
+        answerPreview: cleanText(safeAnswer, 120),
+        answerText: safeAnswer,
       },
     });
     return createState({
@@ -201,6 +211,42 @@
     };
   }
 
+  function transcriptForState(stateInput) {
+    const state = createState(stateInput);
+    const turns = [];
+    QUESTION_SEQUENCE.forEach((slotId) => {
+      const prompt = slotPrompts[slotId];
+      const slot = state.slots[slotId];
+      if (!prompt || !slot || (slot.status !== "answered" && slot.status !== "skipped")) return;
+      turns.push({
+        role: "assistant",
+        slotId,
+        stepId: prompt.stepId,
+        text: prompt.question,
+      });
+      turns.push({
+        role: "user",
+        slotId,
+        stepId: prompt.stepId,
+        inputMethod: slot.inputMethod || null,
+        status: slot.status,
+        text: slot.status === "skipped"
+          ? "I'll skip this for now."
+          : cleanText(redactSensitiveText(slot.answerText || slot.answerPreview), 5000),
+        at: slot.answeredAt || null,
+      });
+    });
+    return {
+      version: CONVERSATION_VERSION,
+      capturedAt: new Date().toISOString(),
+      currentSlot: state.currentSlot,
+      complete: progressForState(state).complete,
+      progress: progressForState(state),
+      turns,
+      permissions: safePermissions(),
+    };
+  }
+
   window.KP_ONBOARDING_CONVERSATION = {
     CONVERSATION_VERSION,
     manifestVersion: manifest.version || null,
@@ -218,5 +264,6 @@
     skipSlot,
     metricForAnswer,
     safePermissions,
+    transcriptForState,
   };
 })();
