@@ -3,15 +3,27 @@
    app pack plus a small state/action contract that the setup UI can render. */
 (function () {
   const copy = window.KP_ONBOARDING_COPY || {};
+  const manifest = window.KP_BOOTSTRAP_MANIFEST || window.KP_ONBOARDING_MANIFEST || {};
 
-  const RUNTIME_VERSION = "2026-06-10.kings-press-conversational-runtime.v1";
-  const PACK_VERSION = "2026-06-10.kings-press-pack.v1";
+  function clonePlain(value) {
+    if (value === undefined || value === null) return value;
+    try {
+      return JSON.parse(JSON.stringify(value));
+    } catch (_err) {
+      return value;
+    }
+  }
+
+  function manifestArray(value, fallback) {
+    return Array.isArray(value) && value.length ? clonePlain(value) : clonePlain(fallback);
+  }
+
+  const RUNTIME_VERSION = manifest.runtimeVersion || "2026-06-10.kings-press-conversational-runtime.v1";
+  const PACK_VERSION = manifest.packVersion || "2026-06-10.kings-press-pack.v1";
   const METRICS_VERSION = 1;
   const MAX_METRICS_EVENTS = 120;
 
-  const STEP_IDS = ["intro", "voice", "connect", "focus", "preferences"];
-
-  const steps = [
+  const defaultSteps = [
     {
       id: "intro",
       label: "Intro",
@@ -84,6 +96,9 @@
     },
   ];
 
+  const steps = manifestArray(manifest.steps, defaultSteps);
+  const STEP_IDS = steps.map((step) => step.id);
+
   const ACTION_INTENTS = {
     OPEN_PROVIDER_SETUP: "open_provider_setup",
     REQUEST_VOICE: "request_voice",
@@ -108,7 +123,7 @@
     SKIPPED: "skipped",
   };
 
-  const flags = {
+  const defaultFlags = {
     onboardingCompletePref: "setupHelperCompleteV1",
     computeSetupLocalStorageKey: "kingspress.desktopSetupComplete",
     firstValuePref: "onboardingFirstValueEventV1",
@@ -116,6 +131,7 @@
     metricsSummaryPref: "onboardingMetricsSummaryV1",
     sentimentPref: "onboardingSentimentV1",
   };
+  const flags = Object.assign({}, defaultFlags, manifest.flags || {});
 
   const METRIC_EVENTS = {
     STARTED: "onboarding_started",
@@ -128,7 +144,7 @@
     SENTIMENT_DISMISSED: "sentiment_dismissed",
   };
 
-  const trust = {
+  const defaultTrust = {
     reassurance: "You're in control. Nothing connects without your approval.",
     footer: "King's Press · Your desk for ideas that matter.",
     permissions: {
@@ -138,16 +154,21 @@
       publish: "King's Press will not publish, send, or connect outside services without approval.",
     },
   };
+  const trust = Object.assign({}, defaultTrust, manifest.trust || {}, {
+    permissions: Object.assign({}, defaultTrust.permissions, (manifest.trust && manifest.trust.permissions) || {}),
+  });
 
-  const firstValueEvent = {
+  const defaultFirstValueEvent = {
     id: "first_usable_setup",
     version: 1,
     description: "A first focus exists and essential context defaults were saved.",
     requiredSignals: ["focus_ready", "preferences_saved"],
     persistedAs: flags.firstValuePref,
   };
+  const firstValueEvent = Object.assign({}, defaultFirstValueEvent, manifest.activation || manifest.firstValueEvent || {});
+  if (!firstValueEvent.persistedAs) firstValueEvent.persistedAs = flags.firstValuePref;
 
-  const connectItems = [
+  const defaultConnectItems = [
     {
       id: "models",
       action: ACTION_INTENTS.OPEN_PROVIDER_SETUP,
@@ -186,8 +207,9 @@
       approvalRequired: true,
     },
   ];
+  const connectItems = manifestArray(manifest.connectItems, defaultConnectItems);
 
-  const actionMetadata = {
+  const defaultActionMetadata = {
     [ACTION_INTENTS.OPEN_PROVIDER_SETUP]: {
       label: "Set up AI & models",
       requiresApproval: true,
@@ -247,12 +269,15 @@
       persistentEffect: "settings_prefs",
     },
   };
+  const actionMetadata = Object.assign({}, defaultActionMetadata, manifest.actionMetadata || {});
 
   const pack = {
-    id: "kings_press",
-    brand: "King's Press",
+    id: manifest.id || "kings_press",
+    brand: manifest.appName || manifest.brand || "King's Press",
     version: PACK_VERSION,
-    persona: {
+    manifestVersion: manifest.version || null,
+    capabilities: manifest.capabilities || null,
+    persona: manifest.persona || {
       role: "warm editorial setup host",
       tone: "warm, direct, plainspoken, premium",
       boundaries: [
@@ -261,6 +286,7 @@
         "Ask one thing at a time and keep typing available.",
       ],
     },
+    graph: manifest.graph || [],
     steps,
     connect: { items: connectItems },
     firstValueEvent,
@@ -534,6 +560,7 @@
     METRIC_EVENTS,
     METRICS_VERSION,
     MAX_METRICS_EVENTS,
+    manifest,
     flags,
     pack,
     steps,

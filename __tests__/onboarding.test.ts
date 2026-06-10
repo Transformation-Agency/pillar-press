@@ -5,6 +5,7 @@ import { classifyIntroConsent } from "@/lib/onboarding/introConsent";
 import { buildSetupExtractionPrompt, setupProfileSchema } from "@/lib/onboarding/setupProfile";
 
 function loadBrowserRuntime() {
+  const manifestSource = readFileSync(new URL("../public/onboarding-manifest.js", import.meta.url), "utf8");
   const source = readFileSync(new URL("../public/onboarding-runtime.js", import.meta.url), "utf8");
   const window = {
     KP_ONBOARDING_COPY: {
@@ -14,11 +15,13 @@ function loadBrowserRuntime() {
       getPressIntroScript: () => "I'm King's Press.",
     },
   } as Record<string, unknown>;
+  runInNewContext(manifestSource, { window });
   runInNewContext(source, { window, Date });
   return window.KP_CONVERSATIONAL_ONBOARDING as any;
 }
 
 function loadBrowserConversation() {
+  const manifestSource = readFileSync(new URL("../public/onboarding-manifest.js", import.meta.url), "utf8");
   const runtimeSource = readFileSync(new URL("../public/onboarding-runtime.js", import.meta.url), "utf8");
   const conversationSource = readFileSync(new URL("../public/onboarding-conversation.js", import.meta.url), "utf8");
   const window = {
@@ -27,6 +30,7 @@ function loadBrowserConversation() {
       AUDIO_INTRO_COPY_VERSION: "test-copy-v1",
     },
   } as Record<string, unknown>;
+  runInNewContext(manifestSource, { window });
   runInNewContext(runtimeSource, { window, Date });
   runInNewContext(conversationSource, { window, Date });
   return window.KP_ONBOARDING_CONVERSATION as any;
@@ -71,6 +75,7 @@ function createTestWindow() {
 
 function loadBrowserActions(options?: { fetch?: unknown }) {
   const window = createTestWindow();
+  const manifestSource = readFileSync(new URL("../public/onboarding-manifest.js", import.meta.url), "utf8");
   const runtimeSource = readFileSync(new URL("../public/onboarding-runtime.js", import.meta.url), "utf8");
   const actionsSource = readFileSync(new URL("../public/onboarding-actions.js", import.meta.url), "utf8");
   function CustomEvent(type: string, init?: { detail?: unknown }) {
@@ -79,6 +84,7 @@ function loadBrowserActions(options?: { fetch?: unknown }) {
   function Event(type: string) {
     return { type };
   }
+  runInNewContext(manifestSource, { window });
   runInNewContext(runtimeSource, { window, Date });
   runInNewContext(actionsSource, { window, Date, CustomEvent, Event, navigator: {}, fetch: options?.fetch });
   return window;
@@ -260,6 +266,14 @@ describe("browser onboarding runtime contract", () => {
 
     expect(runtime.RUNTIME_VERSION).toContain("kings-press-conversational-runtime");
     expect(runtime.pack.id).toBe("kings_press");
+    expect(runtime.pack.manifestVersion).toContain("kings-press-bootstrap-manifest");
+    expect(runtime.manifest.graph.map((node: any) => node.id)).toEqual([
+      "intro",
+      "voice",
+      "connect",
+      "focus",
+      "preferences",
+    ]);
     expect(runtime.pack.steps.map((step: any) => step.id)).toEqual([
       "intro",
       "voice",
@@ -514,6 +528,7 @@ describe("browser onboarding conversation controller", () => {
     const conversation = loadBrowserConversation();
     const state = conversation.createState();
 
+    expect(conversation.manifestVersion).toContain("kings-press-bootstrap-manifest");
     expect(state.currentSlot).toBe("intro_consent");
     expect(conversation.promptForStep("intro", state)).toMatchObject({
       slotId: "intro_consent",

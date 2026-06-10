@@ -4,23 +4,39 @@
 (function () {
   const runtime = window.KP_CONVERSATIONAL_ONBOARDING || {};
   const copy = window.KP_ONBOARDING_COPY || {};
+  const manifest = window.KP_BOOTSTRAP_MANIFEST || window.KP_ONBOARDING_MANIFEST || runtime.manifest || {};
+  const manifestSlots = manifest.slots || {};
+
+  function clonePlain(value) {
+    if (value === undefined || value === null) return value;
+    try {
+      return JSON.parse(JSON.stringify(value));
+    } catch (_err) {
+      return value;
+    }
+  }
 
   const CONVERSATION_VERSION = "2026-06-10.kings-press-conversation-controller.v1";
-  const SLOT_IDS = {
+  const defaultSlotIds = {
     INTRO_CONSENT: "intro_consent",
     VOICE_SETUP: "voice_setup",
     COMMUNICATION_PLATFORMS: "communication_platforms",
     VOICE_PROFILE: "voice_profile",
   };
-  const REQUIRED_SLOTS = [SLOT_IDS.COMMUNICATION_PLATFORMS, SLOT_IDS.VOICE_PROFILE];
-  const QUESTION_SEQUENCE = [
+  const SLOT_IDS = Object.assign({}, defaultSlotIds, manifestSlots.ids || {});
+  const REQUIRED_SLOTS = Array.isArray(manifestSlots.required) && manifestSlots.required.length
+    ? manifestSlots.required.slice()
+    : [SLOT_IDS.COMMUNICATION_PLATFORMS, SLOT_IDS.VOICE_PROFILE];
+  const QUESTION_SEQUENCE = Array.isArray(manifestSlots.sequence) && manifestSlots.sequence.length
+    ? manifestSlots.sequence.slice()
+    : [
     SLOT_IDS.INTRO_CONSENT,
     SLOT_IDS.VOICE_SETUP,
     SLOT_IDS.COMMUNICATION_PLATFORMS,
     SLOT_IDS.VOICE_PROFILE,
   ];
 
-  const slotPrompts = {
+  const defaultSlotPrompts = {
     [SLOT_IDS.INTRO_CONSENT]: {
       stepId: "intro",
       question: "Would you like a guided intro, or a voice-guided intro?",
@@ -58,6 +74,7 @@
       required: true,
     },
   };
+  const slotPrompts = Object.assign({}, defaultSlotPrompts, clonePlain(manifestSlots.prompts || {}));
 
   function cleanText(value, maxLength) {
     const text = String(value || "").replace(/\s+/g, " ").trim();
@@ -186,6 +203,7 @@
 
   window.KP_ONBOARDING_CONVERSATION = {
     CONVERSATION_VERSION,
+    manifestVersion: manifest.version || null,
     SLOT_IDS,
     REQUIRED_SLOTS,
     QUESTION_SEQUENCE,
