@@ -405,7 +405,9 @@ Current implementation already persists:
 Current implementation records `answer_repaired` and `fallback_used` locally. These events are
 redacted, folded into `onboardingMetricsSummaryV1`, and are emitted when deterministic repair
 choices are shown, speech falls back to typing, audio setup fails, or profile extraction falls
-back to local interpretation. Sentiment already records through the onboarding metric stream.
+back to local interpretation. Sentiment records through the same local metric stream; the browser
+and installed-app UI proofs submit the post-setup rating and assert `onboardingSentimentV1` plus
+the sentiment fields in `onboardingMetricsSummaryV1`.
 
 ## Engineering Slices
 

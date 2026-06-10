@@ -303,6 +303,7 @@ async function runBrowserShellProof() {
       campaignName: result.firstValue?.campaignName,
       transcriptTurns: result.transcript?.turns?.length || 0,
       deskThreadId: result.handoff?.deskThreadId,
+      sentimentRating: result.sentiment?.rating,
     }, null, 2));
   } finally {
     await browser.close();

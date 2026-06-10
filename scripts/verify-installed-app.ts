@@ -257,6 +257,7 @@ try {
       throw new Error(`Installed app onboarding UI logged errors:\n${pageErrors.join("\n")}`);
     }
     console.log(`ok installed app conversational onboarding (${onboarding.firstValue?.campaignName})`);
+    console.log(`ok installed app onboarding sentiment (${onboarding.sentiment?.rating}/5)`);
   } finally {
     await browser.close();
   }

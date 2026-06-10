@@ -20,6 +20,15 @@ export type OnboardingUiProofResult = {
   handoff: null | {
     deskThreadId?: string;
   };
+  sentiment: null | {
+    rating?: number;
+    submittedAt?: string;
+  };
+  metricsSummary: null | {
+    sentimentResponses?: number;
+    averageSentiment?: number | null;
+    latestEventType?: string | null;
+  };
   desk: null | {
     activeId?: string | null;
     threads?: Array<{ source?: string }>;
@@ -30,6 +39,7 @@ export type OnboardingUiProofOptions = {
   focusName?: string;
   voiceAnswer?: string;
   requireNoStepper?: boolean;
+  sentimentRating?: number;
 };
 
 export const DEFAULT_ONBOARDING_UI_PROOF = {
@@ -80,6 +90,7 @@ async function waitForText(page: Page, text: string) {
 export async function driveOnboardingUiProof(page: Page, options?: OnboardingUiProofOptions): Promise<OnboardingUiProofResult> {
   const focusName = options?.focusName || DEFAULT_ONBOARDING_UI_PROOF.focusName;
   const voiceAnswer = options?.voiceAnswer || DEFAULT_ONBOARDING_UI_PROOF.voiceAnswer;
+  const sentimentRating = Math.max(1, Math.min(5, Math.round(Number(options?.sentimentRating || 5))));
 
   await page.waitForSelector(".kp-conversation-canvas", { visible: true, timeout: 30000 });
   if (options?.requireNoStepper !== false) {
@@ -113,6 +124,14 @@ export async function driveOnboardingUiProof(page: Page, options?: OnboardingUiP
       window.Store.getPref("setupHelperCompleteV1", false) === true
   `, { timeout: 30000 });
 
+  await waitForText(page, "Was setup useful?");
+  await clickButton(page, String(sentimentRating));
+  await page.waitForFunction(`
+    window.Store &&
+      !!window.Store.getPref("onboardingSentimentV1", null) &&
+      window.Store.getPref("onboardingMetricsSummaryV1", {}).sentimentResponses >= 1
+  `, { timeout: 30000 });
+
   const result = await page.evaluate(`
     (() => {
       const Store = window.Store;
@@ -122,6 +141,8 @@ export async function driveOnboardingUiProof(page: Page, options?: OnboardingUiP
         firstValue: Store.getPref("onboardingFirstValueEventV1", null),
         transcript: Store.getPref("onboardingSetupTranscriptV1", null),
         handoff: Store.getPref("onboardingAssistantHandoffV1", null),
+        sentiment: Store.getPref("onboardingSentimentV1", null),
+        metricsSummary: Store.getPref("onboardingMetricsSummaryV1", null),
         desk: Store.getDesk(),
       };
     })()
@@ -160,6 +181,10 @@ export async function driveOnboardingUiProof(page: Page, options?: OnboardingUiP
   assert(result.handoff?.deskThreadId, "Assistant handoff did not persist a Desk thread id.");
   assert(result.desk?.activeId === result.handoff.deskThreadId, "Handoff Desk thread is not active.");
   assert(result.desk?.threads?.[0]?.source === "kings_press_setup", "Handoff thread source is not King's Press setup.");
+  assert(result.sentiment?.rating === sentimentRating, "Setup sentiment rating was not persisted.");
+  assert((result.metricsSummary?.sentimentResponses || 0) >= 1, "Setup sentiment metric was not counted.");
+  assert(result.metricsSummary?.averageSentiment === sentimentRating, "Setup sentiment average was not updated.");
+  assert(result.metricsSummary?.latestEventType === "sentiment_submitted", "Latest onboarding metric was not the submitted sentiment.");
 
   return result;
 }
