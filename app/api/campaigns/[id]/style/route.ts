@@ -4,9 +4,12 @@ import { requireUser } from "@/lib/auth";
 import { db, campaigns } from "@/lib/db";
 import { styleProfiles, DEFAULT_KNOBS } from "@/db/style-schema";
 import { toErrorResponse } from "@/lib/errors";
+import { getLocalCampaign, getLocalStyleProfile } from "@/lib/local/database";
+import { isLocalFirstMode } from "@/lib/local/mode";
 
 async function campaignInScope(id: string, workspaceId?: string): Promise<boolean> {
   if (!workspaceId) return false;
+  if (isLocalFirstMode()) return !!getLocalCampaign(id, workspaceId);
   const c = await db.query.campaigns.findFirst({
     where: and(eq(campaigns.id, id), eq(campaigns.workspaceId, workspaceId)),
   });
@@ -22,7 +25,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     if (!(await campaignInScope(id, user.workspaceId)))
       return NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
 
-    const p = await db.query.styleProfiles.findFirst({ where: eq(styleProfiles.campaignId, id) });
+    const p = isLocalFirstMode()
+      ? getLocalStyleProfile(id, user.workspaceId)
+      : await db.query.styleProfiles.findFirst({ where: eq(styleProfiles.campaignId, id) });
     return NextResponse.json({
       knobs: p?.knobs ?? DEFAULT_KNOBS,
       directive: p?.directive ?? "",

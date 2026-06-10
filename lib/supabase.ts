@@ -1,5 +1,8 @@
 /**
- * Server-side Supabase client helpers.
+ * Hosted compatibility Supabase client helpers.
+ *
+ * The King’s Press desktop runtime does not call this module. Local-first auth,
+ * database, and storage are handled by embedded SQLite and app-data files.
  *
  * SERVER ONLY. These read service-role / JWT secrets from the environment and
  * must never be imported into client components. The browser only ever talks to
@@ -11,8 +14,8 @@
  *  - `supabaseFromToken(jwt)` is scoped to a specific user's access token and is
  *    the path we use to validate the caller's session.
  *
- * Everything is lazily constructed so that importing this module never throws at
- * build time when the env vars are absent (Supabase is not running locally).
+ * Everything is lazily constructed so importing this module never throws during
+ * a local desktop build where hosted Supabase env vars are absent.
  */
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 

@@ -1,13 +1,13 @@
 /* ============================================================
-   Pillar Press — Editorial Workstation
+   King's Press — Editorial Desk
    Quiet literary "writing room": warm paper, serif, generous space.
    ============================================================ */
 
 :root {
   /* Type */
-  --font-display: "Newsreader", Georgia, serif;
-  --font-body: "Spectral", Georgia, serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --font-display: Georgia, "Times New Roman", serif;
+  --font-body: Georgia, "Times New Roman", serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
   /* Light (paper) — warm off-white */
   --paper:        oklch(0.972 0.008 78);

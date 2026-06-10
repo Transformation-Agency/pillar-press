@@ -1,4 +1,4 @@
-/* References — editable-in-place source documents. The gates and
+/* Preferences — editable-in-place source documents. The gates and
    generators always read the current versions (refContext reads live
    Store state at call time). Read-only for the Assistant role. */
 
@@ -80,7 +80,7 @@ function RuleList({ rules, onChange, readOnly }) {
   );
 }
 
-/* Edit the whole references doc from a plain-language instruction (author only).
+/* Edit the whole preferences doc from a plain-language instruction (author only).
    Generates a proposed doc + summary server-side; the author reviews, then applies. */
 function RefsAIModal({ campaignId, onClose, onApply }) {
   const [instruction, setInstruction] = React.useState("");
@@ -117,7 +117,7 @@ function RefsAIModal({ campaignId, onClose, onApply }) {
         credentials: "same-origin", body: JSON.stringify({ instruction: instruction.trim() }),
       });
       const data = await r.json().catch(() => null);
-      if (!r.ok) throw new Error((data && data.error) || (r.status === 403 ? "Switch to Author to edit References." : "Couldn't generate the edit."));
+      if (!r.ok) throw new Error((data && data.error) || (r.status === 403 ? "Switch to Author to edit Preferences." : "Couldn't generate the edit."));
       setResult(data);
     } catch (e) { setErr((e && e.message) || "Couldn't generate the edit."); }
     setBusy(false);
@@ -128,11 +128,11 @@ function RefsAIModal({ campaignId, onClose, onApply }) {
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 200, display: "grid", placeItems: "center", padding: 16 }}>
       <div onClick={(e) => e.stopPropagation()} className="card" style={{ width: "min(560px, 96vw)", maxHeight: "88vh", overflowY: "auto", padding: "22px 24px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-          <div className="eyebrow">Edit references with AI</div>
+          <div className="eyebrow">Edit preferences with AI</div>
           <button className="icon-btn" onClick={onClose} style={{ width: 30, height: 30 }}><Icon name="xLogo" size={14} /></button>
         </div>
         <p className="muted" style={{ fontSize: 13.5, marginTop: 0, marginBottom: 12 }}>
-          Describe the change in plain language. AI revises the whole references document — you review a summary before anything is applied, and your wording is preserved where the change doesn't touch it.
+          Describe the change in plain language. AI revises the whole preferences document — you review a summary before anything is applied, and your wording is preserved where the change doesn't touch it.
         </p>
         <textarea className="field" value={instruction} onChange={(e) => setInstruction(e.target.value)} disabled={busy || !!result}
           placeholder={"e.g. Add an audience for skeptical executives, and make the red lines more specific. — or attach a brand doc / bio and say 'fold this in.'"}
@@ -175,6 +175,7 @@ function References({ refs, role, campaignName }) {
   const readOnly = role === "assistant";
   const [aiOpen, setAiOpen] = React.useState(false);
   const campaignId = window.Store.getState().activeCampaignId;
+  refs = Object.assign({}, window.Store.activeReferences ? window.Store.activeReferences() : {}, refs || {});
   const set = (key, value) => window.Store.setReferenceSection(key, value);
   const patch = (key, sub) => set(key, { ...refs[key], ...sub });
 
@@ -182,15 +183,15 @@ function References({ refs, role, campaignName }) {
     <div className="scroll-y" style={{ flex: 1 }}>
       <div style={{ maxWidth: 800, margin: "0 auto", padding: "46px 32px 90px" }}>
         {aiOpen && <RefsAIModal campaignId={campaignId} onClose={() => setAiOpen(false)} onApply={(doc) => window.Store.updateReferences(doc)} />}
-        <div className="eyebrow" style={{ marginBottom: 8 }}>{campaignName ? campaignName + " · guidelines" : "Source of truth"}</div>
+        <div className="eyebrow" style={{ marginBottom: 8 }}>{campaignName ? campaignName + " · preferences" : "Source of truth"}</div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
-          <h1 style={{ fontSize: 42, letterSpacing: "-0.02em", margin: 0 }}>References</h1>
-          {!readOnly && <button className="btn" onClick={() => setAiOpen(true)} title="Revise the references document with AI"><Icon name="sparkle" size={15} /> Edit with AI</button>}
+          <h1 style={{ fontSize: 42, letterSpacing: "-0.02em", margin: 0 }}>Preferences</h1>
+          {!readOnly && <button className="btn" onClick={() => setAiOpen(true)} title="Revise the preferences document with AI"><Icon name="sparkle" size={15} /> Edit with AI</button>}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 16px", borderRadius: "var(--radius)", background: readOnly ? "var(--paper-sunk)" : "var(--accent-soft)", marginBottom: 30 }}>
           <span style={{ width: 7, height: 7, borderRadius: 99, background: readOnly ? "var(--ink-3)" : "var(--accent)", animation: readOnly ? "none" : "pulse 2s infinite" }} />
           <span style={{ fontSize: 14, color: readOnly ? "var(--ink-2)" : "var(--accent-ink)" }}>
-            {readOnly ? "Read-only — switch to Author to edit. The assistant role can view but not change References." : "Live — every gate and generator reads the current version, the moment you run."}
+            {readOnly ? "Read-only — switch to Author to edit. The assistant role can view but not change Preferences." : "Live — every gate and generator reads the current version, the moment you run."}
           </span>
         </div>
 
@@ -227,11 +228,11 @@ function References({ refs, role, campaignName }) {
           <RuleList rules={refs.redLines.rules} readOnly={readOnly} onChange={(v) => patch("redLines", { rules: v })} />
         </RefSection>
 
-        <RefSection icon="book" title="Self-Vision — Public Identity">
+        <RefSection icon="book" title="Self Statement">
           <AutoText value={refs.selfVision.body} readOnly={readOnly} onCommit={(v) => patch("selfVision", { body: v })} style={{ fontSize: 16, lineHeight: 1.7 }} />
         </RefSection>
 
-        <RefSection icon="gear" title="Gate Specification">
+        <RefSection icon="gear" title="Gate Preferences">
           <AutoText value={refs.gateSpec.body} readOnly={readOnly} onCommit={(v) => patch("gateSpec", { body: v })} style={{ fontSize: 16, lineHeight: 1.7 }} />
         </RefSection>
       </div>

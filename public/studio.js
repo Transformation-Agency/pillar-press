@@ -15,18 +15,22 @@
   //      in place so the synchronous getters below stay synchronous. ----
   const MODELS = [
     { id: "hedra-image-1", name: "Hedra Image", type: "image", credits: 6,
+      provider: "hedra",
       description: "Text-to-image for post art, hooks, and thumbnails.",
       aspectRatios: ["1:1", "4:5", "16:9", "9:16"], resolutions: ["720p", "1080p"], durations: [],
       requires: { prompt: true } },
     { id: "hedra-character-3-i2v", name: "Character-3 · Image→Video", type: "video", credits: 40,
+      provider: "hedra",
       description: "Animate a start image into short motion video. Optional audio as soundtrack.",
       aspectRatios: ["16:9", "9:16", "1:1"], resolutions: ["540p", "720p", "1080p"], durations: [3, 5, 8, 10], maxDuration: 30,
       requires: { prompt: true, startFrame: true, audio: false, endFrame: false } },
     { id: "hedra-character-3-avatar", name: "Character-3 · Avatar", type: "avatar", credits: 60,
+      provider: "hedra",
       description: "Talking-head video: a portrait image lip-synced to an audio track.",
       aspectRatios: ["9:16", "1:1", "16:9"], resolutions: ["540p", "720p"], durations: [], maxDuration: 120,
       requires: { startFrame: true, audio: true } },
     { id: "eleven-tts-multilingual-v2", name: "ElevenLabs · Multilingual v2", type: "audio", credits: 1,
+      provider: "elevenlabs",
       description: "Natural voiceover from a script. The audio you can sync video to.",
       aspectRatios: [], resolutions: [], durations: [],
       requires: { prompt: true, voice: true } },
@@ -39,6 +43,15 @@
     { id: "adam", name: "Adam", desc: "Deep, grounded", gender: "male", rate: 0.96, pitch: 0.85 },
     { id: "antoni", name: "Antoni", desc: "Calm, measured", gender: "male", rate: 0.98, pitch: 0.95 },
     { id: "arnold", name: "Arnold", desc: "Documentary narration", gender: "male", rate: 0.92, pitch: 0.9 },
+  ];
+  const OPENAI_VOICES = [
+    { id: "alloy", name: "Alloy", desc: "Neutral, balanced", gender: "neutral", rate: 1.0, pitch: 1.0 },
+    { id: "ash", name: "Ash", desc: "Clear, grounded", gender: "neutral", rate: 1.0, pitch: 1.0 },
+    { id: "coral", name: "Coral", desc: "Warm, bright", gender: "female", rate: 1.0, pitch: 1.05 },
+    { id: "echo", name: "Echo", desc: "Crisp narration", gender: "male", rate: 1.0, pitch: 0.95 },
+    { id: "nova", name: "Nova", desc: "Expressive, lively", gender: "female", rate: 1.0, pitch: 1.08 },
+    { id: "onyx", name: "Onyx", desc: "Deep, steady", gender: "male", rate: 0.98, pitch: 0.88 },
+    { id: "shimmer", name: "Shimmer", desc: "Light, gentle", gender: "female", rate: 1.0, pitch: 1.12 },
   ];
 
   const TYPES = [
@@ -94,6 +107,7 @@
     return {
       id: m.id,
       name: m.name || m.label || m.id,
+      provider: m.provider || m.providerId || "hedra",
       type: API_TYPE_TO_KIND[m.type] || m.type || "image",
       credits: typeof m.credits === "number" ? m.credits : (m.cost || 0),
       description: m.description || "",
@@ -122,17 +136,26 @@
   function refreshModels() {
     if (_catalogPromise) return _catalogPromise;
     const types = ["image", "video", "avatar_video", "audio"];
-    _catalogPromise = Promise.all(types.map((t) =>
-      apiGet("/hedra/models?type=" + encodeURIComponent(t)).catch(() => null)
-    )).then((results) => {
+    _catalogPromise = Promise.all([
+      apiGet("/media/providers").catch(() => null),
+      ...types.map((t) => apiGet("/hedra/models?type=" + encodeURIComponent(t)).catch(() => null)),
+    ]).then((results) => {
       const merged = [];
       const seen = {};
-      results.forEach((res) => {
+      const providerStatus = results[0];
+      const providerModels = providerStatus && Array.isArray(providerStatus.providers)
+        ? providerStatus.providers.flatMap((p) => Array.isArray(p.models) && p.configured ? p.models : [])
+        : [];
+      providerModels.forEach((raw) => {
+        const m = normModel(raw);
+        if (m && !seen[m.provider + ":" + m.id]) { seen[m.provider + ":" + m.id] = true; merged.push(m); }
+      });
+      results.slice(1).forEach((res) => {
         const arr = res && (Array.isArray(res) ? res : (res.models || res.items));
         if (!Array.isArray(arr)) return;
         arr.forEach((raw) => {
           const m = normModel(raw);
-          if (m && !seen[m.id]) { seen[m.id] = true; merged.push(m); }
+          if (m && !seen[m.provider + ":" + m.id]) { seen[m.provider + ":" + m.id] = true; merged.push(m); }
         });
       });
       // Hedra serves only image/video models; audio (TTS) is ElevenLabs, so it
@@ -160,7 +183,8 @@
   }
 
   // listVoices() keeps its sync signature; live voices replace the cache.
-  function listVoices() {
+  function listVoices(provider) {
+    if (provider === "openai") return OPENAI_VOICES.slice();
     if (!_voicesLive && !_voicesPromise) refreshVoices();
     return (_voicesLive || VOICES).slice();
   }
@@ -188,8 +212,7 @@
   function getCredits() {
     if (_creditsCache == null && !_creditsPromise) refreshCredits();
     if (_creditsCache != null) return _creditsCache;
-    const s = window.Store && window.Store.getSettings();
-    return (s && s.hedra && s.hedra.apiKey) ? 5000 : 1240;
+    return 0;
   }
   function refreshCredits() {
     if (_creditsPromise) return _creditsPromise;
@@ -283,6 +306,7 @@
   function buildGenerateBody(media) {
     const type = KIND_TO_API_TYPE[media.kind] || "image";
     const body = { type, modelId: media.modelId };
+    if (media.provider) body.provider = media.provider;
     if (media.campaignId) body.campaignId = media.campaignId;
     if (media.enhance !== undefined) body.enhance = media.enhance;
     if (media.directed) body.directed = true;

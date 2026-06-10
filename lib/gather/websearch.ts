@@ -2,9 +2,9 @@
 import { fetchJSON, stripHtml, GatherError, type GatherItem } from "./index";
 
 export async function runWebSearch(query: string, count = 5): Promise<GatherItem[]> {
-  // Standard name first; Brave_Pillar_Press is the name used in this project's
-  // Vercel production env.
-  const key = process.env.BRAVE_SEARCH_API_KEY || process.env.Brave_Pillar_Press;
+  // Keep legacy env names as compatibility fallbacks for existing hosted
+  // installs, but prefer provider-neutral / King’s Press names.
+  const key = process.env.BRAVE_SEARCH_API_KEY || process.env.Brave_Kings_Press || process.env.Brave_Pillar_Press;
   if (!key) throw new GatherError(500, "config", "Missing BRAVE_SEARCH_API_KEY (or wire a different search provider).");
   const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=${count}`;
   const json = await fetchJSON<any>(url, { headers: { Accept: "application/json", "X-Subscription-Token": key } });

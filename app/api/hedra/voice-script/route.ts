@@ -5,7 +5,10 @@ import { requireUser } from "@/lib/auth";
 import { db, references, pieces } from "@/lib/db";
 import { buildRefContext, type ReferencesDoc } from "@/lib/refContext";
 import { craftVoiceScript } from "@/lib/ai/voiceScript";
+import { getAIForTask } from "@/lib/llm";
 import { toErrorResponse } from "@/lib/errors";
+import { getLocalCampaign, getLocalPiece, getLocalReferences } from "@/lib/local/database";
+import { isLocalFirstMode } from "@/lib/local/mode";
 
 const bodySchema = z.object({
   pieceId: z.string().uuid(),
@@ -28,9 +31,11 @@ export async function POST(req: Request) {
     const user = await requireUser();
     const body = bodySchema.parse(await req.json());
 
-    const piece = await db.query.pieces.findFirst({
-      where: and(eq(pieces.id, body.pieceId), eq(pieces.userId, user.id)),
-    });
+    const piece = isLocalFirstMode()
+      ? getLocalPiece(body.pieceId, user.id, user.workspaceId)
+      : await db.query.pieces.findFirst({
+          where: and(eq(pieces.id, body.pieceId), eq(pieces.userId, user.id)),
+        });
     if (!piece) return NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
 
     const text = pieceText(piece);
@@ -38,15 +43,22 @@ export async function POST(req: Request) {
 
     let refCtx = "";
     if (body.campaignId) {
-      const ref = await db.query.references.findFirst({ where: eq(references.campaignId, body.campaignId) });
-      refCtx = buildRefContext((ref?.doc as ReferencesDoc | undefined) ?? null);
+      if (isLocalFirstMode()) {
+        const campaign = getLocalCampaign(body.campaignId, user.workspaceId);
+        if (!campaign) return NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
+        const ref = getLocalReferences(campaign.id, user.workspaceId);
+        refCtx = buildRefContext((ref?.doc as ReferencesDoc | undefined) ?? null);
+      } else {
+        const ref = await db.query.references.findFirst({ where: eq(references.campaignId, body.campaignId) });
+        refCtx = buildRefContext((ref?.doc as ReferencesDoc | undefined) ?? null);
+      }
     }
 
     const script = await craftVoiceScript({
       article: { title: piece.title, text },
       refContext: refCtx,
       voiceName: body.voiceName,
-    });
+    }, getAIForTask("mediaPrompt"));
 
     return NextResponse.json({ script });
   } catch (err) {

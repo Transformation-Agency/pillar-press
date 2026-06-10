@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import { and, asc, eq } from "drizzle-orm";
 import { requireUser } from "@/lib/auth";
 import { db, campaigns, references } from "@/lib/db";
-import { SEED_REFERENCES, slug, type SeedReferences } from "@/lib/seed";
+import { createLocalCampaign, listLocalCampaigns } from "@/lib/local/database";
+import { isLocalFirstMode } from "@/lib/local/mode";
+import { EMPTY_REFERENCES, slug, type SeedReferences } from "@/lib/seed";
 import { createCampaignSchema } from "@/lib/schemas-campaigns";
 import { toErrorResponse } from "@/lib/errors";
 
@@ -13,6 +15,10 @@ export async function GET() {
   try {
     const user = await requireUser();
     if (!user.workspaceId) return NextResponse.json({ campaigns: [] });
+
+    if (isLocalFirstMode()) {
+      return NextResponse.json({ campaigns: listLocalCampaigns(user.workspaceId) });
+    }
 
     const rows = await db
       .select()
@@ -27,8 +33,8 @@ export async function GET() {
 }
 
 // POST /api/campaigns  { name }
-// Create a campaign in the caller's workspace and seed its references from
-// SEED_REFERENCES (one references row per campaign, fresh clone). The slug is
+// Create a campaign in the caller's workspace and create a blank references row.
+// The slug is
 // derived from the name and de-duplicated within the workspace, mirroring the
 // prototype's addCampaign().
 export async function POST(req: Request) {
@@ -42,6 +48,11 @@ export async function POST(req: Request) {
     }
 
     const { id: providedId, name } = createCampaignSchema.parse(await req.json());
+
+    if (isLocalFirstMode()) {
+      const campaign = createLocalCampaign({ id: providedId, name, workspaceId: user.workspaceId });
+      return NextResponse.json({ campaign }, { status: 201 });
+    }
 
     // Unique slug within the workspace (base, base-2, base-3, ...).
     const base = slug(name) || "campaign";
@@ -75,8 +86,7 @@ export async function POST(req: Request) {
 
     await db.insert(references).values({
       campaignId: campaign.id,
-      // fresh clone of the seed doc per campaign
-      doc: JSON.parse(JSON.stringify(SEED_REFERENCES)) as SeedReferences,
+      doc: JSON.parse(JSON.stringify(EMPTY_REFERENCES)) as SeedReferences,
     });
 
     return NextResponse.json({ campaign }, { status: 201 });

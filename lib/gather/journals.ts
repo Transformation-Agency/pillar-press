@@ -2,7 +2,7 @@
 import { XMLParser } from "fast-xml-parser";
 import { fetchJSON, fetchText, stripHtml, type GatherItem } from "./index";
 
-const MAILTO = process.env.GATHER_CONTACT_EMAIL ?? "research@pillarpress.app";
+const MAILTO = process.env.GATHER_CONTACT_EMAIL ?? "research@kingspress.app";
 
 export async function runJournals(query: string): Promise<GatherItem[]> {
   const [cr, ax, pm] = await Promise.allSettled([crossref(query), arxiv(query), pubmed(query)]);
@@ -14,7 +14,7 @@ export async function runJournals(query: string): Promise<GatherItem[]> {
 
 async function crossref(query: string, rows = 4): Promise<GatherItem[]> {
   const url = `https://api.crossref.org/works?rows=${rows}&query=${encodeURIComponent(query)}&mailto=${encodeURIComponent(MAILTO)}`;
-  const json = await fetchJSON<any>(url, { headers: { "User-Agent": `PillarPress/1.0 (mailto:${MAILTO})` } });
+  const json = await fetchJSON<any>(url, { headers: { "User-Agent": `KingsPress/1.0 (mailto:${MAILTO})` } });
   return (json?.message?.items ?? []).map((w: any) => ({
     kind: "journal" as const,
     title: (w.title?.[0] ?? "Untitled").trim(),

@@ -1,45 +1,39 @@
-# INTEGRATION.md — where files go + the front-end swap
+# Gather Integration
 
-## Drop these into the prior `claude-code-backend` tree
+Gather is now part of King's Press Editorial Desk rather than a drop-in backend
+patch. The desktop app uses the same server routes in browser dev and packaged
+Tauri builds, with local-first persistence when SQLite is active.
 
-| This update | Lands at (in your Next.js app) |
+## Server Routes
+
+| Route | Purpose |
 |---|---|
-| `lib/gather/*` | `lib/gather/*` |
-| `lib/gather-validation.ts` | `lib/gather-validation.ts` |
-| `db/gather-schema.ts` | `db/gather-schema.ts` (export its tables from your Drizzle schema barrel) |
-| `db/gather-migration.sql` | run via your migration tool |
-| `app/api/gather/**` | `app/api/gather/**` |
-| `__tests__/gather.test.ts` | `__tests__/gather.test.ts` |
-| `.env.additions` | append to `.env` / Vercel env |
+| `GET /api/gather/sources` | List configured Gather sources for the active workspace/campaign. |
+| `POST /api/gather/sources` | Create a Gather source. |
+| `PATCH /api/gather/sources/:id` | Update a Gather source. |
+| `DELETE /api/gather/sources/:id` | Remove a Gather source. |
+| `POST /api/gather/run` | Run Gather immediately for a campaign. |
+| `GET /api/gather/items` | List gathered items. |
+| `GET /api/gather/schedules` | List saved schedules. |
+| `POST /api/gather/schedules` | Create a once/daily/weekly schedule. |
+| `PATCH /api/gather/schedules/:id` | Update a schedule. |
+| `DELETE /api/gather/schedules/:id` | Delete a schedule. |
+| `POST /api/gather/schedules/run-due` | Run due schedules from the desktop background timer. |
 
-Reuses unchanged from the prior package: `lib/auth.ts` (`requireUser`), `lib/db.ts` (`db`),
-`lib/errors.ts` (`toErrorResponse`). Install deps: `npm i fast-xml-parser cheerio youtube-transcript`.
+## Desktop Behavior
 
-## Front-end swap (in `gather.js`)
+- Schedules are stored in SQLite in `gather_schedules`.
+- The packaged Tauri launcher starts a background timer after the local Next
+  server is ready.
+- The timer calls `/api/gather/schedules/run-due` every minute.
+- Browser/dev mode keeps a UI fallback, but it exits early when the Tauri bridge
+  is present so desktop builds do not double-run scheduled jobs.
 
-The prototype simulates the run. Replace `runGather` with calls to your API — the item shape
-is identical, so `screen-gather.jsx` needs no changes:
+## Connector Notes
 
-```js
-// was: ask the model for demo items
-// now: real connectors, server-side
-async function runGather(sources, _refCtx, onProgress) {
-  const campaignId = window.Store.getState().activeCampaignId;
-  if (onProgress) onProgress({ label: "all sources", i: 0, total: sources.length });
-  const res = await fetch("/api/gather/run", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ campaignId }),
-  });
-  if (!res.ok) throw new Error((await res.json()).error || "Gather failed.");
-  const { items } = await res.json();
-  if (onProgress) onProgress({ done: true });
-  // items already persisted server-side; mirror into the store for the UI:
-  window.Store.addGatherItems(items.map((i) => ({ ...i, demo: false })));
-  return items;
-}
-```
-
-Likewise move source CRUD (`addGatherSource`/`updateGatherSource`/`removeGatherSource`) to
-`/api/gather/sources`, and load items from `/api/gather/items?campaignId=` on mount.
-Send-to-Weave is unchanged (it calls the existing weave/pieces flow).
+RSS, journal lookup, scraping, and YouTube transcript paths can run without a
+cloud model key. Web search needs `BRAVE_SEARCH_API_KEY` or `Brave_Kings_Press`;
+`Brave_Pillar_Press` remains a legacy environment fallback for existing hosted
+installs.
+Gather summaries use the configured `lib/llm` provider, so local models work
+when they can follow the existing summary prompt.

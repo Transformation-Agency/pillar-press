@@ -1,5 +1,9 @@
-/** Database seam — point this at Pillar Press's existing Drizzle client.
- *  Only the `db` instance and the `mediaJobs` table are used by the routes. */
+/** Hosted Postgres Drizzle client.
+ *
+ * The desktop product uses `lib/local/database.ts` and embedded SQLite. This
+ * module remains for legacy/web compatibility routes that still run against
+ * hosted Postgres.
+ */
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import * as schema from "@/db/schema";

@@ -13,3 +13,15 @@ export async function GET() {
     return toErrorResponse(err);
   }
 }
+
+export async function POST(req: Request) {
+  try {
+    await requireUser();
+    const body = await req.json().catch(() => ({}));
+    const apiKey = typeof body?.apiKey === "string" ? body.apiKey.trim() : "";
+    const credits = await getCredits({ apiKey });
+    return NextResponse.json({ ok: true, configured: true, credits });
+  } catch (err) {
+    return toErrorResponse(err);
+  }
+}

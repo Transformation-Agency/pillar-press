@@ -1,6 +1,6 @@
 /* ============================================================
    Gates — the seven editorial review passes.
-   Plain JS. Exposes window.GATES (array) and window.runGate.
+   Plain JS. Exposes window.GATES (array) and severity metadata.
    Each gate is a separate AI call returning structured JSON,
    so the Workbench can fill its rail gate-by-gate.
    ============================================================ */
@@ -91,21 +91,7 @@ DRAFT:
     },
   ];
 
-  async function runGate(gate, draft, refCtx) {
-    const system = PREAMBLE(refCtx);
-    const result = await window.AI.json(gate.task(draft), { system });
-    // normalize findings
-    result.findings = (result.findings || []).map((f) => ({
-      severity: ["must", "consider", "note"].includes(f.severity) ? f.severity : "note",
-      title: f.title || "Finding",
-      detail: f.detail || "",
-      anchor: f.anchor || null,
-    }));
-    return result;
-  }
-
   window.GATES = GATES;
-  window.runGate = runGate;
   window.SEVERITY = {
     must: { label: "Must-fix", varc: "--sev-must", bg: "--sev-must-bg", rank: 0 },
     consider: { label: "Consider", varc: "--sev-consider", bg: "--sev-consider-bg", rank: 1 },

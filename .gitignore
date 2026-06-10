@@ -12,3 +12,9 @@ next-env.d.ts
 coverage/
 .drizzle/
 *.tsbuildinfo
+.local-data/
+src-tauri/target/
+src-tauri/resources/desktop-server/*
+!src-tauri/resources/desktop-server/.gitkeep
+src-tauri/resources/node/*
+!src-tauri/resources/node/.gitkeep

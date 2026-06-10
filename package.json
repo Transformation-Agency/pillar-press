@@ -1,10 +1,24 @@
 {
-  "name": "pillar-press",
+  "name": "kings-press-editorial-desk",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "next dev",
+    "desktop:web": "tsx scripts/run-desktop-web.ts dev",
+    "desktop:web:build": "tsx scripts/run-desktop-web.ts build",
+    "desktop:prepare-sidecar": "tsx scripts/prepare-tauri-sidecar.ts",
+    "desktop:sign-macos-resources": "tsx scripts/sign-macos-desktop-resources.ts",
+    "desktop:icon": "tsx scripts/generate-desktop-icon.ts && tauri icon src-tauri/icons/source-1024.png",
+    "desktop:dev": "tauri dev",
+    "desktop:build": "tauri build",
+    "desktop:build:signed": "tsx scripts/build-signed-desktop.ts",
+    "desktop:verify-release": "tsx scripts/verify-desktop-release.ts",
+    "desktop:verify-installed": "tsx scripts/verify-installed-app.ts",
+    "desktop:verify-signed-release": "tsx scripts/verify-desktop-release.ts --require-developer-id --require-notarized",
+    "onboarding:verify": "tsx scripts/verify-onboarding-activation.ts",
+    "onboarding:verify:browser": "tsx scripts/verify-onboarding-browser-shell.ts",
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
@@ -12,15 +26,17 @@
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "db:push": "drizzle-kit push"
+    "db:push": "drizzle-kit push",
+    "local:db:schema": "tsx scripts/print-local-schema.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.100.0",
     "@supabase/supabase-js": "^2.45.0",
+    "better-sqlite3": "^12.10.0",
     "cheerio": "^1.2.0",
-    "drizzle-orm": "^0.38.0",
+    "drizzle-orm": "^0.45.2",
     "fast-xml-parser": "^5.8.0",
-    "googleapis": "^144.0.0",
+    "googleapis": "^173.0.0",
     "mammoth": "^1.12.0",
     "next": "^15.1.0",
     "pg": "^8.13.0",
@@ -30,14 +46,20 @@
     "zod": "^3.24.0"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.11.2",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.10.0",
     "@types/pg": "^8.11.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "drizzle-kit": "^0.30.0",
+    "drizzle-kit": "^0.31.10",
     "puppeteer": "^25.1.0",
     "tsx": "^4.22.4",
     "typescript": "^5.7.0",
-    "vitest": "^2.1.0"
+    "vitest": "^4.1.8"
+  },
+  "overrides": {
+    "esbuild": "^0.28.0",
+    "postcss": "^8.5.15"
   }
 }

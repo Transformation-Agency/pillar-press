@@ -4,10 +4,12 @@
  * Reads ELEVENLABS_API_KEY from the server runtime. Used to generate the
  * voiceover audio that Hedra avatar/animation generations sync to.
  *
- * In the Pillar Press flow: generate TTS here -> upload the resulting audio
+ * In the King's Press flow: generate TTS here -> upload the resulting audio
  * to Hedra as an asset (hedra.createAsset + hedra.uploadAsset) -> pass that
  * audio_asset_id into hedra.generateAsset for an avatar/lip-synced video.
  */
+
+import { desktopMediaProvider } from "@/lib/desktopSettings";
 
 const ELEVEN_BASE = "https://api.elevenlabs.io/v1";
 
@@ -18,8 +20,8 @@ export class ElevenError extends Error {
   }
 }
 
-function apiKey(): string {
-  const k = process.env.ELEVENLABS_API_KEY;
+function apiKey(override?: string): string {
+  const k = override || process.env.ELEVENLABS_API_KEY || desktopMediaProvider("elevenlabs")?.apiKey;
   if (!k) throw new ElevenError(500, "config", "Missing ELEVENLABS_API_KEY in server environment.");
   return k;
 }
@@ -32,9 +34,9 @@ export interface ElevenVoice {
   preview_url?: string;
 }
 
-export async function listVoices(): Promise<ElevenVoice[]> {
+export async function listVoices(input?: { apiKey?: string }): Promise<ElevenVoice[]> {
   const res = await fetch(`${ELEVEN_BASE}/voices`, {
-    headers: { "xi-api-key": apiKey() },
+    headers: { "xi-api-key": apiKey(input?.apiKey) },
     signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) throw mapError(res.status, await res.text().catch(() => ""));

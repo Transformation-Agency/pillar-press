@@ -6,6 +6,7 @@ export const generationTypeSchema = z.enum(["image", "video", "avatar_video", "a
 export const generateBodySchema = z.object({
   type: generationTypeSchema,
   modelId: z.string().min(1),
+  provider: z.string().trim().optional(),
   // prompt required for image/video/audio; optional for avatar (visual scene)
   prompt: z.string().trim().min(3, "Prompt must be at least 3 characters.").max(2000, "Prompt is too long (max 2000).").optional(),
   // voiceover / TTS — long scripts are chunked + stitched server-side
@@ -21,7 +22,7 @@ export const generateBodySchema = z.object({
   aspectRatio: z.string().optional(),
   resolution: z.string().optional(),
   duration: z.number().int().positive().max(600).optional(),
-  // link to a Pillar Press content item
+  // link to a King's Press content item
   pieceId: z.string().optional(),
   // campaign scope (drives per-campaign style profile + media scoping)
   campaignId: z.string().optional(),

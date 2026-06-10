@@ -1,4 +1,4 @@
-import { ai, type AI } from "@/lib/anthropic";
+import { ai, type AI } from "@/lib/llm";
 
 /**
  * Tighten a finished platform post to ~(1 - ratio) of its length, preserving the

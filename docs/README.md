@@ -1,51 +1,77 @@
-# Pillar Press — Backend Build Package (for Claude Code)
+# King's Press Editorial Desk
 
-This bundle is everything needed to build the **production backend** for Pillar Press,
-an editorial workstation that runs writers' drafts through AI review "gates," generates
-platform-native posts, weaves many files into one piece, and produces media
-(Hedra video + ElevenLabs audio). A working **front-end prototype already exists** — this
-package tells you what to build behind it.
+King's Press Editorial Desk is the local-first desktop publishing and editorial
+operations app. It packages the editorial workflow into a Tauri app that runs a local
+Next.js server, stores data in SQLite, writes generated assets to local app-data
+storage, and uses local models by default.
 
-## Read in this order
+## Read In This Order
 
-1. **`CLAUDE.md`** — how to work in this repo (conventions, ground rules, do/don't).
-2. **`BUILD_BRIEF.md`** — the full scope: every feature and its server-side requirements.
-3. **`DATA_MODEL.md`** — entities, fields, relationships, migrations.
-4. **`API_SPEC.md`** — the endpoints to implement, grouped by feature.
-5. **`server/`** — a real, partial scaffold you should extend (Hedra/ElevenLabs media is
-   already written here as the reference implementation for *all* the integration code).
-6. **`prototype-reference/`** — the actual front-end prototype source. **The AI prompts,
-   data shapes, and business rules are defined here and must be ported verbatim.** These
-   are plain `.js` files (browser globals); your job is to move their logic server-side.
+1. `DESKTOP_LOCAL_FIRST.md` - desktop architecture, packaging, local database,
+   Supabase replacement, Gather scheduling, and release QA.
+2. `LOCAL_DEV.md` - browser dev, desktop dev, desktop build, and LLM
+   configuration examples.
+3. `CONVERSATIONAL_BOOTSTRAP_RUNTIME.md` - reusable first-run conversation
+   runtime, manifest model, activation gates, and next implementation slices.
+4. `BUILD_BRIEF.md` - feature scope and acceptance criteria.
+5. `API_SPEC.md` - route contracts.
+6. `DATA_MODEL.md` - entity relationships and hosted compatibility notes.
 
-## What exists vs. what to build
+## Runtime Shape
 
-| Layer | Status |
+| Layer | Desktop default |
 |---|---|
-| Front-end UX (all screens, flows, components) | ✅ Built (the prototype). Re-point its `fetch`/simulated calls at your new API. |
-| AI prompt logic for gates / weave / generators / revision | ✅ Written (in `prototype-reference/*.js`) — **port these prompts exactly**, move the model call server-side. |
-| Hedra + ElevenLabs media backend | 🟡 Reference implementation in `server/` — finish wiring auth/db and deploy. |
-| Auth, database, persistence for everything else | ❌ Build it (the prototype uses browser `localStorage`; you replace that with real APIs). |
+| Shell | Tauri |
+| Web/API runtime | Packaged Next.js standalone server |
+| Database | SQLite in the app data directory |
+| Storage | Local app-data files served through `/api/local-files/...` |
+| Auth | Embedded local owner/workspace |
+| Browser shell | Local bundled React/Babel runtime and system fonts |
+| LLM | Local-first provider-neutral layer |
+| Scheduling | Tauri-started background Gather scheduler |
+| Installer artifact | macOS `.app` + DMG |
 
-## The core architectural change
+Hosted Postgres/Supabase compatibility still exists for legacy/web testing, but
+it is not the normal desktop path.
 
-The prototype is **client-only**: all state is in `localStorage`, and the only AI it calls
-is a browser helper (`window.claude.complete`). Your job is to build the server that:
+The desktop sidecar is trimmed for local-first use: hosted Google Drive SDK
+packages are not bundled, while local export/save routes remain available.
 
-- holds the real data (campaigns, pieces, references, media, settings) in Postgres,
-- runs the AI passes server-side (so API keys stay server-side),
-- owns the third-party integrations (Anthropic, Hedra, ElevenLabs, Google Drive),
-- enforces auth + per-user/workspace authorization.
+## Model Setup
 
-The front-end then calls your API instead of `localStorage` + `window.claude.complete`.
+The first-run desktop setup supports:
 
-## Target stack (from the product owner)
+- Ollama native local models,
+- starting an existing Ollama install,
+- pulling/selecting an Ollama model,
+- Docker Model Runner via its OpenAI-compatible endpoint,
+- optional hosted API-key providers: OpenAI/ChatGPT, Anthropic, Gemini,
+  xAI/Grok, and generic OpenAI-compatible services.
+- multiple provider profiles plus per-task defaults, so Gather/Weave can stay
+  local while draft, review, revision, utility, or media-prompt work uses a
+  selected cloud provider.
 
-**Next.js (App Router) on Vercel, Postgres + Drizzle, Zod validation.** The `server/`
-scaffold is already in this shape. If you have a strong reason to differ, raise it first.
+The app can run without cloud compute when a local model is available.
 
-## Environment
+The desktop browser shell is also packaged for offline startup: it does not
+fetch React, Babel, or fonts from CDNs during launch.
 
-See `server/.env.example`. Secrets are **server-only** (never `NEXT_PUBLIC_*`):
-`ANTHROPIC_API_KEY`, `HEDRA_API_KEY`, `ELEVENLABS_API_KEY`, `DATABASE_URL`, plus Google
-OAuth client credentials for Drive.
+## Release Checks
+
+For local QA builds:
+
+```bash
+npm run typecheck
+npm test
+cargo test --manifest-path src-tauri/Cargo.toml
+npm run desktop:build
+npm run desktop:verify-release
+npm run desktop:verify-installed
+```
+
+Developer ID signing and Apple notarization are supported on macOS with:
+
+```bash
+npm run desktop:build:signed
+npm run desktop:verify-signed-release
+```

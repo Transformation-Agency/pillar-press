@@ -117,6 +117,7 @@ function DraftTab({ piece, running, gateStatus, onRun, onChangeOriginal, onGoRev
             <div className="eyebrow">The Draft</div>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <span className="mono muted" style={{ fontSize: 12 }}>{wc} words</span>
+              {window.AudioActions && <AudioActions text={() => text} label="draft" filename={(piece.title || "draft") + "-draft.mp3"} pieceId={piece.id} campaignId={piece.campaignId} />}
               <input ref={fileRef} type="file" accept={window.UPLOAD_ACCEPT} style={{ display: "none" }} onChange={upload} />
               <button className="btn ghost sm" onClick={() => fileRef.current.click()} disabled={running || uploading} title="PDF, image, .docx, or text file">
                 {uploading ? <><Spinner size={14} /> Reading…</> : <><Icon name="doc" size={14} /> Upload</>}

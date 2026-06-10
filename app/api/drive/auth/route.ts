@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth";
 import { consentUrl } from "@/lib/drive";
 import { toErrorResponse } from "@/lib/errors";
+import { isLocalFirstMode } from "@/lib/local/mode";
 
 /**
  * GET /api/drive/auth — begin the server-side Google OAuth flow.
@@ -20,6 +21,13 @@ export async function GET(req: Request) {
   try {
     const user = await requireUser();
 
+    if (isLocalFirstMode()) {
+      return NextResponse.json(
+        { error: "Google Drive linking is disabled in local-first desktop mode. Use local exports instead.", code: "local_first" },
+        { status: 400 },
+      );
+    }
+
     const url = new URL(req.url);
     const folderId = url.searchParams.get("folderId") ?? "";
 
@@ -29,7 +37,7 @@ export async function GET(req: Request) {
       folderId,
     });
 
-    return NextResponse.redirect(consentUrl(state));
+    return NextResponse.redirect(await consentUrl(state));
   } catch (err) {
     return toErrorResponse(err);
   }

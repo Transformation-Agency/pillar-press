@@ -71,6 +71,75 @@ function SummaryCard({ summary, onSendToWeave, onDismiss }) {
   );
 }
 
+function SchedulePanel({ campaignId }) {
+  const [version, setVersion] = React.useState(0);
+  const [syncing, setSyncing] = React.useState(false);
+  const [cadence, setCadence] = React.useState("daily");
+  const [time, setTime] = React.useState("08:00");
+  const [dayOfWeek, setDayOfWeek] = React.useState(String(new Date().getDay()));
+  const [runAt, setRunAt] = React.useState("");
+  const schedules = window.GATHER.listSchedules(campaignId);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    setSyncing(true);
+    window.GATHER.syncSchedules(campaignId)
+      .then(() => { if (!cancelled) setVersion((v) => v + 1); })
+      .finally(() => { if (!cancelled) setSyncing(false); });
+    return () => { cancelled = true; };
+  }, [campaignId]);
+
+  const save = () => {
+    const base = { campaignId, cadence, time, timeOfDay: time, dayOfWeek: Number(dayOfWeek) };
+    window.GATHER.saveSchedule(cadence === "once" ? { campaignId, cadence, runAt } : base);
+    setVersion((v) => v + 1);
+  };
+  const remove = (id) => {
+    window.GATHER.deleteSchedule(id);
+    setVersion((v) => v + 1);
+  };
+  const label = (s) => {
+    if (s.cadence === "once") return "Once · " + (s.runAt ? new Date(s.runAt).toLocaleString() : "not set");
+    if (s.cadence === "weekly") return "Weekly · " + ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][s.dayOfWeek || 0] + " " + s.time;
+    return "Daily · " + s.time;
+  };
+
+  return (
+    <div className="card" style={{ padding: "16px 18px", marginTop: 16 }}>
+      <div className="eyebrow" style={{ marginBottom: 10 }}>Schedule{syncing ? " · syncing" : ""}</div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        <select className="field" value={cadence} onChange={(e) => setCadence(e.target.value)} style={{ fontSize: 14, padding: "8px 10px" }}>
+          <option value="daily">Daily</option>
+          <option value="weekly">Weekly</option>
+          <option value="once">Once</option>
+        </select>
+        {cadence === "once" ? (
+          <input className="field" type="datetime-local" value={runAt} onChange={(e) => setRunAt(e.target.value)} style={{ fontSize: 14, padding: "8px 10px" }} />
+        ) : (
+          <input className="field" type="time" value={time} onChange={(e) => setTime(e.target.value)} style={{ fontSize: 14, padding: "8px 10px" }} />
+        )}
+        {cadence === "weekly" && (
+          <select className="field" value={dayOfWeek} onChange={(e) => setDayOfWeek(e.target.value)} style={{ fontSize: 14, padding: "8px 10px" }}>
+            {["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"].map((d, i) => <option key={d} value={i}>{d}</option>)}
+          </select>
+        )}
+        <button className="btn sm" onClick={save} disabled={cadence === "once" && !runAt}><Icon name="gear" size={13} /> Save schedule</button>
+      </div>
+      {schedules.length > 0 && (
+        <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 7 }}>
+          {schedules.map((s) => (
+            <div key={s.id} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, alignItems: "center", fontSize: 13.5, padding: "8px 10px", border: "1px solid var(--hair)", borderRadius: "var(--radius)" }}>
+              <span>{label(s)}{s.lastRunAt ? <span className="muted"> · last run {new Date(s.lastRunAt).toLocaleString()}</span> : ""}</span>
+              <button className="icon-btn" style={{ width: 26, height: 26 }} onClick={() => remove(s.id)} title="Remove schedule"><Icon name="trash" size={13} /></button>
+            </div>
+          ))}
+        </div>
+      )}
+      <p className="muted" style={{ fontSize: 13, marginTop: 10 }}>Schedules run while King’s Press is open. In the desktop app, the local scheduler runs in the background.</p>
+    </div>
+  );
+}
+
 function Gather({ campaignId, refCtx, onGoWeave }) {
   const isMobile = window.useIsMobile();
   const sources = window.Store.getGatherSources(campaignId);
@@ -81,6 +150,10 @@ function Gather({ campaignId, refCtx, onGoWeave }) {
   const [filter, setFilter] = React.useState("all");
   const [uploading, setUploading] = React.useState(false);
   const fileRef = React.useRef(null);
+
+  React.useEffect(() => {
+    window.GATHER.startScheduler && window.GATHER.startScheduler();
+  }, []);
 
   const summaries = window.Store.getGatherSummaries(campaignId);
   const shown = filter === "all" ? items : items.filter((i) => i.kind === filter);
@@ -177,6 +250,7 @@ function Gather({ campaignId, refCtx, onGoWeave }) {
             <button className="btn ghost" style={{ width: "100%" }} disabled={uploading} onClick={() => fileRef.current.click()} title="Upload PDFs, images, .docx, or text files as research items">
               {uploading ? <><Spinner size={14} /> Reading…</> : <><Icon name="doc" size={14} /> Upload documents</>}
             </button>
+            <SchedulePanel campaignId={campaignId} />
             {progLabel && <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, fontSize: 13, color: "var(--accent-ink)" }}><Spinner size={14} /> {progLabel}</div>}
             {err && <p style={{ color: "var(--sev-must)", fontSize: 13.5, marginTop: 12 }}>{err}</p>}
           </div>

@@ -6,6 +6,9 @@ import { db, mediaJobs, settings } from "@/lib/db";
 import { uploadBinaryFile, DriveError } from "@/lib/drive";
 import { safeName } from "@/lib/exporters";
 import { toErrorResponse } from "@/lib/errors";
+import { getLocalMediaJob } from "@/lib/local/database";
+import { isLocalFirstMode } from "@/lib/local/mode";
+import { isLocalStoredUrl, writeLocalPublicFile } from "@/lib/local/storage";
 
 const bodySchema = z.object({ mediaId: z.string().uuid() });
 
@@ -42,9 +45,11 @@ export async function POST(req: Request) {
     const user = await requireUser();
     const { mediaId } = bodySchema.parse(await req.json());
 
-    const media = await db.query.mediaJobs.findFirst({
-      where: and(eq(mediaJobs.id, mediaId), eq(mediaJobs.userId, user.id)),
-    });
+    const media = isLocalFirstMode()
+      ? getLocalMediaJob(mediaId, user.id)
+      : await db.query.mediaJobs.findFirst({
+          where: and(eq(mediaJobs.id, mediaId), eq(mediaJobs.userId, user.id)),
+        });
     if (!media) return NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
 
     const url = media.downloadUrl || media.outputUrl;
@@ -52,8 +57,16 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "This media isn't ready to save yet.", code: "validation" }, { status: 422 });
     }
 
-    const [setting] = await db.select().from(settings).where(settingsScope(user)).limit(1);
-    if (!setting?.driveRefreshToken) {
+    if (isLocalFirstMode() && isLocalStoredUrl(url)) {
+      const base = safeName(media.prompt || media.modelName || media.type || "media");
+      return NextResponse.json({ file: { id: url, name: base, webViewLink: url } }, { status: 201 });
+    }
+
+    const [setting] = isLocalFirstMode()
+      ? []
+      : await db.select().from(settings).where(settingsScope(user)).limit(1);
+    const driveRefreshToken = setting?.driveRefreshToken;
+    if (!isLocalFirstMode() && !driveRefreshToken) {
       throw new DriveError("Google Drive is not linked.", 400, "drive_not_linked");
     }
 
@@ -64,7 +77,8 @@ export async function POST(req: Request) {
       contentType = url.slice(5, url.indexOf(";"));
       bytes = Buffer.from(url.slice(url.indexOf(",") + 1), "base64");
     } else {
-      const r = await fetch(url);
+      const fetchUrl = url.startsWith("/") ? new URL(url, req.url).toString() : url;
+      const r = await fetch(fetchUrl);
       if (!r.ok) throw new DriveError("Couldn't fetch the media file.", 502, "media_fetch_failed");
       contentType = r.headers.get("content-type") || "";
       bytes = Buffer.from(await r.arrayBuffer());
@@ -74,7 +88,12 @@ export async function POST(req: Request) {
     const base = safeName(media.prompt || media.modelName || media.type || "media");
     const name = `${base}-${media.id.slice(0, 8)}.${ext}`;
 
-    const file = await uploadBinaryFile(setting.driveRefreshToken, setting.driveFolderId, name, bytes, mime);
+    if (isLocalFirstMode()) {
+      const localUrl = writeLocalPublicFile(bytes, name, mime, "exports");
+      return NextResponse.json({ file: { id: localUrl, name, webViewLink: localUrl } }, { status: 201 });
+    }
+
+    const file = await uploadBinaryFile(driveRefreshToken!, setting.driveFolderId, name, bytes, mime);
     return NextResponse.json({ file }, { status: 201 });
   } catch (err) {
     return toErrorResponse(err);

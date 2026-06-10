@@ -1,8 +1,10 @@
-# API_SPEC.md — endpoints to implement
+# API_SPEC.md — route contracts
 
-Next.js App Router route handlers. Every route: `requireUser()` first, Zod-validate the
-body, scope queries by user/campaign, return safe errors (see `server/lib/errors.ts`).
-Routes that already exist in `server/` are marked ✅.
+Next.js App Router route handlers run inside the packaged desktop server and in
+browser dev. Every route should resolve the current user/workspace through
+`requireUser()`, Zod-validate request bodies, scope queries by workspace/campaign,
+and return safe errors through `lib/errors.ts`. In desktop mode, `requireUser()`
+resolves the embedded local owner instead of a cloud session.
 
 ## Campaigns
 - `GET    /api/campaigns` — list workspace campaigns.
@@ -18,7 +20,7 @@ Routes that already exist in `server/` are marked ✅.
 - `PATCH  /api/pieces/:id` — update title/original/status.
 - `DELETE /api/pieces/:id`.
 
-## AI passes (server runs Anthropic with the prototype's prompts)
+## AI passes (server runs the configured LLM provider with the prototype's prompts)
 - `POST   /api/pieces/:id/review` — run the **7 gates in order**; persist `packet`
   incrementally; set Draft→Reviewed. Consider SSE/streaming or a job + `GET .../review/status`
   so the UI can show the gate-by-gate rail. Logic: `gates.js`.
@@ -33,7 +35,9 @@ Routes that already exist in `server/` are marked ✅.
   Long runs: return a job id + `GET /api/weave/:id` for progress. Logic: `weave.js`.
 - "Send to Library" = `POST /api/campaigns/:cid/pieces` with the draft.
 
-## Media — Hedra / ElevenLabs  (scaffolded in server/)
+## Media — Hedra / ElevenLabs
+- `GET    /api/media/providers` — configured optional media providers and
+  capabilities; never returns secrets.
 - `GET    /api/hedra/models?type=` ✅ — live models + fallback.
 - `GET    /api/hedra/credits` ✅.
 - `POST   /api/hedra/assets` ✅ — multipart upload (validate type/size) → asset id.
@@ -44,7 +48,7 @@ Routes that already exist in `server/` are marked ✅.
 - `GET    /api/media?pieceId=` ✅ / `DELETE /api/media?id=` ✅ — the user's library.
 - `PATCH  /api/media/:id` — attach/detach to a piece (`source_content_id`).  ← add this.
 
-## Export — Google Drive (move server-side)
+## Export — local fallback + Google Drive
 - `GET    /api/drive/status` — is Drive linked? folder name.
 - `GET    /api/drive/auth` → OAuth consent; callback stores refresh token + folder.
 - `POST   /api/drive/upload` — `{ pieceId, scope:'one'|'all', platform? }` → upload
@@ -52,9 +56,13 @@ Routes that already exist in `server/` are marked ✅.
 - Download (`.md` / `.zip`) stays client-side via `exporters.js`.
 
 ## Settings
-- `GET/PUT /api/settings` — Drive folder + non-secret prefs. **No provider keys here.**
+- `GET/PUT /api/settings` — Drive folder + non-secret prefs.
+- Native desktop model/provider setup is saved outside this route in the app-data
+  `desktop-settings.json` file through Tauri commands. Backups redact secret-like
+  fields from that file.
 
 ## Auth/role enforcement (test these)
-- Unauthenticated → 401 on every route.
+- Hosted unauthenticated requests → 401 on protected routes.
+- Desktop local-first requests → embedded local owner/workspace.
 - `assistant` role → 403 on `PUT /api/campaigns/:id/references`.
 - Fetching another user's piece/media → 404 (not 403, don't reveal existence).

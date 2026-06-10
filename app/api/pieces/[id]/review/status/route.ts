@@ -4,6 +4,8 @@ import { requireUser } from "@/lib/auth";
 import type { SessionUser } from "@/lib/auth";
 import { db, campaigns, pieces } from "@/lib/db";
 import type { Piece } from "@/lib/db";
+import { getLocalPiece } from "@/lib/local/database";
+import { isLocalFirstMode } from "@/lib/local/mode";
 import { GATES, type GateResult } from "@/lib/gates";
 import { toErrorResponse } from "@/lib/errors";
 
@@ -12,6 +14,7 @@ const notFound = () =>
 
 // Scoped piece load (see app/api/pieces/[id]/review/route.ts).
 async function resolvePiece(id: string, user: SessionUser): Promise<Piece | null> {
+  if (isLocalFirstMode()) return getLocalPiece(id, user.id, user.workspaceId) as Piece | null;
   const piece = await db.query.pieces.findFirst({
     where: and(eq(pieces.id, id), eq(pieces.userId, user.id)),
   });

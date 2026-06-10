@@ -7,7 +7,7 @@
  * byte-for-byte from the prototype so output parity is preserved.
  *
  * Differences from the prototype, all mechanical (NOT behavioral):
- *  - `window.AI` is replaced by an injected {@link AI} (lib/anthropic.ts), so the
+ *  - `window.AI` is replaced by an injected {@link AI} (lib/llm), so the
  *    pipeline is PURE and unit-testable with a fake AI — no DB, no network.
  *  - `console.warn` becomes a no-op-safe console.warn (server console).
  *  - refCtx is passed in (built from a campaign's references via
@@ -19,7 +19,7 @@
  *   MAP2   mapToThroughlines()  concept            -> author's References
  *   EXPAND draftSection()       one call per section-> unified draft
  */
-import type { AI } from "@/lib/anthropic";
+import type { AI } from "@/lib/llm";
 
 export interface WeaveSource {
   name: string;

@@ -228,7 +228,7 @@ function Weave({ weave, refCtx, onOpenPiece }) {
             <div className="card" style={{ padding: "22px 22px", position: "sticky", top: 24 }}>
               <div className="eyebrow" style={{ marginBottom: 10 }}>Weave</div>
               <p className="muted" style={{ fontSize: 13.5, marginBottom: 16 }}>
-                Reads each source, finds the through-idea, maps it to your References, then drafts.
+                Reads each source, finds the through-idea, maps it to your Preferences, then drafts.
               </p>
               <button className="btn primary" style={{ width: "100%" }} disabled={running || usableCount < 2} onClick={run}>
                 {running ? <><Spinner size={15} /> Weaving…</> : <><Icon name="play" size={15} /> Weave {usableCount} source{usableCount !== 1 ? "s" : ""}</>}

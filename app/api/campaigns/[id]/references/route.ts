@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { requireUser, assertAuthor } from "@/lib/auth";
 import { db, campaigns, references } from "@/lib/db";
+import { getLocalCampaign, getLocalReferences, updateLocalReferences } from "@/lib/local/database";
+import { isLocalFirstMode } from "@/lib/local/mode";
 import { putReferencesSchema } from "@/lib/schemas-campaigns";
 import { toErrorResponse } from "@/lib/errors";
 
@@ -15,6 +17,7 @@ async function campaignInScope(
   workspaceId: string | undefined,
 ): Promise<string | null> {
   if (!workspaceId) return null;
+  if (isLocalFirstMode()) return getLocalCampaign(campaignId, workspaceId)?.id ?? null;
   const rows = await db
     .select({ id: campaigns.id })
     .from(campaigns)
@@ -41,6 +44,17 @@ export async function GET(
         { error: "Not found.", code: "not_found" },
         { status: 404 },
       );
+    }
+
+    if (isLocalFirstMode()) {
+      const ref = getLocalReferences(scopedId, user.workspaceId);
+      if (!ref) {
+        return NextResponse.json(
+          { error: "Not found.", code: "not_found" },
+          { status: 404 },
+        );
+      }
+      return NextResponse.json({ references: ref });
     }
 
     const ref = await db.query.references.findFirst({
@@ -80,6 +94,17 @@ export async function PUT(
     }
 
     const body = putReferencesSchema.parse(await req.json());
+
+    if (isLocalFirstMode()) {
+      const updated = updateLocalReferences(scopedId, body, user.workspaceId);
+      if (!updated) {
+        return NextResponse.json(
+          { error: "Not found.", code: "not_found" },
+          { status: 404 },
+        );
+      }
+      return NextResponse.json({ references: updated });
+    }
 
     const existing = await db.query.references.findFirst({
       where: eq(references.campaignId, scopedId),

@@ -1,4 +1,4 @@
-import { ai, extractJSON, repairJSON, type AI } from "@/lib/anthropic";
+import { ai, extractJSON, repairJSON, type AI } from "@/lib/llm";
 import type { ReferencesDoc } from "@/lib/refContext";
 
 export interface RefsEditInput {

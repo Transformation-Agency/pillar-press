@@ -134,90 +134,6 @@
     return map;
   }
 
-  async function generatePlatform(platform, { sourceText, priorOutputs, sourceIds, audienceId, refCtx }) {
-    const aud = AUDIENCE_PRESETS.find((a) => a.id === audienceId) || AUDIENCE_PRESETS[0];
-
-    let derivationText;
-    if (sourceIds[0] === "__source__") {
-      derivationText = `Derive from the CANONICAL SOURCE below.`;
-    } else {
-      derivationText = `Derive from these already-generated versions (named): ${sourceIds.map((s) => s.toUpperCase()).join(" + ")}. Use their strongest material. Do NOT merely excerpt — this is an independent entry point that may point back to the longer work.`;
-    }
-
-    const priorBlock = sourceIds[0] === "__source__"
-      ? `CANONICAL SOURCE:\n"""${sourceText}"""`
-      : sourceIds.map((s) => `=== ${s.toUpperCase()} VERSION ===\n${(priorOutputs[s] && priorOutputs[s].draftPost) || sourceText}`).join("\n\n");
-
-    const igExtra = platform.id === "instagram"
-      ? ` For Instagram, the imagery recommendation MUST specify a format: single image, carousel (with slide breakdown), or Reel (with a short beat list).`
-      : "";
-
-    /* --- Call 1: the POST BODY (delimiter format, no JSON escaping) ---
-       Kept separate from the metadata so a long body can never truncate the
-       structured fields. Distill rather than reproduce. */
-    const bodySystem =
-`You write the BODY of a single platform-native post for an author. ${platform.role}
-Register to use: ${platform.register}. ${derivationText}
-This is an INDEPENDENT entry point, never a mere excerpt; it may point back to the longer work. If the source is long, DISTILL it to one sharp idea rather than reproducing it — aim for a complete, well-shaped post and do not exceed ~550 words.
-
-AUTHOR REFERENCES:
-${refCtx}
-
-Return EXACTLY this and nothing else (no JSON, no preamble):
-@@POST@@
-<the full post as plain prose; keep paragraph breaks as blank lines>
-@@END@@`;
-    const bodyPrompt =
-`TARGET PLATFORM: ${platform.name}
-SELECTED AUDIENCE: ${aud.name}
-
-${priorBlock}
-
-Write the post now in the delimited format.`;
-    const bodyOut = await window.AI.text(bodyPrompt, { system: bodySystem });
-    let draftPost = bodyOut || "";
-    const pm = bodyOut.split(/@@\s*POST\s*@@/i);
-    if (pm.length > 1) draftPost = pm[1].split(/@@\s*END\s*@@/i)[0];
-    draftPost = draftPost.replace(/@@\s*END\s*@@[\s\S]*$/i, "").trim();
-
-    /* --- Call 2: the METADATA (compact JSON, given the finished body) --- */
-    const metaSystem =
-`You produce publishing metadata for a FINISHED platform post written for an author. Base every field on the actual post text provided. Run a risk & boundary check against the author's RED LINES.
-
-AUTHOR REFERENCES:
-${refCtx}
-
-Return ONLY compact valid JSON (no prose, no code fences):
-{"throughlineTag":"<one throughline tag, no hash>","strategicPurpose":"1 sentence","hooks":["2-3 short alternative opening hooks"],"ctas":["2-3 call-to-action options"],"mediaRec":"<imagery/media recommendation${platform.id === "instagram" ? ", specify single image / carousel / Reel" : ""}>","riskCheck":"<'Clear' or the specific concern>","relatedOffering":"<related offering or destination>","followUp":"<one suggested follow-up post>"}`;
-    const metaPrompt =
-`PLATFORM: ${platform.name}
-SELECTED AUDIENCE: ${aud.name}${igExtra}
-
-THE POST:
-"""${draftPost}"""
-
-Return the metadata JSON now.`;
-    let meta = {};
-    try { meta = await window.AI.json(metaPrompt, { system: metaSystem }); }
-    catch (e) { console.warn("Platform metadata failed:", platform.id, e); }
-
-    return {
-      platform: platform.name,
-      selectedAudience: aud.name,
-      throughlineTag: (meta.throughlineTag || "").replace(/^#/, "") || "—",
-      strategicPurpose: meta.strategicPurpose || "—",
-      draftPost: draftPost || "—",
-      hooks: Array.isArray(meta.hooks) ? meta.hooks : [],
-      ctas: Array.isArray(meta.ctas) ? meta.ctas : [],
-      mediaRec: meta.mediaRec || "—",
-      riskCheck: meta.riskCheck || "Clear",
-      relatedOffering: meta.relatedOffering || "—",
-      followUp: meta.followUp || "—",
-      _platform: platform.id,
-      _audienceId: aud.id,
-    };
-  }
-
   // Generate platform-native versions server-side in fixed order.
   // POST /api/pieces/:id/outputs { active, audiences } -> { piece, outputs, outputOrder }.
   async function generateOutputs(piece, activeIds, audienceMap, refCtx, onProgress) {
@@ -249,7 +165,6 @@ Return the metadata JSON now.`;
   window.GEN = {
     generateRevision,
     generateOutputs,
-    generatePlatform,
     condenseOutput,
     resolveSources,
     canonicalSource,

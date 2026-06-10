@@ -11,7 +11,7 @@ import {
   generateRevision,
   type RevisionPacket,
 } from "@/lib/revision";
-import type { AI } from "@/lib/anthropic";
+import type { AI } from "@/lib/llm";
 
 describe("author guidance (direction + gate commentary)", () => {
   it("builds a labelled commentary block and skips empty notes", () => {

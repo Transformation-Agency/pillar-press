@@ -12,6 +12,9 @@ import {
 import { uploadMany, DriveError } from "@/lib/drive";
 import { driveUploadSchema, driveUploadFilesSchema } from "@/lib/schemas-drive";
 import { toErrorResponse } from "@/lib/errors";
+import { getLocalPiece } from "@/lib/local/database";
+import { isLocalFirstMode } from "@/lib/local/mode";
+import { writeLocalPublicFile } from "@/lib/local/storage";
 
 /**
  * POST /api/drive/upload — build platform-output markdown for a piece and upload
@@ -30,6 +33,14 @@ import { toErrorResponse } from "@/lib/errors";
 const notFound = () =>
   NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
 
+function localUploadMany(files: { name: string; content: string; mime?: string }[]) {
+  return files.map((file) => {
+    const mime = file.mime || "text/markdown";
+    const url = writeLocalPublicFile(Buffer.from(file.content, "utf8"), file.name, mime, "exports");
+    return { id: url, name: file.name, webViewLink: url };
+  });
+}
+
 /** Scope a settings row to this caller. */
 function settingsScope(user: SessionUser) {
   return user.workspaceId
@@ -42,6 +53,7 @@ function settingsScope(user: SessionUser) {
  * revealing existence). Mirrors app/api/pieces/[id]/route.ts#resolvePiece.
  */
 async function resolvePiece(id: string, user: SessionUser): Promise<Piece | null> {
+  if (isLocalFirstMode()) return getLocalPiece(id, user.id, user.workspaceId) as Piece | null;
   const piece = await db.query.pieces.findFirst({
     where: and(eq(pieces.id, id), eq(pieces.userId, user.id)),
   });
@@ -61,9 +73,19 @@ export async function POST(req: Request) {
     const user = await requireUser();
     const raw: unknown = await req.json();
 
+    if (isLocalFirstMode()) {
+      if (raw && typeof raw === "object" && "files" in raw) {
+        const { files } = driveUploadFilesSchema.parse(raw);
+        return NextResponse.json({ files: localUploadMany(files) }, { status: 201 });
+      }
+    }
+
     // 1) Ensure Drive is linked for this caller. (Shared by both modes.)
-    const [setting] = await db.select().from(settings).where(settingsScope(user)).limit(1);
-    if (!setting?.driveRefreshToken) {
+    const [setting] = isLocalFirstMode()
+      ? []
+      : await db.select().from(settings).where(settingsScope(user)).limit(1);
+    const driveRefreshToken = setting?.driveRefreshToken;
+    if (!isLocalFirstMode() && !driveRefreshToken) {
       throw new DriveError("Google Drive is not linked.", 400, "drive_not_linked");
     }
 
@@ -71,7 +93,7 @@ export async function POST(req: Request) {
     if (raw && typeof raw === "object" && "files" in raw) {
       const { files } = driveUploadFilesSchema.parse(raw);
       const uploaded = await uploadMany(
-        setting.driveRefreshToken,
+        driveRefreshToken!,
         setting.driveFolderId,
         files,
       );
@@ -117,9 +139,13 @@ export async function POST(req: Request) {
       });
     }
 
+    if (isLocalFirstMode()) {
+      return NextResponse.json({ files: localUploadMany(files) }, { status: 201 });
+    }
+
     // 4) Upload to the linked folder (server-side OAuth).
     const uploaded = await uploadMany(
-      setting.driveRefreshToken,
+      driveRefreshToken!,
       setting.driveFolderId,
       files,
     );

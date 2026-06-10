@@ -1,6 +1,6 @@
 /* ============================================================
-   AI — wrapper around window.claude.complete with JSON parsing.
-   Plain JS. Exposes window.AI.
+   AI helpers — JSON parsing + reference context only.
+   Model calls are server-side through /api routes.
    ============================================================ */
 (function () {
 
@@ -66,32 +66,46 @@
     return null;
   }
 
-  async function raw(messages, system) {
-    const msgs = system
-      ? [{ role: "user", content: system },
-         { role: "assistant", content: "Understood. I will follow these instructions exactly and reply only in the specified format." },
-         ...messages]
-      : messages;
-    return await window.claude.complete({ messages: msgs });
+  function cleanSetupText(value, maxLength) {
+    return String(value || "").replace(/\s+/g, " ").trim().slice(0, maxLength || 360);
   }
 
-  // Call expecting JSON. Falls back to truncation repair, then a repair round-trip.
-  async function json(prompt, { system } = {}) {
-    const messages = [{ role: "user", content: prompt }];
-    let out = await raw(messages, system);
-    let parsed = extractJSON(out) || repairJSON(out);
-    if (parsed) return parsed;
-    // repair attempt
-    messages.push({ role: "assistant", content: out });
-    messages.push({ role: "user", content: "Return ONLY valid JSON matching the schema. Be concise so it fits. No prose, no code fences." });
-    out = await raw(messages, system);
-    parsed = extractJSON(out) || repairJSON(out);
-    if (parsed) return parsed;
-    throw new Error("Could not parse JSON from model output.");
+  function setupStringList(value, maxItems) {
+    return Array.isArray(value)
+      ? value.map((item) => cleanSetupText(item, 120)).filter(Boolean).slice(0, maxItems || 5)
+      : [];
   }
 
-  async function text(prompt, { system } = {}) {
-    return await raw([{ role: "user", content: prompt }], system);
+  function buildSetupProfileBlock(profile) {
+    if (!profile || typeof profile !== "object") return [];
+    const voice = profile.voiceProfile && typeof profile.voiceProfile === "object" ? profile.voiceProfile : {};
+    const publication = profile.publicationDefaults && typeof profile.publicationDefaults === "object" ? profile.publicationDefaults : {};
+    const permissions = profile.permissions && typeof profile.permissions === "object" ? profile.permissions : {};
+    const lines = ["\nAPPROVED SETUP PROFILE:"];
+    const selfStatement = cleanSetupText(profile.selfStatement || voice.userDescription);
+    if (selfStatement) lines.push("Self statement: " + selfStatement);
+    const platforms = Array.isArray(profile.communicationPlatforms)
+      ? profile.communicationPlatforms
+          .map((item) => cleanSetupText(item && (item.platform || item.name || item), 80))
+          .filter(Boolean)
+          .slice(0, 6)
+      : [];
+    if (platforms.length) lines.push("Communication platforms: " + platforms.join(", "));
+    const outputTypes = setupStringList(publication.defaultOutputTypes, 8);
+    if (outputTypes.length) lines.push("Writing formats: " + outputTypes.join(", "));
+    const toneWords = setupStringList(voice.toneWords, 8);
+    if (toneWords.length) lines.push("Tone words: " + toneWords.join(", "));
+    const avoid = setupStringList(voice.avoid, 8);
+    if (avoid.length) lines.push("Avoid: " + avoid.join(", "));
+    const preservation = cleanSetupText(publication.preserveRawLanguage, 80);
+    if (preservation) lines.push("Preservation preference: " + preservation);
+    lines.push(
+      "Permissions: memory=" + (permissions.mayUseSavedMemory ? "approved" : "not approved") +
+        "; examples=" + (permissions.mayUseUploadedVoiceExamples ? "approved" : "not approved") +
+        "; web=" + (permissions.mayUseWebResearch ? "approved" : "not approved") +
+        "; publish/send=not approved"
+    );
+    return lines;
   }
 
   // Build a compact reference context block the gates/generators read.
@@ -123,8 +137,14 @@
     if (r.selfVision && r.selfVision.body) {
       lines.push("\nSELF-VISION (public identity):\n" + r.selfVision.body);
     }
+    if (r.gateSpec && r.gateSpec.body) {
+      lines.push("\nGATE PREFERENCES:\n" + r.gateSpec.body);
+    }
+    if (r.setupProfile && r.setupProfile.profile) {
+      lines.push.apply(lines, buildSetupProfileBlock(r.setupProfile.profile));
+    }
     return lines.join("\n");
   }
 
-  window.AI = { json, text, extractJSON, repairJSON, refContext };
+  window.AI = { extractJSON, repairJSON, refContext };
 })();

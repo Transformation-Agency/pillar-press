@@ -4,6 +4,8 @@ import { requireUser } from "@/lib/auth";
 import { db, settings } from "@/lib/db";
 import { folderName } from "@/lib/drive";
 import { toErrorResponse } from "@/lib/errors";
+import { getOrCreateLocalSettings } from "@/lib/local/database";
+import { isLocalFirstMode } from "@/lib/local/mode";
 
 /**
  * GET /api/drive/status — report whether the caller has linked Google Drive and,
@@ -25,6 +27,16 @@ function scope(user: { id: string; workspaceId?: string }) {
 export async function GET() {
   try {
     const user = await requireUser();
+
+    if (isLocalFirstMode()) {
+      const row = getOrCreateLocalSettings(user.id, user.workspaceId ?? "local-workspace");
+      return NextResponse.json({
+        linked: false,
+        folderId: row.driveFolderId,
+        folderName: row.driveFolderId ? "Local exports" : null,
+        localExportAvailable: true,
+      });
+    }
 
     const [row] = await db.select().from(settings).where(scope(user)).limit(1);
 

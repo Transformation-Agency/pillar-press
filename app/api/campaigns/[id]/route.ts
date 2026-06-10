@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { requireUser } from "@/lib/auth";
 import { db, campaigns } from "@/lib/db";
+import { renameLocalCampaign } from "@/lib/local/database";
+import { isLocalFirstMode } from "@/lib/local/mode";
 import { renameCampaignSchema } from "@/lib/schemas-campaigns";
 import { toErrorResponse } from "@/lib/errors";
 
@@ -23,6 +25,17 @@ export async function PATCH(
     }
 
     const { name } = renameCampaignSchema.parse(await req.json());
+
+    if (isLocalFirstMode()) {
+      const campaign = renameLocalCampaign(id, name, user.workspaceId);
+      if (!campaign) {
+        return NextResponse.json(
+          { error: "Not found.", code: "not_found" },
+          { status: 404 },
+        );
+      }
+      return NextResponse.json({ campaign });
+    }
 
     const [updated] = await db
       .update(campaigns)

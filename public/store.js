@@ -44,8 +44,8 @@
     activeCampaignId: null,
     settings: {
       drive: { clientId: "", folderId: "", folderName: "" },
-      hedra: { apiKey: "" },
-      eleven: { apiKey: "" },
+      hedra: {},
+      eleven: {},
     },
     media: [],
     gatherSources: [],
@@ -56,10 +56,12 @@
     theme: "light",
     role: "author",
     weave: { sources: [], result: null },
+    desk: { threads: [], activeId: null },
   };
 
   // tracks which campaigns have had their per-campaign data hydrated
   const loadedCampaigns = new Set();
+  const pendingCampaignCreates = new Map();
 
   function emit() { listeners.forEach((l) => l(state)); }
 
@@ -73,9 +75,9 @@
         folderId: s.driveFolderId || (s.drive && s.drive.folderId) || prefs.driveFolderId || "",
         folderName: (s.drive && s.drive.folderName) || prefs.driveFolderName || "",
       },
-      // hedra/eleven keys are server-side env now; keep cache shape only.
-      hedra: { apiKey: (state.settings.hedra && state.settings.hedra.apiKey) || "" },
-      eleven: { apiKey: (state.settings.eleven && state.settings.eleven.apiKey) || "" },
+      // Media provider keys are server-side/native-side only.
+      hedra: {},
+      eleven: {},
       prefs: prefs,
     };
     if (prefs.theme === "light" || prefs.theme === "dark") state.theme = prefs.theme;
@@ -84,6 +86,35 @@
 
   function ensureCampaign(id) {
     return (state.campaigns || []).find((c) => c.id === id) || null;
+  }
+
+  function replaceCampaignId(tempId, realId) {
+    if (!tempId || !realId || tempId === realId) return;
+    const c = ensureCampaign(tempId);
+    if (!c) return;
+    c.id = realId;
+    if (state.activeCampaignId === tempId) state.activeCampaignId = realId;
+    if (state.settings && state.settings.prefs && state.settings.prefs.activeCampaignId === tempId) {
+      state.settings.prefs.activeCampaignId = realId;
+    }
+    (state.pieces || []).forEach((p) => { if (p.campaignId === tempId) p.campaignId = realId; });
+    (state.gatherSources || []).forEach((s) => { if (s.campaignId === tempId) s.campaignId = realId; });
+    (state.gatherItems || []).forEach((i) => { if (i.campaignId === tempId) i.campaignId = realId; });
+    (state.gatherSummaries || []).forEach((s) => { if (s.campaignId === tempId) s.campaignId = realId; });
+    (state.media || []).forEach((m) => { if (m.campaignId === tempId) m.campaignId = realId; });
+    if (loadedCampaigns.has(tempId)) {
+      loadedCampaigns.delete(tempId);
+      loadedCampaigns.add(realId);
+    }
+  }
+
+  function replacePieceId(tempId, realId) {
+    if (!tempId || !realId || tempId === realId) return;
+    const p = (state.pieces || []).find((x) => x.id === tempId);
+    if (!p) return;
+    p.id = realId;
+    if (state.activePieceId === tempId) state.activePieceId = realId;
+    (state.media || []).forEach((m) => { if (m.pieceId === tempId) m.pieceId = realId; });
   }
 
   /* ---- per-campaign hydration (references + pieces + gather + media) ---- */
@@ -189,6 +220,11 @@
       emit(); // render shell with campaign list + settings
 
       if (activeId) await hydrateCampaign(activeId);
+      const deskRes = await apiGet("/desk/session").catch(() => ({ session: { state: {} } }));
+      const deskState = deskRes && deskRes.session && deskRes.session.state;
+      if (deskState && typeof deskState === "object") {
+        state.desk = Object.assign({ threads: [], activeId: null }, deskState);
+      }
     } catch (e) {
       console.warn("[Store] hydrate failed:", e && e.message);
     }
@@ -223,6 +259,28 @@
       state.settings.prefs = Object.assign({}, state.settings.prefs || {}, { [key]: value });
       emit(); persistPrefs({ [key]: value });
     },
+    setPrefs(patch) {
+      if (!patch || typeof patch !== "object") return;
+      if (!state.settings) state.settings = {};
+      state.settings.prefs = Object.assign({}, state.settings.prefs || {}, patch);
+      emit(); persistPrefs(patch);
+    },
+
+    /* ---- Desk chat session (thread state, persisted as one scoped blob) ---- */
+    getDesk() {
+      if (!state.desk) state.desk = { threads: [], activeId: null };
+      if (!Array.isArray(state.desk.threads)) state.desk.threads = [];
+      return state.desk;
+    },
+    setDesk(next) {
+      state.desk = Object.assign({ threads: [], activeId: null }, next || {});
+      emit();
+      bg(apiSend("PUT", "/desk/session", {
+        activeId: state.desk.activeId || null,
+        state: state.desk,
+      }), "PUT /desk/session");
+      return state.desk;
+    },
 
     /* ---- Campaigns ---- */
     getCampaigns() { return state.campaigns || []; },
@@ -253,9 +311,24 @@
       loadedCampaigns.add(id); // brand-new, nothing to fetch
       if (activate) { state.activeCampaignId = id; state.activePieceId = null; }
       emit();
-      bg(apiSend("POST", "/campaigns", { id, name: name || "New campaign" }), "POST /campaigns");
+      const created = apiSend("POST", "/campaigns", { name: name || "New campaign" }).then((res) => {
+        const serverCampaign = res && res.campaign;
+        if (!serverCampaign || !serverCampaign.id) return ensureCampaign(id);
+        replaceCampaignId(id, serverCampaign.id);
+        const c = ensureCampaign(serverCampaign.id);
+        if (c) Object.assign(c, { name: serverCampaign.name || c.name, slug: serverCampaign.slug || c.slug });
+        emit();
+        persistPrefs();
+        return c || ensureCampaign(serverCampaign.id);
+      });
+      pendingCampaignCreates.set(id, created);
+      created.then(() => pendingCampaignCreates.delete(id), () => pendingCampaignCreates.delete(id));
+      bg(created, "POST /campaigns");
       persistPrefs();
       return id;
+    },
+    whenCampaignSaved(id) {
+      return pendingCampaignCreates.get(id) || Promise.resolve(api.getCampaign(id));
     },
     // Hydrate a campaign's references + pieces (+ gather/media) on demand WITHOUT
     // making it the active campaign — used by the Book Writer to load a book
@@ -275,8 +348,8 @@
       if (!state.settings) state.settings = {};
       const s = state.settings;
       s.drive = s.drive || { clientId: "", folderId: "", folderName: "" };
-      s.hedra = s.hedra || { apiKey: "" };
-      s.eleven = s.eleven || { apiKey: "" };
+      s.hedra = s.hedra || {};
+      s.eleven = s.eleven || {};
       return s;
     },
     setDriveConfig(patch) {
@@ -292,10 +365,6 @@
       state.settings.prefs = body.prefs;
       bg(apiSend("PUT", "/settings", body), "PUT /settings (drive)");
     },
-    // hedra/eleven keys are env-side now; keep in cache only, do not send.
-    setHedraConfig(patch) { const s = api.getSettings(); s.hedra = Object.assign({}, s.hedra, patch); emit(); },
-    setElevenConfig(patch) { const s = api.getSettings(); s.eleven = Object.assign({}, s.eleven, patch); emit(); },
-
     /* ---- Media assets (Studio) ---- */
     getMedia() { if (!Array.isArray(state.media)) state.media = []; return state.media; },
     mediaForCampaign(cid) { return api.getMedia().filter((m) => m.campaignId === cid); },
@@ -430,7 +499,14 @@
       state.pieces.unshift(p);
       state.activePieceId = p.id;
       emit();
-      bg(apiSend("POST", "/campaigns/" + cid + "/pieces", { id, title: p.title, original: "" }), "POST pieces");
+      bg(apiSend("POST", "/campaigns/" + cid + "/pieces", { title: p.title, original: "" }).then((res) => {
+        const serverPiece = res && res.piece;
+        if (!serverPiece || !serverPiece.id) return;
+        replacePieceId(id, serverPiece.id);
+        const current = api.getPiece(serverPiece.id);
+        if (current) Object.assign(current, normPiece(serverPiece));
+        emit();
+      }), "POST pieces");
       return p;
     },
     updatePiece(id, patch) {
@@ -480,10 +556,12 @@
     /* ---- References ---- */
     updateReferences(patch) {
       const c = api.activeCampaign();
-      if (!c) return;
+      if (!c) return Promise.resolve(null);
       c.references = Object.assign({}, c.references, patch);
       emit();
-      bg(apiSend("PUT", "/campaigns/" + c.id + "/references", { patch }), "PUT references");
+      const saved = apiSend("PUT", "/campaigns/" + c.id + "/references", { patch });
+      bg(saved, "PUT references");
+      return saved;
     },
     setReferenceSection(key, value) {
       const c = api.activeCampaign();

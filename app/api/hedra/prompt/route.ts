@@ -4,8 +4,11 @@ import { z } from "zod";
 import { requireUser } from "@/lib/auth";
 import { db, references, pieces } from "@/lib/db";
 import { styleProfiles } from "@/db/style-schema";
+import { getLocalPiece, getLocalReferences, getLocalStyleProfile } from "@/lib/local/database";
+import { isLocalFirstMode } from "@/lib/local/mode";
 import { buildRefContext, type ReferencesDoc } from "@/lib/refContext";
 import { craftImagePrompt } from "@/lib/ai/imagePrompt";
+import { getAIForTask } from "@/lib/llm";
 import { sanitizeText } from "@/lib/validation";
 import { toErrorResponse } from "@/lib/errors";
 
@@ -32,17 +35,23 @@ export async function POST(req: Request) {
     let refCtx = "";
     let directive = "";
     if (body.campaignId) {
-      const ref = await db.query.references.findFirst({ where: eq(references.campaignId, body.campaignId) });
+      const ref = isLocalFirstMode()
+        ? getLocalReferences(body.campaignId, user.workspaceId)
+        : await db.query.references.findFirst({ where: eq(references.campaignId, body.campaignId) });
       refCtx = buildRefContext((ref?.doc as ReferencesDoc | undefined) ?? null);
-      const prof = await db.query.styleProfiles.findFirst({ where: eq(styleProfiles.campaignId, body.campaignId) });
+      const prof = isLocalFirstMode()
+        ? getLocalStyleProfile(body.campaignId, user.workspaceId)
+        : await db.query.styleProfiles.findFirst({ where: eq(styleProfiles.campaignId, body.campaignId) });
       directive = prof?.directive || "";
     }
 
     let article: { title?: string; excerpt?: string } | undefined;
     if (body.pieceId) {
-      const pc = await db.query.pieces.findFirst({
-        where: and(eq(pieces.id, body.pieceId), eq(pieces.userId, user.id)),
-      });
+      const pc = isLocalFirstMode()
+        ? getLocalPiece(body.pieceId, user.id, user.workspaceId)
+        : await db.query.pieces.findFirst({
+            where: and(eq(pieces.id, body.pieceId), eq(pieces.userId, user.id)),
+          });
       if (pc) article = { title: pc.title, excerpt: pieceExcerpt(pc) };
     }
 
@@ -51,7 +60,7 @@ export async function POST(req: Request) {
       styleDirective: directive,
       refContext: refCtx,
       article,
-    });
+    }, getAIForTask("mediaPrompt"));
     return NextResponse.json({ prompt });
   } catch (err) {
     return toErrorResponse(err);

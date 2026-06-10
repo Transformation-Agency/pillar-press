@@ -16,3 +16,17 @@ export async function GET() {
     return toErrorResponse(err);
   }
 }
+
+export async function POST(req: Request) {
+  try {
+    await requireUser();
+    const body = await req.json().catch(() => ({}));
+    const apiKey = typeof body?.apiKey === "string" ? body.apiKey.trim() : "";
+    const voices = await listVoices({ apiKey });
+    return NextResponse.json({
+      voices: voices.map((v) => ({ id: v.voice_id, name: v.name, category: v.category, previewUrl: v.preview_url })),
+    });
+  } catch (err) {
+    return toErrorResponse(err);
+  }
+}

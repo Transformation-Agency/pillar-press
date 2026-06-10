@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { requireUser } from "@/lib/auth";
 import { db, mediaJobs } from "@/lib/db";
+import { getLocalMediaJob, updateLocalMediaJob } from "@/lib/local/database";
+import { isLocalFirstMode } from "@/lib/local/mode";
 import { getGenerationStatus, getAssetUrls } from "@/lib/hedra";
 import { persistRemoteImage, persistRemoteVideo } from "@/lib/storage";
 import { toErrorResponse } from "@/lib/errors";
@@ -18,9 +20,11 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     const user = await requireUser();
     const { id } = await params;
 
-    const job = await db.query.mediaJobs.findFirst({
-      where: and(eq(mediaJobs.id, id), eq(mediaJobs.userId, user.id)),
-    });
+    const job = isLocalFirstMode()
+      ? getLocalMediaJob(id, user.id)
+      : await db.query.mediaJobs.findFirst({
+          where: and(eq(mediaJobs.id, id), eq(mediaJobs.userId, user.id)),
+        });
     if (!job) return NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
 
     // already terminal — no need to hit the provider again
@@ -74,20 +78,41 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       }
     }
 
-    const [updated] = await db
-      .update(mediaJobs)
-      .set({
-        status: (s.status as typeof mediaJobs.$inferInsert.status) ?? job.status,
+    if (isLocalFirstMode()) {
+      const localCompletedAt =
+        typeof job.completedAt === "string"
+          ? job.completedAt
+          : job.completedAt
+            ? job.completedAt.toISOString()
+            : null;
+      const updated = updateLocalMediaJob(job.id, user.id, {
+        status: (s.status as any) ?? job.status,
         progress: s.progress != null ? Math.round(s.progress <= 1 ? s.progress * 100 : s.progress) : job.progress,
         outputUrl: outUrl ?? job.outputUrl,
         downloadUrl: dl ?? job.downloadUrl,
         thumbnailUrl: thumb ?? job.thumbnailUrl,
         hedraAssetId: s.asset_id ?? job.hedraAssetId,
         errorMessage: s.status === "failed" ? (s.error ?? "Generation failed.") : job.errorMessage,
-        completedAt: terminal ? new Date() : job.completedAt,
+        completedAt: terminal ? new Date().toISOString() : localCompletedAt,
+      });
+      return NextResponse.json({ job: updated });
+    }
+
+    const dbJob = job as typeof mediaJobs.$inferSelect;
+    const [updated] = await db
+      .update(mediaJobs)
+      .set({
+        status: (s.status as typeof mediaJobs.$inferInsert.status) ?? dbJob.status,
+        progress: s.progress != null ? Math.round(s.progress <= 1 ? s.progress * 100 : s.progress) : dbJob.progress,
+        outputUrl: outUrl ?? dbJob.outputUrl,
+        downloadUrl: dl ?? dbJob.downloadUrl,
+        thumbnailUrl: thumb ?? dbJob.thumbnailUrl,
+        hedraAssetId: s.asset_id ?? dbJob.hedraAssetId,
+        errorMessage: s.status === "failed" ? (s.error ?? "Generation failed.") : dbJob.errorMessage,
+        completedAt: terminal ? new Date() : dbJob.completedAt,
         updatedAt: new Date(),
       })
-      .where(eq(mediaJobs.id, job.id))
+      .where(eq(mediaJobs.id, dbJob.id))
       .returning();
 
     return NextResponse.json({ job: updated });

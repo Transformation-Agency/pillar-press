@@ -1,53 +1,72 @@
-# CLAUDE.md — working instructions for this backend
+# CLAUDE.md - Working Instructions For King's Press
 
-You are building the backend for **Pillar Press**. A complete front-end prototype exists
-in `prototype-reference/`. Build the server it needs. Read `BUILD_BRIEF.md`,
-`DATA_MODEL.md`, and `API_SPEC.md` before writing code.
+You are building **King's Press Editorial Desk**, the local-first editorial
+operations desktop app. The target product is a Tauri desktop app that runs a
+packaged Next.js server locally, stores app data in SQLite, keeps generated files
+in local app-data storage, and uses local models by default.
 
-## Ground rules
+Read these before making architecture changes:
 
-- **Port business logic verbatim.** The gate prompts, the platform generation order, the
-  weave map-reduce, and the revision rules already exist in `prototype-reference/*.js`.
-  Do **not** redesign them — translate them to server code, keeping prompts, ordering,
-  and validation identical. Where the prototype's behavior and this doc disagree, the
-  prototype is the source of truth for *what the feature does*; this doc is the source of
-  truth for *how the server should be structured*.
-- **Secrets are server-only.** `ANTHROPIC_API_KEY`, `HEDRA_API_KEY`, `ELEVENLABS_API_KEY`,
-  and Google OAuth secrets live in server runtime. Never expose them to the client, logs,
-  responses, or `NEXT_PUBLIC_*`. The browser only calls your own `/api/*` routes.
-- **Stack:** Next.js App Router on Vercel, Postgres + Drizzle, Zod for every request body.
-  Match the patterns already in `server/`.
-- **Auth + authorization on every route.** Use the `requireUser()` seam in
-  `server/lib/auth.ts` (wire it to your real auth provider). Every read/write is scoped by
-  `userId`/`workspaceId`; one user must never touch another's data.
-- **Keep AI calls resilient.** The model has a limited output budget, so the prototype
-  chunks long work. Preserve that: the revision and weave run in bounded passes; tolerate
-  malformed/truncated JSON (see `ai.js` `repairJSON`). Use streaming or background jobs for
-  long multi-call operations where it improves UX, but the persisted row is the source of
-  truth.
-- **Don't break the front-end contract.** The response shapes you return should map cleanly
-  onto the prototype's data structures (see `DATA_MODEL.md`). When in doubt, match the
-  object shapes the prototype already stores in `localStorage` (read `store.js`).
-- **Migrations over rewrites.** Add tables; don't restructure broadly. `server/db/` already
-  has the `media_jobs` table — follow that style for the rest.
+1. `docs/DESKTOP_LOCAL_FIRST.md`
+2. `docs/LOCAL_DEV.md`
+3. `docs/BUILD_BRIEF.md`
+4. `docs/API_SPEC.md`
+5. `docs/DATA_MODEL.md`
 
-## Build order (suggested)
+## Ground Rules
 
-1. Auth seam + db client + base Zod/error utilities (mostly present in `server/lib/`).
-2. Data model + migrations for campaigns, pieces, references, settings, media (DATA_MODEL.md).
-3. CRUD APIs for campaigns / pieces / references / settings.
-4. Anthropic wrapper (server-side `complete()`), then the AI features in this order:
-   gates → revision → platform generators → weave. Port prompts from the reference files.
-5. Media: finish the Hedra/ElevenLabs routes in `server/` (already scaffolded) + polling.
-6. Google Drive export (server-side OAuth).
-7. Tests for each integration client and the generation routes (extend `server/__tests__`).
+- **Local-first is the product default.** Desktop builds should not require
+  Supabase, Postgres, Docker, Vercel, or cloud model keys for normal operation.
+  Hosted compatibility can remain, but it must not leak into the normal desktop
+  path.
+- **Keep the editorial behavior stable.** The gate prompts, platform generation
+  order, weave map-reduce, revision rules, delimiters, JSON schemas, and parser
+  repair behavior are product behavior. Preserve them unless the product owner
+  explicitly asks to change editorial output.
+- **Secrets stay server-side or native-side.** LLM keys, Hedra/ElevenLabs keys,
+  OAuth secrets, and provider tokens must not be exposed through browser globals,
+  client bundles, logs, route responses, or backup exports.
+- **Model access goes through `lib/llm`.** Do not add direct provider calls in
+  feature code. Use the provider-neutral interface so Ollama, Docker Model
+  Runner, OpenAI-compatible endpoints, OpenAI/ChatGPT, Anthropic, Gemini, and
+  xAI/Grok keep working behind the same prompt layer.
+- **SQLite/local storage must stay first-class.** API routes that touch data or
+  generated files need a local-first branch when `KINGS_PRESS_LOCAL_FIRST=true`,
+  `DATA_BACKEND=sqlite`, or a local database path is configured.
+- **Use migrations and schema updates intentionally.** Drizzle/Postgres files
+  remain for hosted compatibility. The desktop schema is
+  `db/local-sqlite-schema.sql`; keep it aligned with local API behavior.
+- **Do not deploy or push unless asked.** Work on feature branches and keep
+  release artifacts local unless the user explicitly requests publication.
 
-## Definition of done
+## Desktop Build Order
 
-- App builds and deploys on Vercel.
-- No secret is reachable client-side (grep the client bundle for the keys).
-- Every prototype feature has a real API: gate review, proposed revision, platform outputs,
-  weave, campaigns/references, media generation, Drive export.
-- Authorization is enforced and tested; one user cannot read another's pieces or media.
-- The front-end works against the new API with `localStorage` + `window.claude.complete`
-  removed.
+1. Preserve the packaged Next standalone server and bundled Node runtime path.
+2. Keep Tauri launcher resource lookup compatible with packaged app resource
+   layouts.
+3. Keep first-run setup usable for non-technical users:
+   - install or open Ollama setup,
+   - start an existing Ollama install,
+   - list and pull Ollama models,
+   - list Docker Model Runner models,
+   - save optional cloud API-key settings.
+4. Keep local backups consistent and secret-redacted.
+5. Keep Gather scheduling durable in SQLite and run due jobs from the desktop
+   background scheduler.
+6. Run the desktop verifier after packaging changes.
+
+## Definition Of Done For The Desktop Product
+
+- The app is branded **King's Press Editorial Desk** in UI, bundle metadata,
+  installer artifacts, menus, docs, and normal-user onboarding.
+- `npm run desktop:build` produces a Tauri `.app` and DMG.
+- The app launches from the packaged `.app`, starts its local server, initializes
+  SQLite, starts with no default campaigns, and serves the UI without a developer
+  server.
+- First-run model setup supports local-first Ollama, existing Ollama installs,
+  Docker Model Runner, optional hosted API keys, multiple provider profiles, and
+  per-task LLM defaults.
+- `npm run desktop:verify-release` passes for local QA builds.
+- Developer ID signing/notarization is supported by `npm run desktop:build:signed`;
+  signed artifacts must pass `npm run desktop:verify-signed-release`.
+- `npm run typecheck`, `npm test`, and native Rust tests pass.

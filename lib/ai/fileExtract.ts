@@ -1,10 +1,10 @@
-import { completeBlocks } from "@/lib/anthropic";
+import { getFileAI, type MultimodalContentBlock } from "@/lib/llm";
 
 /**
  * Turn an uploaded file into research text.
  * - text-like → decode as UTF-8
- * - PDF → Claude reads the document natively (text + layout)
- * - image → Claude vision transcribes text + describes visual content
+ * - PDF → configured multimodal file provider reads the document
+ * - image → configured vision provider transcribes text + describes visual content
  * - .docx → mammoth extracts the raw text
  * Pure-ish (no DB); the route does auth + I/O.
  */
@@ -36,21 +36,23 @@ export async function extractFileText(input: ExtractInput): Promise<string> {
     return input.bytes.toString("utf8");
   }
 
-  // PDF — Claude reads it natively.
+  // PDF — use the configured multimodal file provider/fallback.
   if (mime === "application/pdf" || ext === "pdf") {
-    return completeBlocks([
+    const content: MultimodalContentBlock[] = [
       { type: "document", source: { type: "base64", media_type: "application/pdf", data: input.bytes.toString("base64") } },
       { type: "text", text: PDF_PROMPT },
-    ]);
+    ];
+    return getFileAI("pdf").completeBlocks!(content);
   }
 
-  // Images — Claude vision transcribes + describes.
+  // Images — use the configured vision provider/fallback.
   const imgMime = mime.startsWith("image/") ? mime : IMAGE_MIME[ext];
   if (imgMime) {
-    return completeBlocks([
+    const content: MultimodalContentBlock[] = [
       { type: "image", source: { type: "base64", media_type: imgMime, data: input.bytes.toString("base64") } },
       { type: "text", text: IMG_PROMPT },
-    ]);
+    ];
+    return getFileAI("vision").completeBlocks!(content);
   }
 
   // Word .docx — extract raw text with mammoth.

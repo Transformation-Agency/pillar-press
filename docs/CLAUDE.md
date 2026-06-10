@@ -1,53 +1,51 @@
-# CLAUDE.md — working instructions for this backend
+# CLAUDE.md - Contributor Notes
 
-You are building the backend for **Pillar Press**. A complete front-end prototype exists
-in `prototype-reference/`. Build the server it needs. Read `BUILD_BRIEF.md`,
-`DATA_MODEL.md`, and `API_SPEC.md` before writing code.
+King's Press Editorial Desk is a local-first desktop app, not just a hosted
+backend. Treat the Tauri desktop runtime, local SQLite database, local storage,
+and provider-neutral model layer as the primary product surface.
 
-## Ground rules
+## Rules Of The Road
 
-- **Port business logic verbatim.** The gate prompts, the platform generation order, the
-  weave map-reduce, and the revision rules already exist in `prototype-reference/*.js`.
-  Do **not** redesign them — translate them to server code, keeping prompts, ordering,
-  and validation identical. Where the prototype's behavior and this doc disagree, the
-  prototype is the source of truth for *what the feature does*; this doc is the source of
-  truth for *how the server should be structured*.
-- **Secrets are server-only.** `ANTHROPIC_API_KEY`, `HEDRA_API_KEY`, `ELEVENLABS_API_KEY`,
-  and Google OAuth secrets live in server runtime. Never expose them to the client, logs,
-  responses, or `NEXT_PUBLIC_*`. The browser only calls your own `/api/*` routes.
-- **Stack:** Next.js App Router on Vercel, Postgres + Drizzle, Zod for every request body.
-  Match the patterns already in `server/`.
-- **Auth + authorization on every route.** Use the `requireUser()` seam in
-  `server/lib/auth.ts` (wire it to your real auth provider). Every read/write is scoped by
-  `userId`/`workspaceId`; one user must never touch another's data.
-- **Keep AI calls resilient.** The model has a limited output budget, so the prototype
-  chunks long work. Preserve that: the revision and weave run in bounded passes; tolerate
-  malformed/truncated JSON (see `ai.js` `repairJSON`). Use streaming or background jobs for
-  long multi-call operations where it improves UX, but the persisted row is the source of
-  truth.
-- **Don't break the front-end contract.** The response shapes you return should map cleanly
-  onto the prototype's data structures (see `DATA_MODEL.md`). When in doubt, match the
-  object shapes the prototype already stores in `localStorage` (read `store.js`).
-- **Migrations over rewrites.** Add tables; don't restructure broadly. `server/db/` already
-  has the `media_jobs` table — follow that style for the rest.
+- Preserve the existing editorial prompts and output contracts for gates,
+  revision, platform outputs, Weave, Gather summaries, image prompts, voice
+  scripts, and JSON repair.
+- Keep secrets out of browser code. Cloud API keys saved by the desktop setup
+  live in the native app data settings file and are passed to the packaged Next
+  server through `KINGS_PRESS_LLM_SETTINGS_PATH`.
+- Use `lib/llm` for model calls. Feature modules should not know whether the
+  active provider is Ollama, Docker Model Runner, OpenAI-compatible, OpenAI,
+  Anthropic, Gemini, or xAI/Grok.
+- Prefer local-first branches for auth, data, and storage. Supabase/Postgres
+  compatibility can remain for hosted testing, but the desktop path must run
+  without them.
+- Keep Tauri commands small and native-specific. Business logic should remain in
+  shared TypeScript when it belongs to the web/API runtime.
+- Do not run Drizzle push/generate against the desktop SQLite schema. The local
+  schema lives in `db/local-sqlite-schema.sql`.
 
-## Build order (suggested)
+## Verification
 
-1. Auth seam + db client + base Zod/error utilities (mostly present in `server/lib/`).
-2. Data model + migrations for campaigns, pieces, references, settings, media (DATA_MODEL.md).
-3. CRUD APIs for campaigns / pieces / references / settings.
-4. Anthropic wrapper (server-side `complete()`), then the AI features in this order:
-   gates → revision → platform generators → weave. Port prompts from the reference files.
-5. Media: finish the Hedra/ElevenLabs routes in `server/` (already scaffolded) + polling.
-6. Google Drive export (server-side OAuth).
-7. Tests for each integration client and the generation routes (extend `server/__tests__`).
+Use the narrowest check that proves the change, then run broader checks for
+desktop packaging changes:
 
-## Definition of done
+```bash
+npm run typecheck
+npm test
+cargo test --manifest-path src-tauri/Cargo.toml
+npm run desktop:build
+npm run desktop:verify-release
+```
 
-- App builds and deploys on Vercel.
-- No secret is reachable client-side (grep the client bundle for the keys).
-- Every prototype feature has a real API: gate review, proposed revision, platform outputs,
-  weave, campaigns/references, media generation, Drive export.
-- Authorization is enforced and tested; one user cannot read another's pieces or media.
-- The front-end works against the new API with `localStorage` + `window.claude.complete`
-  removed.
+Developer ID signing and Apple notarization are supported by
+`npm run desktop:build:signed` and verified with
+`npm run desktop:verify-signed-release`.
+When that work resumes, use:
+
+```bash
+npm run desktop:build:signed
+npm run desktop:verify-signed-release
+```
+
+The signed release path requires Developer ID signing and notarization
+credentials. Until that work resumes, a passing local QA build proves the
+installable local artifact, not public Gatekeeper distribution readiness.

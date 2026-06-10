@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { extractJSON, repairJSON } from "@/lib/anthropic";
+import { extractJSON, repairJSON } from "@/lib/llm";
 
 describe("extractJSON", () => {
   it("parses clean JSON object", () => {

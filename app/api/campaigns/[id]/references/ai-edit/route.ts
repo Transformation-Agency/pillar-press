@@ -5,7 +5,10 @@ import { assertAuthor } from "@/lib/auth";
 import { db, campaigns, references } from "@/lib/db";
 import { craftReferencesEdit } from "@/lib/ai/refsEdit";
 import { type ReferencesDoc } from "@/lib/refContext";
+import { getAIForTask } from "@/lib/llm";
 import { toErrorResponse } from "@/lib/errors";
+import { getLocalCampaign, getLocalReferences } from "@/lib/local/database";
+import { isLocalFirstMode } from "@/lib/local/mode";
 
 const bodySchema = z.object({ instruction: z.string().trim().min(3).max(2000) });
 
@@ -26,20 +29,24 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const { id } = await params;
 
     if (!user.workspaceId) return notFound();
-    const campaign = await db.query.campaigns.findFirst({
-      where: and(eq(campaigns.id, id), eq(campaigns.workspaceId, user.workspaceId)),
-    });
+    const campaign = isLocalFirstMode()
+      ? getLocalCampaign(id, user.workspaceId)
+      : await db.query.campaigns.findFirst({
+          where: and(eq(campaigns.id, id), eq(campaigns.workspaceId, user.workspaceId)),
+        });
     if (!campaign) return notFound();
 
     const body = bodySchema.parse(await req.json());
 
-    const ref = await db.query.references.findFirst({ where: eq(references.campaignId, campaign.id) });
+    const ref = isLocalFirstMode()
+      ? getLocalReferences(campaign.id, user.workspaceId)
+      : await db.query.references.findFirst({ where: eq(references.campaignId, campaign.id) });
     if (!ref) return notFound();
 
     const result = await craftReferencesEdit({
       doc: (ref.doc as ReferencesDoc) ?? {},
       instruction: body.instruction,
-    });
+    }, getAIForTask("utility"));
 
     if (!result.ok) {
       return NextResponse.json(
