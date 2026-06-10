@@ -683,11 +683,6 @@ function IntroConsentSetup({ answered, onAccept, onSkip, value, onChange, onSubm
   if (answered) return null;
   return (
     <div className="kp-inline-intro-consent">
-      <div className="kp-inline-intro-copy">
-        <p className="kp-inline-step-label">Start here</p>
-        <h3>Would you like a guided intro, or a voice-guided intro?</h3>
-        <p>If yes, I will offer voice setup first, then help connect models and integrations. If not, you can skip setup and go straight to the desk.</p>
-      </div>
       <label className="kp-inline-intro-answer">
         <span className="sr-only">Answer the guided intro question</span>
         <textarea
@@ -2474,12 +2469,6 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
 
         {step === 0 && (
           <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError} conversationState={conversationState} centered hostless>
-            <h1 style={{ margin: 0, fontFamily: "var(--font-serif)", fontSize: "clamp(50px, 6vw, 76px)", fontWeight: 500, lineHeight: 1.04 }}>
-              I'm King's Press.
-            </h1>
-            <p style={{ margin: "22px auto 42px", maxWidth: 680, color: "#766A63", fontSize: 21, lineHeight: 1.5, textAlign: "center" }}>
-              I help you articulate your thoughts and turn them into clear, publishable work. I can guide you through voice, models, integrations, and your first focus, or you can skip setup and go straight to the desk.
-            </p>
             <section style={{
               border: "1px solid #D8CEC3", borderRadius: 10, background: "rgba(255, 252, 246, 0.68)",
               overflow: "hidden",
