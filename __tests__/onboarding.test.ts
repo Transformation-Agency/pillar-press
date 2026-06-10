@@ -315,10 +315,16 @@ describe("browser onboarding runtime contract", () => {
     expect(runtime.canComplete(failed)).toBe(false);
     expect(runtime.canComplete({
       firstValue: {
-        focusReadyOrSkipped: true,
-        preferencesSavedOrSkipped: true,
+        focusReady: true,
+        preferencesSaved: true,
       },
     })).toBe(true);
+    expect(runtime.canComplete({
+      firstValue: {
+        focusReady: true,
+        preferencesSkipped: true,
+      },
+    })).toBe(false);
   });
 
   it("documents separate onboarding and compute readiness flags", () => {
@@ -362,8 +368,8 @@ describe("browser onboarding runtime contract", () => {
       version: 1,
       completedAt: "2026-06-10T00:00:00.000Z",
       complete: true,
-      focusReadyOrSkipped: true,
-      preferencesSavedOrSkipped: true,
+      focusReady: true,
+      preferencesSaved: true,
       campaignId: "camp_1",
       campaignName: "Launch plan",
       providerReady: true,
@@ -372,17 +378,19 @@ describe("browser onboarding runtime contract", () => {
     });
   });
 
-  it("does not mark first value complete without focus and preferences signals", () => {
+  it("does not mark first value complete without focus and saved preferences signals", () => {
     const runtime = loadBrowserRuntime();
     const event = runtime.buildFirstValueEvent({
-      preferencesSaved: true,
+      campaignId: "camp_1",
+      preferencesSkipped: true,
       routeTarget: "desk",
     });
 
     expect(event).toMatchObject({
       complete: false,
       completedAt: null,
-      focusReadyOrSkipped: false,
+      focusReady: true,
+      preferencesSaved: false,
       preferencesSavedOrSkipped: true,
     });
   });
@@ -777,6 +785,7 @@ describe("browser onboarding action registry", () => {
     };
 
     const result = await window.KP_ONBOARDING_ACTIONS.completeOnboarding({
+      sessionId: "session-activation",
       firstValueComplete: true,
       firstValue: {
         campaignId: "camp_1",
@@ -795,6 +804,7 @@ describe("browser onboarding action registry", () => {
       data: {
         onboardingComplete: true,
         firstValueComplete: true,
+        sessionId: "session-activation",
       },
     });
     expect(prefs.setupHelperCompleteV1).toBe(true);

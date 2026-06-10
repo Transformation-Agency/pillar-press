@@ -920,6 +920,7 @@ function App() {
   const [desktopNotice, setDesktopNotice] = React.useState(null);
   const [backupBusy, setBackupBusy] = React.useState(false);
   const [setupOpen, setSetupOpen] = React.useState(false);
+  const [lastSetupResult, setLastSetupResult] = React.useState(null);
   const [sentimentOpen, setSentimentOpen] = React.useState(false);
   const [sentimentBusy, setSentimentBusy] = React.useState(false);
   const [campaignCreateOpen, setCampaignCreateOpen] = React.useState(false);
@@ -960,6 +961,7 @@ function App() {
   const completeSetup = (payload) => {
     const result = payload || {};
     window.Store.setPref(setupCompletePref, true);
+    setLastSetupResult(result);
     if (result.campaignId && window.Store.getCampaign && window.Store.getCampaign(result.campaignId)) {
       window.Store.setActiveCampaign(result.campaignId);
     }
@@ -972,8 +974,9 @@ function App() {
     try {
       if (window.KP_ONBOARDING_ACTIONS && window.KP_ONBOARDING_ACTIONS.submitSentiment) {
         await window.KP_ONBOARDING_ACTIONS.submitSentiment(rating, {
-          sessionId: "post-setup",
-          firstValueComplete: true,
+          sessionId: (lastSetupResult && lastSetupResult.sessionId) || "post-setup",
+          firstValueComplete: !!(lastSetupResult && lastSetupResult.firstValue && lastSetupResult.firstValue.complete),
+          campaignId: lastSetupResult && lastSetupResult.campaignId,
         });
       } else {
         window.Store.setPref(sentimentPref, {

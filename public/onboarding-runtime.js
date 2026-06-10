@@ -142,8 +142,8 @@
   const firstValueEvent = {
     id: "first_usable_setup",
     version: 1,
-    description: "A first focus exists and essential voice/context defaults were saved or explicitly skipped.",
-    requiredSignals: ["focus_ready_or_skipped", "preferences_saved_or_skipped"],
+    description: "A first focus exists and essential context defaults were saved.",
+    requiredSignals: ["focus_ready", "preferences_saved"],
     persistedAs: flags.firstValuePref,
   };
 
@@ -312,8 +312,8 @@
         externalServices: false,
       },
       firstValue: {
-        focusReadyOrSkipped: false,
-        preferencesSavedOrSkipped: false,
+        focusReady: false,
+        preferencesSaved: false,
         completedAt: null,
       },
       error: null,
@@ -351,7 +351,7 @@
   function canComplete(state) {
     const current = state || createInitialState();
     const fv = current.firstValue || {};
-    return !!(fv.focusReadyOrSkipped && fv.preferencesSavedOrSkipped);
+    return !!((fv.focusReady || fv.campaignId) && fv.preferencesSaved);
   }
 
   function nextStepId(currentStepId) {
@@ -394,18 +394,19 @@
 
   function buildFirstValueEvent(input) {
     const current = input || {};
-    const focusReadyOrSkipped = !!(current.focusReadyOrSkipped || current.campaignId || current.focusSkipped);
-    const preferencesSavedOrSkipped = !!(current.preferencesSaved || current.preferencesSkipped);
-    const complete = focusReadyOrSkipped && preferencesSavedOrSkipped;
+    const focusReady = !!(current.focusReady || current.campaignId);
+    const preferencesSaved = !!current.preferencesSaved;
+    const complete = focusReady && preferencesSaved;
     return {
       id: firstValueEvent.id,
       version: firstValueEvent.version,
       completedAt: complete ? (current.completedAt || new Date().toISOString()) : null,
       complete,
-      focusReadyOrSkipped,
-      preferencesSavedOrSkipped,
+      focusReady,
+      preferencesSaved,
+      focusReadyOrSkipped: focusReady || !!current.focusSkipped,
+      preferencesSavedOrSkipped: preferencesSaved || !!current.preferencesSkipped,
       focusSkipped: !!current.focusSkipped,
-      preferencesSaved: !!current.preferencesSaved,
       preferencesSkipped: !!current.preferencesSkipped,
       campaignId: current.campaignId || null,
       campaignName: current.campaignName || "",

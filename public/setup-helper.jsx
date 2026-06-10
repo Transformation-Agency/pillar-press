@@ -1576,7 +1576,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
       }
       const setupDurationMs = Date.now() - setupStartedAtRef.current;
       const firstValue = {
-        focusReadyOrSkipped: true,
+        focusReady: !!focusId,
         preferencesSaved,
         preferencesSkipped: skipPreferences,
         campaignId: focusId,
@@ -1591,10 +1591,11 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
         campaignId: focusId,
         campaignName: firstValue.campaignName,
         firstValue,
+        sessionId: metricsSessionIdRef.current,
       };
       if (ONBOARDING_ACTION_REGISTRY && ONBOARDING_ACTION_REGISTRY.completeOnboarding) {
         const result = await ONBOARDING_ACTION_REGISTRY.completeOnboarding({
-          firstValueComplete: true,
+          firstValueComplete: !!(focusId && preferencesSaved),
           firstValue,
           sessionId: metricsSessionIdRef.current,
         });

@@ -316,6 +316,7 @@
         onboardingComplete: true,
         firstValueComplete: !!(firstValueEvent && firstValueEvent.complete),
         firstValueEvent,
+        sessionId: options && options.sessionId,
       });
     } catch (error) {
       return failed(intent, error, "Could not finish setup.");
