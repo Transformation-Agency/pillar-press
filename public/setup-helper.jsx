@@ -1,117 +1,242 @@
 /* First-run setup helper. Keeps secrets in the native provider dialog and
-   writes campaign preferences through the existing Store/references routes. */
+   writes preferences through the existing Store/references routes. */
 
-function SetupStep({ n, title, active, done }) {
+const ONBOARDING_COPY = window.KP_ONBOARDING_COPY || {
+  getPressIntroScript: () => "I'm King's Press.\n\nTo start, tell me where you communicate most.",
+};
+
+function OnboardingBrand() {
   return (
-    <div style={{
-      display: "flex", alignItems: "center", gap: 9, padding: "8px 10px",
-      borderRadius: 999, border: "1px solid " + (active ? "var(--accent)" : "var(--hair)"),
-      background: active ? "var(--accent-soft)" : "transparent",
-      color: active ? "var(--accent-ink)" : "var(--ink-3)",
-      whiteSpace: "nowrap",
-    }}>
-      <span className="mono" style={{
-        width: 20, height: 20, borderRadius: 999, display: "grid", placeItems: "center",
-        background: done ? "var(--accent)" : "var(--paper-2)",
-        color: done ? "white" : "inherit", fontSize: 11,
-      }}>{done ? <Icon name="check" size={12} /> : n}</span>
-      <span className="mono" style={{ fontSize: 11, letterSpacing: "0.04em", textTransform: "uppercase" }}>{title}</span>
+    <div style={{ display: "flex", alignItems: "center", gap: 12, color: "#2A211E" }}>
+      <span aria-hidden="true" style={{
+        width: 28, height: 28, borderRadius: 9, display: "grid", placeItems: "center",
+        background: "rgba(167, 71, 50, 0.10)", color: "#A74732", fontFamily: "var(--font-serif)",
+        fontSize: 17, fontWeight: 700,
+      }}>K</span>
+      <strong style={{ fontFamily: "var(--font-serif)", fontSize: 27, fontWeight: 500, lineHeight: 1 }}>
+        King's Press
+      </strong>
     </div>
   );
 }
 
-function SetupField({ label, children, hint }) {
+function OnboardingStepper({ step }) {
+  const steps = ["Connect", "Welcome", "First focus", "Preferences"];
   return (
-    <label style={{ display: "grid", gap: 6 }}>
-      <span className="eyebrow">{label}</span>
+    <nav aria-label="Setup progress" style={{
+      display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", alignItems: "center",
+      gap: 14, marginTop: 72, color: "#766A63",
+    }}>
+      {steps.map((label, i) => {
+        const active = step === i;
+        const done = i < step;
+        return (
+          <div key={label} aria-current={active ? "step" : undefined} style={{
+            display: "grid", gridTemplateColumns: "auto auto minmax(24px, 1fr)", alignItems: "center",
+            gap: 14, minWidth: 0,
+          }}>
+            <span style={{
+              width: 39, height: 39, borderRadius: 999, display: "grid", placeItems: "center",
+              border: "1px solid " + (active ? "#A74732" : "#D8CEC3"),
+              color: active ? "#A74732" : (done ? "#766A63" : "#766A63"),
+              background: active ? "rgba(167, 71, 50, 0.045)" : "transparent",
+              fontFamily: "var(--font-serif)", fontSize: 17,
+            }}>{i + 1}</span>
+            <span style={{
+              color: active ? "#A74732" : "#766A63",
+              fontFamily: "var(--font-serif)", fontSize: 18, whiteSpace: "nowrap",
+              overflow: "hidden", textOverflow: "ellipsis",
+            }}>{label}</span>
+            {i < steps.length - 1 && <span aria-hidden="true" style={{
+              height: 1, minWidth: 24, background: "#D8CEC3", opacity: 0.9,
+            }} />}
+          </div>
+        );
+      })}
+    </nav>
+  );
+}
+
+function SetupStatusChip({ label }) {
+  return (
+    <span style={{
+      minHeight: 34, display: "inline-flex", alignItems: "center", gap: 9,
+      border: "1px solid #D8CEC3", borderRadius: 10, padding: "5px 12px",
+      color: "#766A63", background: "rgba(255, 252, 246, 0.75)",
+      fontSize: 14.5, whiteSpace: "nowrap",
+    }}>
+      <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: 999, background: "#766A63" }} />
+      {label}
+    </span>
+  );
+}
+
+function SetupPanelRow({ icon, title, description, status, action, onClick, disabled }) {
+  return (
+    <div style={{
+      display: "grid", gridTemplateColumns: "88px minmax(0, 1fr) auto auto", alignItems: "center",
+      gap: 24, padding: "42px 46px", borderTop: "1px solid #D8CEC3",
+    }}>
+      <span aria-hidden="true" style={{
+        width: 72, height: 72, borderRadius: 999, display: "grid", placeItems: "center",
+        background: "rgba(216, 206, 195, 0.34)", color: "#2A211E",
+      }}>
+        <Icon name={icon} size={31} />
+      </span>
+      <div style={{ minWidth: 0 }}>
+        <h3 style={{ margin: 0, fontFamily: "var(--font-serif)", fontSize: 26, fontWeight: 500, color: "#2A211E" }}>
+          {title}
+        </h3>
+        <p style={{ margin: "11px 0 0", maxWidth: 430, color: "#766A63", fontSize: 18, lineHeight: 1.5 }}>
+          {description}
+        </p>
+      </div>
+      <SetupStatusChip label={status} />
+      <button className="kp-setup-outline" onClick={onClick} disabled={disabled}>{action}</button>
+    </div>
+  );
+}
+
+function SetupActions({ secondary, onSecondary, primary, onPrimary, disabled, busy }) {
+  return (
+    <div style={{
+      display: "flex", justifyContent: "space-between", alignItems: "center", gap: 20,
+      marginTop: 42,
+    }}>
+      <button className="kp-setup-link" onClick={onSecondary}>{secondary}</button>
+      <button className="kp-setup-primary" onClick={onPrimary} disabled={disabled || busy}>
+        {busy ? <Spinner size={16} /> : null}
+        {primary}
+        {!busy && <Icon name="arrowR" size={22} />}
+      </button>
+    </div>
+  );
+}
+
+function SetupReassurance({ compact }) {
+  return (
+    <div style={{ marginTop: compact ? 28 : 54, textAlign: "center", color: "#766A63", fontSize: 16 }}>
+      <p style={{ margin: 0, display: "inline-flex", alignItems: "center", gap: 10 }}>
+        <Icon name="key" size={15} /> You're in control. Nothing connects without your approval.
+      </p>
+      <p style={{ margin: "74px 0 0", opacity: 0.82 }}>King's Press · Your desk for ideas that matter.</p>
+    </div>
+  );
+}
+
+function SetupField({ label, helper, children }) {
+  return (
+    <label style={{ display: "grid", gap: 8, color: "#2A211E", minWidth: 0 }}>
+      <span style={{ fontFamily: "var(--font-serif)", fontSize: 21 }}>{label}</span>
+      {helper && <span style={{ color: "#766A63", fontSize: 16, lineHeight: 1.4 }}>{helper}</span>}
       {children}
-      {hint && <span className="muted" style={{ fontSize: 12.5, lineHeight: 1.45 }}>{hint}</span>}
     </label>
   );
 }
 
 function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialStep }) {
-  const [step, setStep] = React.useState(initialStep || 0);
+  const [step, setStep] = React.useState(Math.min(initialStep || 0, 3));
   const [providerStatus, setProviderStatus] = React.useState(null);
-  const [statusError, setStatusError] = React.useState("");
   const [busy, setBusy] = React.useState(false);
-  const [campaignName, setCampaignName] = React.useState("My first campaign");
+  const [campaignName, setCampaignName] = React.useState("");
   const [prefDraft, setPrefDraft] = React.useState(null);
+  const [draftStyle, setDraftStyle] = React.useState("Polished");
+  const [advancedOpen, setAdvancedOpen] = React.useState(false);
+  const [audioState, setAudioState] = React.useState("audio_not_connected");
+  const [audioError, setAudioError] = React.useState("");
+  const [introVisible, setIntroVisible] = React.useState(false);
+  const [integrationsTouched, setIntegrationsTouched] = React.useState(false);
   const state = window.Store.getState();
   const campaigns = state.campaigns || [];
   const activeCampaign = window.Store.activeCampaign && window.Store.activeCampaign();
-  const hasCampaign = !!activeCampaign;
   const hasDesktopBridge = !!(window.KINGS_DESKTOP && window.KINGS_DESKTOP.isDesktop && window.KINGS_DESKTOP.isDesktop());
-
-  const loadStatus = async () => {
-    setStatusError("");
-    try {
-      const r = await fetch("/api/llm/status", { headers: { Accept: "application/json" } });
-      const data = await r.json().catch(() => null);
-      if (!r.ok) throw new Error((data && data.error) || "Provider status is not ready yet.");
-      setProviderStatus(data);
-    } catch (e) {
-      setStatusError((e && e.message) || "Could not read provider status.");
-      setProviderStatus(null);
-    }
-  };
+  const introScript = ONBOARDING_COPY.getPressIntroScript("kings_press");
+  const quickPicks = Array.from(new Set([
+    activeCampaign && activeCampaign.name,
+    campaigns[0] && campaigns[0].name,
+    "Launch plan",
+    "Book draft",
+    "New focus",
+  ].filter(Boolean))).slice(0, 4);
 
   React.useEffect(() => {
     if (!open) return;
-    loadStatus();
+    fetch("/api/llm/status", { headers: { Accept: "application/json" } })
+      .then((r) => r.json().then((data) => ({ ok: r.ok, data })).catch(() => ({ ok: false, data: null })))
+      .then(({ ok, data }) => setProviderStatus(ok ? data : null))
+      .catch(() => setProviderStatus(null));
   }, [open]);
 
   React.useEffect(() => {
     if (!open) return;
     const refs = window.Store.activeReferences ? window.Store.activeReferences() : {};
+    const throughline = refs.strategy && refs.strategy.throughlines && refs.strategy.throughlines[0];
+    const audience = refs.audiences && refs.audiences.list && refs.audiences.list[0];
+    setCampaignName(activeCampaign && activeCampaign.name ? activeCampaign.name : "");
     setPrefDraft({
       selfVision: (refs.selfVision && refs.selfVision.body) || "",
       strategy: (refs.strategy && refs.strategy.body) || "",
-      throughlineTag: refs.strategy && refs.strategy.throughlines && refs.strategy.throughlines[0] ? refs.strategy.throughlines[0].tag || "" : "core",
-      throughlineName: refs.strategy && refs.strategy.throughlines && refs.strategy.throughlines[0] ? refs.strategy.throughlines[0].name || "" : "",
-      throughlineNote: refs.strategy && refs.strategy.throughlines && refs.strategy.throughlines[0] ? refs.strategy.throughlines[0].note || "" : "",
-      audienceId: refs.audiences && refs.audiences.list && refs.audiences.list[0] ? refs.audiences.list[0].id || "" : "general",
-      audienceName: refs.audiences && refs.audiences.list && refs.audiences.list[0] ? refs.audiences.list[0].name || "" : "",
-      audienceNote: refs.audiences && refs.audiences.list && refs.audiences.list[0] ? refs.audiences.list[0].note || "" : "",
+      throughlineTag: throughline ? throughline.tag || "" : "core",
+      throughlineName: throughline ? throughline.name || "" : "",
+      throughlineNote: throughline ? throughline.note || "" : "",
+      audienceId: audience ? audience.id || "" : "general",
+      audienceName: audience ? audience.name || "" : "",
+      audienceNote: audience ? audience.note || "" : "",
+      registerBody: (refs.registers && refs.registers.body) || "",
+      voiceRules: refs.voiceRules && refs.voiceRules.rules ? refs.voiceRules.rules.join("\n") : "",
+      redLines: refs.redLines && refs.redLines.rules ? refs.redLines.rules.join("\n") : "",
       gateSpec: (refs.gateSpec && refs.gateSpec.body) || "",
     });
   }, [open, activeCampaign && activeCampaign.id]);
 
   if (!open) return null;
 
-  const providerName = providerStatus && providerStatus.provider ? providerStatus.provider : "not configured";
-  const modelName = providerStatus && providerStatus.model ? providerStatus.model : "";
-  const fileModelName = providerStatus && providerStatus.fileModel ? providerStatus.fileModel : "";
-  const capabilityText = (value) => {
-    if (!value) return "";
-    if (Array.isArray(value)) return value.join(", ");
-    if (typeof value === "object") {
-      return Object.entries(value)
-        .filter(([, enabled]) => enabled === true)
-        .map(([key]) => key)
-        .join(", ");
-    }
-    return String(value);
-  };
-  const capabilities = capabilityText(providerStatus && providerStatus.capabilities);
+  const providerConnected = !!(providerStatus && providerStatus.provider && providerStatus.model);
+  const voiceConnected = audioState === "audio_ready";
 
-  const createCampaign = async () => {
-    const name = campaignName.trim();
-    if (!name) return;
+  async function connectAudio() {
+    setAudioError("");
+    setAudioState("requesting_microphone");
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error("Microphone access is not available here.");
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((track) => track.stop());
+      if (hasDesktopBridge && window.KINGS_DESKTOP.startVoiceSession) {
+        await window.KINGS_DESKTOP.startVoiceSession();
+      }
+      setAudioState("audio_ready");
+    } catch (e) {
+      setAudioState("error");
+      setAudioError((e && e.message) || "Audio setup failed. You can continue by typing.");
+    }
+  }
+
+  async function introduce() {
+    setIntroVisible(true);
+    if (voiceConnected) {
+      await ONBOARDING_AUDIO.speakText(introScript, { interrupt: true });
+    }
+  }
+
+  async function ensureFocus() {
+    const clean = campaignName.trim();
+    if (activeCampaign && (!clean || clean === activeCampaign.name)) return activeCampaign.id;
+    const name = clean || "Untitled focus";
     setBusy(true);
     try {
       const tempId = window.Store.addCampaign(name);
       if (window.Store.whenCampaignSaved) await window.Store.whenCampaignSaved(tempId);
-      setStep(2);
-    } catch (e) {
-      console.warn("Campaign setup failed:", e);
+      return tempId;
+    } finally {
+      setBusy(false);
     }
-    setBusy(false);
-  };
+  }
 
   const savePreferences = () => {
-    if (!prefDraft || !activeCampaign) return;
-    const refs = window.Store.activeReferences ? window.Store.activeReferences() : {};
+    if (!prefDraft || !window.Store.activeReferences) return;
+    const refs = window.Store.activeReferences() || {};
     const throughline = {
       tag: (prefDraft.throughlineTag || "core").trim(),
       name: prefDraft.throughlineName.trim(),
@@ -124,6 +249,8 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     };
     const strategyList = (refs.strategy && refs.strategy.throughlines) || [];
     const audienceList = (refs.audiences && refs.audiences.list) || [];
+    const registerBody = prefDraft.registerBody.trim() ||
+      ("Default draft style: " + draftStyle.toLowerCase() + ".");
     const patch = {
       strategy: Object.assign({}, refs.strategy || {}, {
         body: prefDraft.strategy,
@@ -134,14 +261,22 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
       audiences: Object.assign({}, refs.audiences || {}, {
         list: audience.name || audience.note ? [audience].concat(audienceList.slice(1)) : audienceList,
       }),
+      registers: Object.assign({}, refs.registers || {}, { body: registerBody }),
+      voiceRules: Object.assign({}, refs.voiceRules || {}, {
+        rules: prefDraft.voiceRules.split("\n").map((x) => x.trim()).filter(Boolean),
+      }),
+      redLines: Object.assign({}, refs.redLines || {}, {
+        rules: prefDraft.redLines.split("\n").map((x) => x.trim()).filter(Boolean),
+      }),
       selfVision: Object.assign({}, refs.selfVision || {}, { body: prefDraft.selfVision }),
       gateSpec: Object.assign({}, refs.gateSpec || {}, { body: prefDraft.gateSpec }),
     };
     window.Store.updateReferences(patch);
   };
 
-  const finish = () => {
-    if (step === 2) savePreferences();
+  const finish = async () => {
+    if (!activeCampaign && campaignName.trim()) await ensureFocus();
+    savePreferences();
     if (onComplete) onComplete();
   };
 
@@ -150,134 +285,380 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     if (onClose) onClose();
   };
 
-  const steps = [
-    { title: "Model" },
-    { title: "Campaign" },
-    { title: "Preferences" },
-  ];
-
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 190, background: "oklch(0 0 0 / 0.30)", display: "grid", placeItems: "center", padding: 20 }}>
-      <div className="card" style={{ width: "min(880px, 100%)", maxHeight: "calc(100vh - 40px)", overflow: "auto", padding: 0, boxShadow: "var(--shadow-lg)" }}>
-        <div style={{ padding: "22px 26px 18px", borderBottom: "1px solid var(--hair)", display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start" }}>
-          <div>
-            <div className="eyebrow" style={{ marginBottom: 8 }}>Skippable setup</div>
-            <h2 style={{ fontSize: 30, margin: 0 }}>Make the desk yours</h2>
-            <p className="muted" style={{ margin: "8px 0 0", fontSize: 15.5, lineHeight: 1.55 }}>
-              Connect a model, start a campaign, and add the preferences every draft, review, Gather run, and Studio prompt should respect.
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 190, overflow: "auto",
+      background: "#F7F2EB", color: "#2A211E",
+      fontFamily: "var(--font-body)",
+    }}>
+      <style>{`
+        .kp-setup-input {
+          width: 100%;
+          min-height: 55px;
+          border: 1px solid #D8CEC3;
+          border-radius: 10px;
+          background: rgba(255, 252, 246, 0.82);
+          color: #2A211E;
+          font: 18px var(--font-body);
+          padding: 14px 18px;
+          outline: none;
+          box-shadow: none;
+        }
+        .kp-setup-input:focus, .kp-setup-primary:focus-visible, .kp-setup-outline:focus-visible, .kp-setup-link:focus-visible, .kp-segment:focus-visible, .kp-chip:focus-visible {
+          outline: 3px solid rgba(167, 71, 50, 0.22);
+          outline-offset: 2px;
+        }
+        .kp-setup-primary {
+          min-height: 61px;
+          min-width: 238px;
+          border: 0;
+          border-radius: 10px;
+          background: #A74732;
+          color: white;
+          font: 21px var(--font-serif);
+          padding: 0 30px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 16px;
+          cursor: pointer;
+          box-shadow: 0 15px 32px rgba(167, 71, 50, 0.16);
+        }
+        .kp-setup-primary:hover { background: #913B2A; }
+        .kp-setup-primary:disabled { opacity: 0.52; cursor: not-allowed; }
+        .kp-setup-outline {
+          min-height: 47px;
+          border: 1px solid #A74732;
+          border-radius: 8px;
+          background: transparent;
+          color: #A74732;
+          font: 17px var(--font-serif);
+          padding: 0 21px;
+          cursor: pointer;
+        }
+        .kp-setup-outline:hover { background: rgba(167, 71, 50, 0.06); }
+        .kp-setup-link {
+          min-height: 44px;
+          border: 0;
+          background: transparent;
+          color: #766A63;
+          padding: 0;
+          font: 18px var(--font-serif);
+          text-decoration: underline;
+          text-underline-offset: 5px;
+          cursor: pointer;
+        }
+        .kp-chip {
+          min-height: 60px;
+          border: 1px solid #D8CEC3;
+          border-radius: 999px;
+          background: rgba(255, 252, 246, 0.72);
+          color: #766A63;
+          padding: 0 28px;
+          display: inline-flex;
+          align-items: center;
+          gap: 13px;
+          font: 18px var(--font-serif);
+          cursor: pointer;
+        }
+        .kp-chip[data-active="true"], .kp-segment[data-active="true"] {
+          border-color: #A74732;
+          color: #A74732;
+          background: rgba(167, 71, 50, 0.045);
+        }
+        .kp-segment {
+          min-height: 55px;
+          border: 1px solid #D8CEC3;
+          border-radius: 10px;
+          background: rgba(255, 252, 246, 0.72);
+          color: #766A63;
+          padding: 0 20px;
+          font: 17px var(--font-serif);
+          cursor: pointer;
+        }
+        @media (max-width: 780px) {
+          .kp-setup-row { grid-template-columns: 1fr !important; }
+        }
+      `}</style>
+      <div style={{ width: "min(1120px, calc(100% - 72px))", margin: "0 auto", padding: "44px 0 34px" }}>
+        <OnboardingBrand />
+        <OnboardingStepper step={step} />
+
+        {step === 0 && (
+          <main style={{ marginTop: 86 }}>
+            <h1 style={{ margin: 0, fontFamily: "var(--font-serif)", fontSize: "clamp(50px, 6vw, 76px)", fontWeight: 500, lineHeight: 1.04 }}>
+              Let's set up your desk
+            </h1>
+            <p style={{ margin: "22px 0 42px", color: "#766A63", fontSize: 21, lineHeight: 1.5 }}>
+              Choose what to connect now. You can skip anything and change it later.
             </p>
-          </div>
-          <button className="icon-btn" onClick={onClose || skip} title="Close"><Icon name="xLogo" size={15} /></button>
-        </div>
+            <section style={{
+              border: "1px solid #D8CEC3", borderRadius: 10, background: "rgba(255, 252, 246, 0.68)",
+              overflow: "hidden",
+            }}>
+              <SetupPanelRow
+                icon="db"
+                title="AI & models"
+                description="Choose the models King's Press can use to think and create."
+                status={providerConnected ? "Connected" : "Not connected"}
+                action="Set up"
+                onClick={onOpenProviderSetup}
+                disabled={!hasDesktopBridge}
+              />
+              <SetupPanelRow
+                icon="mic"
+                title="Voice"
+                description="Connect a microphone for voice input and guided setup."
+                status={voiceConnected ? "Connected" : "Optional"}
+                action={audioState === "requesting_microphone" ? "Connecting" : "Connect"}
+                onClick={connectAudio}
+                disabled={audioState === "requesting_microphone"}
+              />
+              <SetupPanelRow
+                icon="globe"
+                title="Integrations"
+                description="Bring in sources, media, and tools. You can add more anytime."
+                status={integrationsTouched ? "Optional" : "Not connected"}
+                action="Explore"
+                onClick={() => setIntegrationsTouched(true)}
+              />
+            </section>
+            {audioState === "error" && (
+              <p role="alert" style={{ margin: "16px 0 0", color: "#A74732", fontSize: 15.5 }}>{audioError}</p>
+            )}
+            <SetupActions
+              secondary="Skip setup"
+              onSecondary={skip}
+              primary="Continue"
+              onPrimary={() => setStep(1)}
+            />
+            <SetupReassurance />
+          </main>
+        )}
 
-        <div style={{ padding: "14px 26px", borderBottom: "1px solid var(--hair)", display: "flex", gap: 8, overflowX: "auto" }}>
-          {steps.map((s, i) => <SetupStep key={s.title} n={i + 1} title={s.title} active={step === i} done={i < step || (i === 1 && hasCampaign)} />)}
-        </div>
-
-        <div style={{ padding: "24px 26px 26px" }}>
-          {step === 0 && (
-            <div style={{ display: "grid", gap: 16 }}>
-              <div className="card" style={{ padding: 16, background: "var(--paper-sunk)" }}>
-                <div className="eyebrow" style={{ marginBottom: 6 }}>Current provider</div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
-                  <div><div className="muted" style={{ fontSize: 12 }}>Text</div><strong>{providerName}{modelName ? " / " + modelName : ""}</strong></div>
-                  <div><div className="muted" style={{ fontSize: 12 }}>File fallback</div><strong>{fileModelName || "not configured"}</strong></div>
-                  <div><div className="muted" style={{ fontSize: 12 }}>Capabilities</div><strong>{capabilities || "unknown"}</strong></div>
-                </div>
-                {statusError && <div style={{ marginTop: 10, color: "var(--sev-must)", fontSize: 13.5 }}>{statusError}</div>}
-              </div>
-              <p className="muted" style={{ fontSize: 15, lineHeight: 1.6, margin: 0 }}>
-                King's Press is local-first. Use Ollama or Docker Model Runner for local work, then add optional cloud profiles like OpenAI, Anthropic, Gemini, xAI/Grok, or any OpenAI-compatible endpoint when a task needs them.
-              </p>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button className="btn primary" onClick={onOpenProviderSetup} disabled={!hasDesktopBridge}>
-                  <Icon name="key" size={14} /> Open provider setup
-                </button>
-                <button className="btn ghost" onClick={loadStatus}><Icon name="check" size={14} /> Refresh status</button>
-                {!hasDesktopBridge && <span className="muted" style={{ fontSize: 13.5, alignSelf: "center" }}>Provider setup is available in the installed desktop app.</span>}
-              </div>
-            </div>
-          )}
-
-          {step === 1 && (
-            <div style={{ display: "grid", gap: 16 }}>
-              {hasCampaign ? (
-                <div className="card" style={{ padding: 16, background: "var(--accent-soft)", color: "var(--accent-ink)" }}>
-                  <div className="eyebrow" style={{ color: "inherit", marginBottom: 4 }}>Active campaign</div>
-                  <strong>{activeCampaign.name}</strong>
-                  <p style={{ margin: "8px 0 0", fontSize: 14.5 }}>This is where pieces, Gather sources, media, and preferences will live.</p>
-                </div>
+        {step === 1 && (
+          <main style={{
+            minHeight: "calc(100vh - 290px)", display: "grid", placeItems: "center",
+            padding: "72px 0 42px", textAlign: "center",
+          }}>
+            <div style={{ width: "min(660px, 100%)" }}>
+              <div style={{
+                color: "#766A63", fontSize: 13, letterSpacing: "0.34em", textTransform: "uppercase",
+                marginBottom: 25,
+              }}>Welcome</div>
+              <h1 style={{ margin: 0, fontFamily: "var(--font-serif)", fontSize: "clamp(46px, 5vw, 66px)", fontWeight: 500, lineHeight: 1.08 }}>
+                May I introduce myself?
+              </h1>
+              {!introVisible ? (
+                <>
+                  <p style={{ margin: "30px auto 0", maxWidth: 560, color: "#766A63", fontFamily: "var(--font-serif)", fontSize: 27, lineHeight: 1.38 }}>
+                    I'm King's Press—your desk for turning ideas into clear, publishable work.
+                  </p>
+                  <p style={{ margin: "30px auto 0", maxWidth: 540, color: "#766A63", fontFamily: "var(--font-serif)", fontSize: 21, lineHeight: 1.42 }}>
+                    I'll help you think, draft, refine, and prepare your work so it's ready to be read and remembered.
+                  </p>
+                  {!voiceConnected && (
+                    <p style={{
+                      margin: "36px auto 0", paddingTop: 27, borderTop: "1px solid #D8CEC3",
+                      maxWidth: 430, color: "#766A63", fontSize: 17, lineHeight: 1.5,
+                      display: "flex", gap: 12, alignItems: "flex-start", textAlign: "left",
+                    }}>
+                      <Icon name="warn" size={18} style={{ color: "#A74732", flexShrink: 0, marginTop: 3 }} />
+                      Voice is not connected yet, so I'll keep my introduction on screen. You can still type your setup answers.
+                    </p>
+                  )}
+                  <div style={{ marginTop: 44, display: "grid", justifyItems: "center", gap: 22 }}>
+                    <button className="kp-setup-primary" onClick={introduce} style={{ minWidth: 330 }}>
+                      Yes, introduce yourself
+                    </button>
+                    <button className="kp-setup-link" onClick={() => setStep(2)}>Skip for now</button>
+                  </div>
+                </>
               ) : (
                 <>
-                  <SetupField label="Campaign name" hint="A campaign is the folder for one body of work: preferences, pieces, sources, and media.">
-                    <input className="field" value={campaignName} onChange={(e) => setCampaignName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") createCampaign(); }} />
-                  </SetupField>
-                  <button className="btn primary" onClick={createCampaign} disabled={busy || !campaignName.trim()} style={{ justifySelf: "start" }}>
-                    {busy ? <><Spinner size={14} /> Starting...</> : <><Icon name="plus" size={14} /> Start campaign</>}
-                  </button>
+                  <pre style={{
+                    whiteSpace: "pre-wrap", margin: "34px auto 0", maxWidth: 680,
+                    color: "#766A63", font: "20px/1.68 var(--font-serif)", textAlign: "center",
+                  }}>{introScript}</pre>
+                  <div style={{ marginTop: 42, display: "grid", justifyItems: "center", gap: 18 }}>
+                    <button className="kp-setup-primary" onClick={() => setStep(2)}>Continue <Icon name="arrowR" size={22} /></button>
+                    <button className="kp-setup-link" onClick={() => setStep(2)}>Skip for now</button>
+                  </div>
                 </>
               )}
-              {!!campaigns.length && (
+            </div>
+          </main>
+        )}
+
+        {step === 2 && (
+          <main style={{ marginTop: 86 }}>
+            <h1 style={{ margin: 0, fontFamily: "var(--font-serif)", fontSize: "clamp(46px, 5.3vw, 66px)", fontWeight: 500, lineHeight: 1.08 }}>
+              What are you working on first?
+            </h1>
+            <p style={{ margin: "24px 0 54px", maxWidth: 680, color: "#766A63", fontFamily: "var(--font-serif)", fontSize: 27, lineHeight: 1.38 }}>
+              Your first focus helps organize drafts, sources, Gather runs, and notes in one place.
+            </p>
+            <SetupField label="First project or campaign name" helper="You can rename this anytime.">
+              <input
+                className="kp-setup-input"
+                value={campaignName}
+                onChange={(e) => setCampaignName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") ensureFocus().then(() => setStep(3)); }}
+                placeholder="e.g. Smoke Test"
+                style={{ fontFamily: "var(--font-serif)", fontSize: 25, height: 75 }}
+              />
+            </SetupField>
+            <div style={{ marginTop: 62 }}>
+              <h2 style={{ margin: 0, fontFamily: "var(--font-serif)", fontSize: 25, fontWeight: 500 }}>Quick picks</h2>
+              <p style={{ margin: "10px 0 28px", color: "#766A63", fontSize: 18 }}>Start with one of your recent focuses.</p>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 22 }}>
+                {quickPicks.map((pick, i) => (
+                  <button
+                    key={pick}
+                    className="kp-chip"
+                    data-active={campaignName === pick}
+                    onClick={() => setCampaignName(pick === "New focus" ? "" : pick)}
+                  >
+                    <Icon name={i === 0 ? "sparkle" : pick === "Book draft" ? "book" : pick === "New focus" ? "plus" : "play"} size={21} />
+                    {pick}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <SetupActions
+              secondary="Skip for now"
+              onSecondary={() => setStep(3)}
+              primary="Continue"
+              busy={busy}
+              onPrimary={() => ensureFocus().then(() => setStep(3))}
+            />
+            <SetupReassurance />
+          </main>
+        )}
+
+        {step === 3 && prefDraft && (
+          <main style={{ marginTop: 86 }}>
+            <h1 style={{ margin: 0, fontFamily: "var(--font-serif)", fontSize: "clamp(52px, 5.8vw, 76px)", fontWeight: 500, lineHeight: 1.04 }}>
+              Set your defaults
+            </h1>
+            <p style={{ margin: "22px 0 34px", color: "#766A63", fontSize: 21, lineHeight: 1.5 }}>
+              Start with the basics. You can refine everything later.
+            </p>
+            <section style={{
+              border: "1px solid #D8CEC3", borderRadius: 10, background: "rgba(255, 252, 246, 0.64)",
+              overflow: "hidden",
+            }}>
+              <div style={{ padding: "30px 30px 28px", display: "grid", gap: 30 }}>
+                <SetupField label="Your voice" helper="Who you are, what you stand for, and how the desk should sound.">
+                  <textarea
+                    className="kp-setup-input"
+                    value={prefDraft.selfVision}
+                    onChange={(e) => setPrefDraft({ ...prefDraft, selfVision: e.target.value })}
+                    rows={4}
+                    placeholder="e.g. I'm a founder building for operators. Clear, bold, and useful."
+                    style={{ resize: "vertical", minHeight: 132 }}
+                  />
+                </SetupField>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 28 }}>
+                  <SetupField label="Primary audience">
+                    <input
+                      className="kp-setup-input"
+                      value={prefDraft.audienceName}
+                      onChange={(e) => setPrefDraft({ ...prefDraft, audienceName: e.target.value })}
+                      placeholder="e.g. Independent operators"
+                    />
+                  </SetupField>
+                  <SetupField label="Throughline">
+                    <input
+                      className="kp-setup-input"
+                      value={prefDraft.throughlineName}
+                      onChange={(e) => setPrefDraft({ ...prefDraft, throughlineName: e.target.value })}
+                      placeholder="e.g. Core insight or point of view"
+                    />
+                  </SetupField>
+                </div>
                 <div>
-                  <div className="eyebrow" style={{ marginBottom: 8 }}>Existing campaigns</div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                    {campaigns.map((c) => (
-                      <button key={c.id} className={"btn sm " + (activeCampaign && activeCampaign.id === c.id ? "primary" : "ghost")} onClick={() => window.Store.setActiveCampaign(c.id)}>
-                        {c.name}
+                  <h2 style={{ margin: 0, fontFamily: "var(--font-serif)", fontSize: 22, fontWeight: 500 }}>Draft style</h2>
+                  <p style={{ margin: "8px 0 12px", color: "#766A63", fontSize: 16 }}>How should default drafts come through?</p>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 20 }}>
+                    {["Polished", "Plainspoken", "Strategic", "Conversational"].map((option) => (
+                      <button
+                        key={option}
+                        className="kp-segment"
+                        data-active={draftStyle === option}
+                        onClick={() => {
+                          setDraftStyle(option);
+                          setPrefDraft({ ...prefDraft, registerBody: "Default draft style: " + option.toLowerCase() + "." });
+                        }}
+                      >
+                        {draftStyle === option && <Icon name="check" size={16} style={{ marginRight: 10 }} />}
+                        {option}
                       </button>
                     ))}
                   </div>
                 </div>
-              )}
-            </div>
-          )}
-
-          {step === 2 && prefDraft && (
-            <div style={{ display: "grid", gap: 16 }}>
-              {!hasCampaign && <div style={{ color: "var(--sev-must)", fontSize: 14 }}>Start or select a campaign before saving preferences.</div>}
-              <SetupField label="Self statement" hint="The first-person public identity and voice anchor. This maps to Self-Vision in the prompt context.">
-                <textarea className="field" value={prefDraft.selfVision} onChange={(e) => setPrefDraft({ ...prefDraft, selfVision: e.target.value })} rows={5} placeholder="Who are you, what do you stand for, and how should the desk sound when writing with you?" />
-              </SetupField>
-              <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 12 }}>
-                <SetupField label="Primary throughline">
-                  <input className="field" value={prefDraft.throughlineName} onChange={(e) => setPrefDraft({ ...prefDraft, throughlineName: e.target.value })} placeholder="e.g. Local-first creative systems" />
-                </SetupField>
-                <SetupField label="Throughline tag">
-                  <input className="field mono" value={prefDraft.throughlineTag} onChange={(e) => setPrefDraft({ ...prefDraft, throughlineTag: e.target.value })} placeholder="core" />
-                </SetupField>
               </div>
-              <SetupField label="Throughline note">
-                <textarea className="field" value={prefDraft.throughlineNote} onChange={(e) => setPrefDraft({ ...prefDraft, throughlineNote: e.target.value })} rows={3} />
-              </SetupField>
-              <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 12 }}>
-                <SetupField label="Primary audience">
-                  <input className="field" value={prefDraft.audienceName} onChange={(e) => setPrefDraft({ ...prefDraft, audienceName: e.target.value })} placeholder="e.g. Independent operators" />
-                </SetupField>
-                <SetupField label="Audience id">
-                  <input className="field mono" value={prefDraft.audienceId} onChange={(e) => setPrefDraft({ ...prefDraft, audienceId: e.target.value })} placeholder="general" />
-                </SetupField>
+              <div style={{ borderTop: "1px solid #D8CEC3" }}>
+                <button
+                  onClick={() => setAdvancedOpen((x) => !x)}
+                  aria-expanded={advancedOpen}
+                  style={{
+                    width: "100%", minHeight: 93, border: 0, background: "transparent", color: "#2A211E",
+                    display: "grid", gridTemplateColumns: "42px minmax(0, 1fr) auto", alignItems: "center",
+                    gap: 24, padding: "20px 30px", textAlign: "left", cursor: "pointer",
+                  }}
+                >
+                  <Icon name="gear" size={28} />
+                  <span>
+                    <span style={{ display: "block", fontFamily: "var(--font-serif)", fontSize: 22 }}>Advanced rules</span>
+                    <span style={{ display: "block", marginTop: 5, color: "#766A63", fontSize: 16 }}>Tone rules, do-nots, and custom preferences.</span>
+                  </span>
+                  <Icon name="chevD" size={22} style={{ transform: advancedOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
+                </button>
+                {advancedOpen && (
+                  <div style={{ padding: "0 30px 30px", display: "grid", gap: 22 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: 22 }}>
+                      <SetupField label="Point-of-view tag">
+                        <input className="kp-setup-input" value={prefDraft.throughlineTag} onChange={(e) => setPrefDraft({ ...prefDraft, throughlineTag: e.target.value })} placeholder="core" />
+                      </SetupField>
+                      <SetupField label="Audience key">
+                        <input className="kp-setup-input" value={prefDraft.audienceId} onChange={(e) => setPrefDraft({ ...prefDraft, audienceId: e.target.value })} placeholder="general" />
+                      </SetupField>
+                    </div>
+                    <SetupField label="Point-of-view note">
+                      <textarea className="kp-setup-input" value={prefDraft.throughlineNote} onChange={(e) => setPrefDraft({ ...prefDraft, throughlineNote: e.target.value })} rows={3} />
+                    </SetupField>
+                    <SetupField label="Strategy note">
+                      <textarea className="kp-setup-input" value={prefDraft.strategy} onChange={(e) => setPrefDraft({ ...prefDraft, strategy: e.target.value })} rows={3} />
+                    </SetupField>
+                    <SetupField label="Audience note">
+                      <textarea className="kp-setup-input" value={prefDraft.audienceNote} onChange={(e) => setPrefDraft({ ...prefDraft, audienceNote: e.target.value })} rows={3} />
+                    </SetupField>
+                    <SetupField label="Drafting notes">
+                      <textarea className="kp-setup-input" value={prefDraft.registerBody} onChange={(e) => setPrefDraft({ ...prefDraft, registerBody: e.target.value })} rows={3} />
+                    </SetupField>
+                    <SetupField label="Tone rules">
+                      <textarea className="kp-setup-input" value={prefDraft.voiceRules} onChange={(e) => setPrefDraft({ ...prefDraft, voiceRules: e.target.value })} rows={3} placeholder="One rule per line." />
+                    </SetupField>
+                    <SetupField label="Do-nots">
+                      <textarea className="kp-setup-input" value={prefDraft.redLines} onChange={(e) => setPrefDraft({ ...prefDraft, redLines: e.target.value })} rows={3} placeholder="One constraint per line." />
+                    </SetupField>
+                    <SetupField label="Editorial guardrails">
+                      <textarea className="kp-setup-input" value={prefDraft.gateSpec} onChange={(e) => setPrefDraft({ ...prefDraft, gateSpec: e.target.value })} rows={4} placeholder="e.g. Be strict on unsupported claims, gentle on voice, and flag anything that sounds generic." />
+                    </SetupField>
+                  </div>
+                )}
               </div>
-              <SetupField label="Audience note">
-                <textarea className="field" value={prefDraft.audienceNote} onChange={(e) => setPrefDraft({ ...prefDraft, audienceNote: e.target.value })} rows={3} />
-              </SetupField>
-              <SetupField label="Gate preferences" hint="Extra instructions for how strict the seven editorial gates should be. The canonical gate prompts still run.">
-                <textarea className="field" value={prefDraft.gateSpec} onChange={(e) => setPrefDraft({ ...prefDraft, gateSpec: e.target.value })} rows={4} placeholder="e.g. Be strict on unsupported claims, gentle on voice, and flag anything that sounds generic." />
-              </SetupField>
-            </div>
-          )}
-        </div>
-
-        <div style={{ padding: "14px 26px", borderTop: "1px solid var(--hair)", display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-          <button className="btn ghost" onClick={skip}>Skip for now</button>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button className="btn ghost" onClick={() => setStep(Math.max(0, step - 1))} disabled={step === 0}>Back</button>
-            {step < 2 ? (
-              <button className="btn primary" onClick={() => setStep(Math.min(2, step + 1))} disabled={step === 1 && !hasCampaign}>Next <Icon name="arrowR" size={14} /></button>
-            ) : (
-              <button className="btn primary" onClick={finish} disabled={!hasCampaign}><Icon name="check" size={14} /> Finish setup</button>
-            )}
-          </div>
-        </div>
+            </section>
+            <SetupActions
+              secondary="Do this later"
+              onSecondary={finish}
+              primary="Finish setup"
+              onPrimary={finish}
+            />
+            <SetupReassurance compact />
+          </main>
+        )}
       </div>
     </div>
   );

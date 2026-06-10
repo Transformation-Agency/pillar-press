@@ -31,6 +31,17 @@ Editorial Desk**.
 - The browser shell is self-contained at startup. React, ReactDOM, and Babel are
   vendored under `public/vendor/`, and typography uses system serif/mono stacks
   instead of remote font downloads.
+- First-run setup opens with a skippable, audio-ready introduction. Microphone
+  access is requested only after the user chooses voice setup. The first product
+  introduction is deterministic, versioned copy owned by the app; the LLM is not
+  used to introduce the product or classify intro consent. The user can skip
+  audio, use OS dictation/manual typing, or continue after speech setup fails.
+- The first real onboarding question asks where the user communicates most.
+  When the user chooses to interpret that answer, `/api/onboarding/extract-setup-profile`
+  uses the configured utility LLM to return an editable profile draft only. The
+  app does not save model-interpreted preferences until the user reviews and
+  approves them, and it does not infer permission to use memory, web research,
+  publishing, sending, or outside services.
 - First-run setup lets a user choose Ollama, Docker Model Runner, or a hosted
   provider API key. Ollama setup checks whether Ollama is installed/running, can
   open the Ollama installer page, starts an existing Ollama install, lists
@@ -70,6 +81,10 @@ Editorial Desk**.
   OpenAI-compatible image endpoint, and a custom image endpoint can be configured
   with `MEDIA_IMAGE_*` variables. The UI
   reports provider capabilities without storing media API keys in browser state.
+- Drafts, proposed revisions, and generated platform outputs expose read-aloud
+  controls. **Play aloud** uses local/browser speech for quick preview; **Save
+  audio** renders an ElevenLabs voiceover through the existing server media route
+  and persists it as an audio media job when `ELEVENLABS_API_KEY` is configured.
 - The native desktop menu exposes normal-user setup actions:
   - **Set Up Local Model...** reopens first-run model setup.
   - **Start Ollama** starts the local Ollama service when it is installed but

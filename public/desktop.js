@@ -43,6 +43,10 @@
     initLocalDatabase: () => invoke("init_local_database"),
     createLocalBackup: () => invoke("create_local_backup"),
     runtimeStatus: () => invoke("desktop_runtime_status"),
+    startVoiceSession: () => invoke("start_voice_session"),
+    speakText: (text, options) => invoke("speak_text", { args: { text, interrupt: !!(options && options.interrupt) } }),
+    stopVoiceSession: () => invoke("stop_voice_session"),
+    onSttFinal: (handler) => listen("stt:final", handler),
     onShowModelSetup: (handler) => listen("kingspress:show-model-setup", handler),
     onBackupCreated: (handler) => listen("kingspress:backup-created", handler),
   };

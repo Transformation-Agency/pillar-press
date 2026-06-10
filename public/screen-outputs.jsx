@@ -166,6 +166,7 @@ function OutputCard({ o, derivation, pieceId, platform, onCondensed, onDrive, on
         </div>
         <div style={{ display: "flex", gap: 6 }}>
           <CopyButton text={() => outputToText(o)} label="Copy" />
+          {window.AudioActions && <AudioActions text={() => o.draftPost || ""} label={o.platform + " output"} filename={window.EXPORT.safeName(o.platform) + ".mp3"} pieceId={pieceId} />}
           <button className="btn ghost sm" onClick={() => downloadOutput(o)} title="Download .md"><Icon name="doc" size={14} /> Download</button>
           <button className="btn ghost sm" onClick={() => onDrive && onDrive(o)} title="Save to Google Drive"><GoogleIcon size={13} /> Drive</button>
           {onImage && <button className="btn ghost sm" onClick={() => onImage(o)} title="Generate an image for this post"><Icon name="image" size={14} /> Image</button>}

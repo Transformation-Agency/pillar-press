@@ -276,12 +276,59 @@ function CampaignSwitcher({ campaigns, activeId, onSelect, onAdd }) {
             );
           })}
           <hr className="rule" style={{ margin: "5px 4px" }} />
-          <button onClick={() => { const n = prompt("New campaign name"); if (n && n.trim()) onAdd(n.trim()); setOpen(false); }}
+          <button onClick={() => { onAdd(); setOpen(false); }}
             className="mono" style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, border: "none", background: "transparent", cursor: "pointer", borderRadius: "var(--radius)", padding: "9px 10px", color: "var(--ink-3)", fontSize: 12, letterSpacing: "0.04em" }}>
             <Icon name="plus" size={13} /> NEW CAMPAIGN
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+function CampaignCreateDialog({ open, onClose, onCreate }) {
+  const [name, setName] = React.useState("King's Press");
+  const inputRef = React.useRef(null);
+  React.useEffect(() => {
+    if (!open) return;
+    setName("King's Press");
+    setTimeout(() => {
+      if (inputRef.current) {
+        inputRef.current.focus();
+        inputRef.current.select();
+      }
+    }, 0);
+  }, [open]);
+  if (!open) return null;
+  const submit = () => {
+    const clean = name.trim();
+    if (!clean) return;
+    onCreate(clean);
+  };
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 210, background: "oklch(0 0 0 / 0.32)", display: "grid", placeItems: "center", padding: 20 }}>
+      <div className="card" style={{ width: "min(520px, 100%)", padding: "26px 28px", boxShadow: "var(--shadow-lg)" }}>
+        <div className="eyebrow" style={{ marginBottom: 8 }}>New campaign</div>
+        <h2 style={{ fontSize: 25, margin: "0 0 10px" }}>Name this body of work</h2>
+        <p className="muted" style={{ margin: "0 0 18px", fontSize: 14.5, lineHeight: 1.5 }}>
+          Campaigns hold pieces, preferences, Gather sources, and Studio media together.
+        </p>
+        <input
+          ref={inputRef}
+          className="field"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") submit();
+            if (e.key === "Escape") onClose();
+          }}
+          placeholder="Campaign name"
+        />
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
+          <button className="btn ghost" onClick={onClose}>Cancel</button>
+          <button className="btn primary" onClick={submit} disabled={!name.trim()}><Icon name="plus" size={14} /> Create campaign</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -647,13 +694,19 @@ function DesktopOnboarding() {
   const savedProfiles = profilesFromSettings(savedSettings);
 
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "oklch(0 0 0 / 0.28)", display: "grid", placeItems: "center", padding: 24 }}>
-      <div className="card" style={{ width: "min(760px, 100%)", maxHeight: "calc(100vh - 48px)", overflow: "auto", padding: "24px 26px", boxShadow: "var(--shadow-lg)" }}>
-        <div className="eyebrow" style={{ marginBottom: 8 }}>King's Press desktop setup</div>
-        <h2 style={{ fontSize: 30, marginBottom: 10 }}>Choose your writing model</h2>
-        <p className="muted" style={{ fontSize: 15.5, lineHeight: 1.55 }}>
-          King's Press keeps your editorial database local. Use a local model by default, or add a cloud API key when you want hosted compute.
-        </p>
+    <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "var(--paper)", display: "flex", flexDirection: "column" }}>
+      <div style={{ padding: "28px clamp(20px, 4vw, 56px) 22px", borderBottom: "1px solid var(--hair)", display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start", flexShrink: 0 }}>
+        <div>
+          <div className="eyebrow" style={{ marginBottom: 8 }}>King's Press desktop setup</div>
+          <h2 style={{ fontSize: 30, marginBottom: 10 }}>Choose your writing model</h2>
+          <p className="muted" style={{ fontSize: 15.5, lineHeight: 1.55, maxWidth: 760 }}>
+            King's Press keeps your editorial database local. Use a local model by default, or add a cloud API key when you want hosted compute.
+          </p>
+        </div>
+        <button className="icon-btn" onClick={() => setOpen(false)} title="Close setup"><Icon name="xLogo" size={15} /></button>
+      </div>
+      <div className="scroll-y" style={{ flex: 1, minHeight: 0, padding: "28px clamp(20px, 4vw, 56px) 40px" }}>
+        <div style={{ maxWidth: 980, margin: "0 auto" }}>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 16 }}>
           <button className={"btn " + (setupMode === "ollama" ? "primary" : "ghost")} onClick={() => { setSetupMode("ollama"); if (models.length) setModel(models[0]); setProfileName(""); }} disabled={busy}>Ollama</button>
           <button className={"btn " + (setupMode === "docker" ? "primary" : "ghost")} onClick={() => { setSetupMode("docker"); setModel(dockerModels.length ? dockerModels[0] : ""); setProfileName(""); }} disabled={busy}>Docker Model Runner</button>
@@ -755,7 +808,8 @@ function DesktopOnboarding() {
             </div>
           </div>
         )}
-        {message && <p style={{ marginTop: 12, color: "var(--accent-ink)", fontSize: 14 }}>{message}</p>}
+          {message && <p style={{ marginTop: 12, color: "var(--accent-ink)", fontSize: 14 }}>{message}</p>}
+        </div>
       </div>
     </div>
   );
@@ -767,6 +821,7 @@ function App() {
   const [desktopNotice, setDesktopNotice] = React.useState(null);
   const [backupBusy, setBackupBusy] = React.useState(false);
   const [setupOpen, setSetupOpen] = React.useState(false);
+  const [campaignCreateOpen, setCampaignCreateOpen] = React.useState(false);
   const isMobile = window.useIsMobile();
   const role = state.role || "author";
 
@@ -791,12 +846,12 @@ function App() {
     });
     return () => { cancelled = true; };
   }, []);
-  const createFirstCampaign = () => {
-    const name = prompt("Campaign name", "King's Press");
-    if (name && name.trim()) {
-      window.Store.addCampaign(name.trim());
-      setView("library");
-    }
+  const createCampaign = (name) => {
+    const clean = String(name || "").trim();
+    if (!clean) return;
+    window.Store.addCampaign(clean);
+    setCampaignCreateOpen(false);
+    setView("library");
   };
   const createDesktopBackup = async () => {
     if (!hasDesktopBridge || backupBusy) return;
@@ -829,7 +884,7 @@ function App() {
         </nav>
         <div className="spacer" />
         <CampaignSwitcher campaigns={campaigns} activeId={state.activeCampaignId}
-          onSelect={(id) => window.Store.setActiveCampaign(id)} onAdd={(n) => window.Store.addCampaign(n)} />
+          onSelect={(id) => window.Store.setActiveCampaign(id)} onAdd={() => setCampaignCreateOpen(true)} />
         {!isMobile && <RoleSwitch role={role} onChange={(r) => window.Store.setRole(r)} />}
         <button className="btn sm" onClick={() => setSetupOpen(true)} title="Setup provider, campaign, and preferences">
           <Icon name="gear" size={13} /> Setup
@@ -854,7 +909,7 @@ function App() {
           icon="book"
           title="Create your first campaign"
           body="King’s Press starts empty now. Add only the campaigns you actually use, then write pieces, preferences, Gather sources, and Studio assets inside that campaign."
-          action={<button className="btn primary" style={{ marginTop: 18 }} onClick={createFirstCampaign}><Icon name="plus" size={15} /> New campaign</button>}
+          action={<button className="btn primary" style={{ marginTop: 18 }} onClick={() => setCampaignCreateOpen(true)}><Icon name="plus" size={15} /> New campaign</button>}
         />
       )}
 
@@ -907,6 +962,7 @@ function App() {
           onComplete={() => { window.Store.setPref("setupHelperCompleteV1", true); setSetupOpen(false); }}
         />
       )}
+      <CampaignCreateDialog open={campaignCreateOpen} onClose={() => setCampaignCreateOpen(false)} onCreate={createCampaign} />
       <DesktopOnboarding />
     </div>
   );

@@ -119,6 +119,7 @@ function RevisionTab({ piece, onUpdate, refCtx }) {
             </div>
             <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
               {FullToggle}
+              {window.AudioActions && <AudioActions text={() => rev.text} label="revision" filename={(piece.title || "revision") + "-revision.mp3"} pieceId={piece.id} campaignId={piece.campaignId} />}
               <CopyButton text={() => rev.text} label="Copy revision" />
               <button className="btn ghost sm" onClick={generate} disabled={busy}>
                 {busy ? <Spinner size={14} /> : <Icon name="play" size={14} />} Regenerate

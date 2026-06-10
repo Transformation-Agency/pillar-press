@@ -78,6 +78,13 @@ struct DesktopRuntimeStatus {
     bundled_node_path: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct SpeakTextArgs {
+    text: String,
+    #[serde(default)]
+    interrupt: Option<bool>,
+}
+
 #[derive(Clone, Serialize)]
 struct BackupResult {
     path: String,
@@ -97,6 +104,7 @@ struct BackupManifest {
 struct DesktopServer {
     child: Mutex<Option<Child>>,
     ollama_child: Mutex<Option<Child>>,
+    speech_child: Mutex<Option<Child>>,
     port: Mutex<Option<u16>>,
     #[cfg(not(debug_assertions))]
     scheduler_started: Mutex<bool>,
@@ -107,6 +115,7 @@ impl DesktopServer {
         Self {
             child: Mutex::new(None),
             ollama_child: Mutex::new(None),
+            speech_child: Mutex::new(None),
             port: Mutex::new(None),
             #[cfg(not(debug_assertions))]
             scheduler_started: Mutex::new(false),
@@ -122,6 +131,11 @@ impl Drop for DesktopServer {
             }
         }
         if let Ok(child_slot) = self.ollama_child.get_mut() {
+            if let Some(child) = child_slot {
+                let _ = child.kill();
+            }
+        }
+        if let Ok(child_slot) = self.speech_child.get_mut() {
             if let Some(child) = child_slot {
                 let _ = child.kill();
             }
@@ -1039,6 +1053,69 @@ fn desktop_runtime_status(app: AppHandle) -> Result<DesktopRuntimeStatus, String
     })
 }
 
+#[tauri::command]
+fn start_voice_session(app: AppHandle) -> Result<(), String> {
+    app.emit(
+        "voice:status",
+        serde_json::json!({
+            "status": "ready"
+        }),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn speak_text(app: AppHandle, args: SpeakTextArgs) -> Result<(), String> {
+    let text = args.text.trim();
+    if text.is_empty() {
+        return Ok(());
+    }
+
+    let server = app.state::<DesktopServer>();
+    let mut speech_child = server.speech_child.lock().map_err(|e| e.to_string())?;
+    if args.interrupt.unwrap_or(false) {
+        if let Some(child) = speech_child.as_mut() {
+            let _ = child.kill();
+        }
+        *speech_child = None;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let child = Command::new("/usr/bin/say")
+            .arg(text)
+            .spawn()
+            .map_err(|e| format!("Could not speak text: {e}"))?;
+        *speech_child = Some(child);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = text;
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+fn stop_voice_session(app: AppHandle) -> Result<(), String> {
+    let server = app.state::<DesktopServer>();
+    let mut speech_child = server.speech_child.lock().map_err(|e| e.to_string())?;
+    if let Some(child) = speech_child.as_mut() {
+        let _ = child.kill();
+    }
+    *speech_child = None;
+    app.emit(
+        "voice:status",
+        serde_json::json!({
+            "status": "stopped"
+        }),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 fn main() {
     #[cfg(target_os = "macos")]
     disable_macos_window_restoration();
@@ -1068,7 +1145,10 @@ fn main() {
             get_model_choice,
             init_local_database,
             create_local_backup,
-            desktop_runtime_status
+            desktop_runtime_status,
+            start_voice_session,
+            speak_text,
+            stop_voice_session
         ])
         .run(tauri::generate_context!())
         .expect("error while running King's Press Editorial Desk");
