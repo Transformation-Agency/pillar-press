@@ -496,6 +496,7 @@ A production release candidate must pass:
 - `npm test`
 - `cargo test --manifest-path src-tauri/Cargo.toml`
 - `npm run desktop:build:signed`
+- `npm run desktop:verify-installed`
 - `npm run desktop:verify-signed-release`
 
 ## Immediate Next Recommendation
@@ -511,4 +512,7 @@ methods, bridge a desktop STT final transcript, and seed the Desk assistant hand
 `npm run onboarding:verify:browser` as the browser-shell proof that the actual static React/Babel
 front end opens setup on a clean install, completes the typed path through the real Store cache,
 captures focus and preference answers in the transcript, saves first value, closes setup, and
-lands on the active Desk handoff thread before running notarized desktop release checks.
+lands on the active Desk handoff thread. Use `npm run desktop:verify-installed` as the packaged-app
+proof that the copied DMG payload can boot from a clean app-data directory and complete that same
+conversational setup path against the installed app server before running notarized desktop release
+checks.

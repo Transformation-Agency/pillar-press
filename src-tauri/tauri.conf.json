@@ -7,6 +7,7 @@
     "beforeDevCommand": "npm run desktop:web",
     "devUrl": "http://localhost:3000",
     "beforeBuildCommand": "npm run desktop:web:build",
+    "beforeBundleCommand": "npm run desktop:sign-macos-resources",
     "frontendDist": "../public"
   },
   "app": {

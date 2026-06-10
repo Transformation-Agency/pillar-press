@@ -214,6 +214,11 @@ fn random_secret_key() -> String {
     BASE64.encode(bytes)
 }
 
+fn should_use_keychain_secret() -> bool {
+    std::env::var_os("KINGS_PRESS_DESKTOP_DATA_DIR").is_none()
+        && std::env::var_os("KINGS_PRESS_DISABLE_KEYCHAIN").is_none()
+}
+
 #[cfg(target_os = "macos")]
 fn read_keychain_secret() -> Option<String> {
     let out = Command::new("security")
@@ -267,28 +272,41 @@ fn write_keychain_secret(_secret: &str) -> bool {
 }
 
 fn desktop_secret_key(app: &AppHandle) -> Result<String, String> {
-    if let Some(secret) = read_keychain_secret() {
-        if BASE64.decode(secret.as_bytes()).map(|bytes| bytes.len() == 32).unwrap_or(false) {
-            return Ok(secret);
+    if should_use_keychain_secret() {
+        if let Some(secret) = read_keychain_secret() {
+            if BASE64
+                .decode(secret.as_bytes())
+                .map(|bytes| bytes.len() == 32)
+                .unwrap_or(false)
+            {
+                return Ok(secret);
+            }
         }
     }
 
     let local_path = local_secret_key_path(app)?;
     if let Ok(secret) = fs::read_to_string(&local_path) {
         let clean = secret.trim().to_string();
-        if BASE64.decode(clean.as_bytes()).map(|bytes| bytes.len() == 32).unwrap_or(false) {
+        if BASE64
+            .decode(clean.as_bytes())
+            .map(|bytes| bytes.len() == 32)
+            .unwrap_or(false)
+        {
             return Ok(clean);
         }
     }
 
     let secret = random_secret_key();
-    if !write_keychain_secret(&secret) {
+    if !should_use_keychain_secret() || !write_keychain_secret(&secret) {
         fs::write(&local_path, &secret).map_err(|e| e.to_string())?;
     }
     Ok(secret)
 }
 
-fn encrypt_setting_secret(app: &AppHandle, value: Option<String>) -> Result<Option<String>, String> {
+fn encrypt_setting_secret(
+    app: &AppHandle,
+    value: Option<String>,
+) -> Result<Option<String>, String> {
     let Some(raw) = value else {
         return Ok(None);
     };
@@ -1069,7 +1087,9 @@ fn save_model_choice(app: AppHandle, model: String) -> Result<(), String> {
         }]),
         default_profile_id: Some("ollama-local".into()),
         task_defaults: None,
-        media_providers: read_desktop_settings(&app).ok().and_then(|s| s.media_providers),
+        media_providers: read_desktop_settings(&app)
+            .ok()
+            .and_then(|s| s.media_providers),
     };
     let json = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
     fs::write(settings_path(&app)?, json).map_err(|e| e.to_string())
@@ -1138,12 +1158,15 @@ fn save_llm_settings(app: AppHandle, settings: DesktopSettings) -> Result<(), St
             .map(str::trim)
             .filter(|v| !v.is_empty())
             .map(str::to_string),
-        api_key: encrypt_setting_secret(&app, settings
-            .api_key
-            .as_deref()
-            .map(str::trim)
-            .filter(|v| !v.is_empty())
-            .map(str::to_string))?,
+        api_key: encrypt_setting_secret(
+            &app,
+            settings
+                .api_key
+                .as_deref()
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .map(str::to_string),
+        )?,
         profiles: if profiles.is_empty() {
             None
         } else {
@@ -1164,7 +1187,9 @@ fn save_llm_settings(app: AppHandle, settings: DesktopSettings) -> Result<(), St
                 })
                 .collect()
         }),
-        media_providers: read_desktop_settings(&app).ok().and_then(|s| s.media_providers),
+        media_providers: read_desktop_settings(&app)
+            .ok()
+            .and_then(|s| s.media_providers),
     };
     let json = serde_json::to_string_pretty(&cleaned).map_err(|e| e.to_string())?;
     fs::write(settings_path(&app)?, json).map_err(|e| e.to_string())

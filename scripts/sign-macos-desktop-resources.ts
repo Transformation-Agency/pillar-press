@@ -18,19 +18,16 @@ function required(name: string) {
 const signingIdentity =
   required("KINGS_PRESS_SIGNING_IDENTITY") ||
   required("APPLE_SIGNING_IDENTITY") ||
-  required("MACOS_SIGNING_IDENTITY");
+  required("MACOS_SIGNING_IDENTITY") ||
+  "-";
 
 if (process.platform !== "darwin") {
   console.log("Skipping macOS resource signing on non-macOS platform.");
   process.exit(0);
 }
 
-if (!signingIdentity) {
-  throw new Error(
-    "Missing signing identity. Set KINGS_PRESS_SIGNING_IDENTITY, APPLE_SIGNING_IDENTITY, or MACOS_SIGNING_IDENTITY."
-  );
-}
 const activeSigningIdentity = signingIdentity;
+const isAdHocSigning = activeSigningIdentity === "-";
 
 async function exists(path: string) {
   try {
@@ -61,7 +58,8 @@ function shouldSign(path: string) {
 
 async function codesign(path: string) {
   await new Promise<void>((resolve, reject) => {
-    const args = ["--force", "--timestamp", "--options", "runtime"];
+    const args = ["--force"];
+    if (!isAdHocSigning) args.push("--timestamp", "--options", "runtime");
     if (path === nodeRuntimePath) {
       args.push("--entitlements", nodeEntitlementsPath);
     }

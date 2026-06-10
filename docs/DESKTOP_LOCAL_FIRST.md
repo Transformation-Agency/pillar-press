@@ -179,9 +179,12 @@ blank first campaign, and run the Gather scheduler endpoint.
 temporary Applications folder, launches that copied app through macOS
 LaunchServices with a fresh app-data directory, and verifies that the copied app
 starts its bundled server, defaults to local-first model settings, exposes media
-provider status, creates SQLite locally, and starts with no campaigns. It uses a
-fresh launch so macOS saved-window restoration cannot mask an app-icon boot
-regression.
+provider status, creates SQLite locally, and starts with no campaigns. It then
+drives the packaged King’s Press UI through the conversational setup path,
+intentionally defers voice, creates the first focus, saves writing preferences,
+persists the setup transcript, records first value, closes setup, and lands on
+the active Desk handoff thread. It uses a fresh launch so macOS saved-window
+restoration cannot mask an app-icon boot or first-run onboarding regression.
 
 Developer ID signing and Apple notarization use:
 

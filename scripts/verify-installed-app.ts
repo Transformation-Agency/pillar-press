@@ -2,6 +2,8 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
+import puppeteer from "puppeteer";
+import { driveOnboardingUiProof } from "./onboarding-ui-proof";
 
 const root = process.cwd();
 const dmgPath = join(root, "src-tauri", "target", "release", "bundle", "dmg", "King's Press Editorial Desk_0.1.0_aarch64.dmg");
@@ -58,12 +60,21 @@ function cleanLaunchEnv(homeDir: string, tmpDir: string, appDataDir: string): No
 }
 
 async function waitForServerUrl(appPid: number, appDataDir: string): Promise<string> {
-  for (let i = 0; i < 100; i += 1) {
+  for (let i = 0; i < 240; i += 1) {
     const status = await fetchCandidatePorts(appPid, appDataDir);
     if (status) return status;
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await new Promise((resolve) => setTimeout(resolve, 500));
   }
-  throw new Error("Installed app did not expose a reachable local King’s Press server.");
+  const ps = await capture("ps", ["-axo", "pid,ppid,command"], "process list").catch(() => "");
+  const related = ps
+    .split("\n")
+    .filter((line) => line.includes(String(appPid)) || line.includes("next-server") || line.includes(executableName))
+    .join("\n")
+    .trim();
+  throw new Error([
+    "Installed app did not expose a reachable local King’s Press server.",
+    related ? `related processes:\n${related}` : "related processes: <none>",
+  ].join("\n\n"));
 }
 
 async function waitForAppPid(installedApp: string): Promise<number> {
@@ -218,6 +229,36 @@ try {
   }
   if (!Array.isArray(runtime.providers) || runtime.providers.length < 5) {
     throw new Error(`Expected installed app media provider status, got ${JSON.stringify(runtime)}`);
+  }
+  const browser = await puppeteer.launch({
+    headless: true,
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+  });
+  try {
+    const page = await browser.newPage();
+    const pageErrors: string[] = [];
+    page.on("pageerror", (error) => {
+      pageErrors.push(error instanceof Error ? error.message : String(error));
+    });
+    page.on("console", (message) => {
+      const text = message.text();
+      const expectedProviderFallback =
+        message.type() === "error" &&
+        /^Failed to load resource: the server responded with a status of (400|502) /.test(text);
+      if (message.type() === "error" && !expectedProviderFallback) pageErrors.push(text);
+    });
+    await page.setViewport({ width: 1280, height: 900 });
+    await page.goto(`${serverUrl}/`, { waitUntil: "domcontentloaded" });
+    const onboarding = await driveOnboardingUiProof(page, {
+      focusName: "Installed App Focus",
+      voiceAnswer: "I write for operators. Keep the setup plainspoken, useful, and direct.",
+    });
+    if (pageErrors.length) {
+      throw new Error(`Installed app onboarding UI logged errors:\n${pageErrors.join("\n")}`);
+    }
+    console.log(`ok installed app conversational onboarding (${onboarding.firstValue?.campaignName})`);
+  } finally {
+    await browser.close();
   }
   for (const file of ["kings-press.sqlite3"]) {
     const path = join(appDataDir, file);
