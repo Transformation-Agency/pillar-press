@@ -987,6 +987,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
   const [integrationsTouched, setIntegrationsTouched] = React.useState(false);
   const [introAnswer, setIntroAnswer] = React.useState("");
   const [setupAnswer, setSetupAnswer] = React.useState("");
+  const [setupAnswerInputMethod, setSetupAnswerInputMethod] = React.useState("typed");
   const [setupTranscript, setSetupTranscript] = React.useState("");
   const [listening, setListening] = React.useState(false);
   const [repairState, setRepairState] = React.useState(null);
@@ -1193,12 +1194,14 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
       : null;
     if (repair && (repair.needsRepair || repair.intent === "help" || repair.intent === "repeat")) {
       setSetupAnswer(clean);
+      setSetupAnswerInputMethod(inputMethod || "typed");
       setSetupTranscript(clean);
       showRepair(slotId, "focus", repair);
       return { needsRepair: true };
     }
     if (repair && repair.intent === "skip") {
       setSetupAnswer(clean);
+      setSetupAnswerInputMethod(inputMethod || "typed");
       setSetupTranscript(clean);
       setRepairState(null);
       setConversationState((current) => ONBOARDING_CONVERSATION.skipSlot(current, slotId));
@@ -1206,6 +1209,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
       return { skipped: true };
     }
     setSetupAnswer(clean);
+    setSetupAnswerInputMethod(inputMethod || "typed");
     setSetupTranscript(clean);
     setRepairState(null);
     setSetupError("");
@@ -1255,6 +1259,8 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
   function captureFocusNameAsSetupAnswer(answer, inputMethod) {
     const clean = String(answer || "").trim();
     if (!clean || communicationSetupHasDecision()) return;
+    setSetupAnswer(clean);
+    setSetupAnswerInputMethod(inputMethod || "typed");
     setConversationState((current) => {
       if (communicationSetupHasDecision(current)) return current;
       return ONBOARDING_CONVERSATION.captureAnswer(
@@ -1551,36 +1557,37 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     setSetupError((fallbackRepair && fallbackRepair.message) || "I am not sure if that was a yes or a skip. Use one of the buttons, or type yes or skip.");
   }
 
-  function handleTranscript(text) {
+  function handleTranscript(text, targetStep) {
     const clean = String(text || "").trim();
     if (!clean) return;
-    if (step === 0) {
+    const activeStep = targetStep || step;
+    if (activeStep === "intro" || activeStep === 0) {
       handleIntroConsentAnswer(clean, "voice");
       return;
     }
-    if (step === 1) {
+    if (activeStep === "voice" || activeStep === 1) {
       handleVoiceSetupAnswer(clean, "voice");
       return;
     }
-    if (step === 3) {
+    if (activeStep === "focus" || activeStep === 3) {
       applyPlatformAnswer(clean, "voice");
       return;
     }
-    if (step === 4) {
+    if (activeStep === "preferences" || activeStep === 4) {
       interpretProfileAnswer(clean, "voice");
     }
   }
 
   transcriptHandlerRef.current = handleTranscript;
 
-  function listenForAnswer() {
+  function listenForAnswer(targetStep) {
     setSetupError("");
     stopListeningSession();
     setListening(true);
     const session = ONBOARDING_AUDIO.listenOnce && ONBOARDING_AUDIO.listenOnce({
       onFinal: (transcript) => {
         setSetupTranscript(transcript);
-        handleTranscript(transcript);
+        handleTranscript(transcript, targetStep);
       },
       onError: (error) => {
         setSetupError((error && error.message) || "Speech recognition is not available here. You can type instead.");
@@ -1840,12 +1847,13 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     const slots = (next && next.slots) || {};
     const communicationSlot = slots[ONBOARDING_CONVERSATION.SLOT_IDS.COMMUNICATION_PLATFORMS];
     const cleanFocus = String(focusNameInput || campaignName || "").trim();
+    const cleanSetupAnswer = String(setupAnswer || "").trim();
     if (cleanFocus && (!communicationSlot || communicationSlot.status !== "answered")) {
       next = ONBOARDING_CONVERSATION.captureAnswer(
         next,
         ONBOARDING_CONVERSATION.SLOT_IDS.COMMUNICATION_PLATFORMS,
-        cleanFocus,
-        "typed",
+        cleanSetupAnswer || cleanFocus,
+        cleanSetupAnswer ? (setupAnswerInputMethod || "typed") : "typed",
       );
     }
     const latestSlots = (next && next.slots) || {};
@@ -2644,6 +2652,17 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
           min-height: 50px;
           font-size: 18px;
         }
+        .kp-focus-voice-row {
+          display: flex;
+          align-items: center;
+          flex-wrap: wrap;
+          gap: 12px;
+          margin-top: 12px;
+        }
+        .kp-focus-voice-row .kp-setup-outline {
+          min-height: 42px;
+          font-size: 15.5px;
+        }
         .kp-repair-box {
           border: 1px solid rgba(167, 71, 50, 0.24);
           border-radius: 12px;
@@ -2794,7 +2813,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
                   if (setupError) setSetupError("");
                 }}
                 onSubmit={() => handleIntroConsentAnswer(introAnswer, "typed")}
-                onListen={listenForAnswer}
+                onListen={() => listenForAnswer("intro")}
                 listening={listening}
                 transcript={step === 0 ? setupTranscript : ""}
                 repair={repairState && repairState.slotId === ONBOARDING_CONVERSATION.SLOT_IDS.INTRO_CONSENT ? repairState : null}
@@ -2912,6 +2931,21 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
                 placeholder="e.g. Smoke Test"
                 style={{ fontFamily: "var(--font-serif)", fontSize: 25, height: 75 }}
               />
+              <div className="kp-focus-voice-row">
+                <button className="kp-setup-outline" type="button" onClick={() => listenForAnswer("focus")} disabled={listening} aria-pressed={listening ? "true" : "false"}>
+                  <Icon name="mic" size={16} /> {listening ? "Listening" : "Speak answer"}
+                </button>
+                {setupTranscript && step === 3 && (
+                  <p className="kp-transcript-preview" aria-live="polite">I heard: <strong>{setupTranscript}</strong></p>
+                )}
+              </div>
+              <SetupRepairChoices
+                repair={repairState && repairState.slotId === ONBOARDING_CONVERSATION.SLOT_IDS.COMMUNICATION_PLATFORMS ? repairState : null}
+                onChoose={(suggestion) => {
+                  const next = (suggestion && suggestion.value) || "";
+                  applyPlatformAnswer(next, "button");
+                }}
+              />
             </SetupField>
             <div style={{ marginTop: 38 }}>
               <h2 style={{ margin: 0, fontFamily: "var(--font-serif)", fontSize: 25, fontWeight: 500 }}>Quick picks</h2>
@@ -2957,7 +2991,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
               helper={preferencesPrompt && preferencesPrompt.helper}
               value={profileAnswer}
               onChange={setProfileAnswer}
-              onListen={listenForAnswer}
+              onListen={() => listenForAnswer("preferences")}
               listening={listening}
               disabled={profileBusy}
               transcript={step === 4 ? setupTranscript : ""}

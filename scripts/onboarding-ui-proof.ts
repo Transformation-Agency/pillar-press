@@ -37,7 +37,10 @@ export type OnboardingUiProofResult = {
 
 export type OnboardingUiProofOptions = {
   focusName?: string;
+  focusAnswer?: string;
+  expectedCampaignName?: string;
   voiceAnswer?: string;
+  answerInputMethod?: "typed" | "voice";
   requireNoStepper?: boolean;
   sentimentRating?: number;
 };
@@ -87,9 +90,44 @@ async function waitForText(page: Page, text: string) {
   }
 }
 
+async function installSpeechRecognitionMock(page: Page, transcripts: string[]) {
+  await page.evaluate(`
+    (() => {
+      window.__kpSpeechRecognitionQueue = ${JSON.stringify(transcripts)}.slice();
+      function MockSpeechRecognition() {
+        this.continuous = false;
+        this.interimResults = false;
+        this.lang = "en-US";
+        this.onresult = null;
+        this.onerror = null;
+        this.onend = null;
+      }
+      MockSpeechRecognition.prototype.start = function () {
+        const queue = window.__kpSpeechRecognitionQueue || [];
+        const transcript = queue.shift() || "";
+        window.__kpSpeechRecognitionQueue = queue;
+        setTimeout(() => {
+          if (transcript && this.onresult) {
+            this.onresult({ results: [[{ transcript }]] });
+          }
+          if (this.onend) this.onend();
+        }, 20);
+      };
+      MockSpeechRecognition.prototype.stop = function () {
+        if (this.onend) this.onend();
+      };
+      window.SpeechRecognition = MockSpeechRecognition;
+      window.webkitSpeechRecognition = MockSpeechRecognition;
+    })()
+  `);
+}
+
 export async function driveOnboardingUiProof(page: Page, options?: OnboardingUiProofOptions): Promise<OnboardingUiProofResult> {
   const focusName = options?.focusName || DEFAULT_ONBOARDING_UI_PROOF.focusName;
+  const focusAnswer = options?.focusAnswer || focusName;
   const voiceAnswer = options?.voiceAnswer || DEFAULT_ONBOARDING_UI_PROOF.voiceAnswer;
+  const answerInputMethod = options?.answerInputMethod || "typed";
+  const expectedCampaignName = options?.expectedCampaignName || focusName;
   const sentimentRating = Math.max(1, Math.min(5, Math.round(Number(options?.sentimentRating || 5))));
 
   await page.waitForSelector(".kp-conversation-canvas", { visible: true, timeout: 30000 });
@@ -109,12 +147,30 @@ export async function driveOnboardingUiProof(page: Page, options?: OnboardingUiP
   await clickButton(page, "Continue");
 
   await waitForText(page, "First project or campaign name");
-  await typeInto(page, "input[placeholder='e.g. Smoke Test']", focusName);
+  if (answerInputMethod === "voice") {
+    await installSpeechRecognitionMock(page, [focusAnswer, voiceAnswer]);
+    await clickButton(page, "Speak answer");
+    await waitForText(page, "I heard: " + focusAnswer);
+    await waitForText(page, focusAnswer);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await page.waitForFunction(`
+      Array.from(document.querySelectorAll("input"))
+        .some((input) => input.placeholder === "e.g. Smoke Test" && input.value.trim().length > 0)
+    `, { timeout: 30000 });
+  } else {
+    await typeInto(page, "input[placeholder='e.g. Smoke Test']", focusName);
+  }
   await clickButton(page, "Continue");
 
   await waitForText(page, "Tell me how this desk should sound for you.");
-  await typeIntoFirstTextarea(page, voiceAnswer);
-  await clickButton(page, "Use for defaults");
+  if (answerInputMethod === "voice") {
+    await clickButton(page, "Speak answer");
+    await waitForText(page, "I heard: " + voiceAnswer);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  } else {
+    await typeIntoFirstTextarea(page, voiceAnswer);
+    await clickButton(page, "Use for defaults");
+  }
   await waitForText(page, "HERE IS WHAT I UNDERSTOOD");
   await clickButton(page, "Finish setup");
 
@@ -151,7 +207,7 @@ export async function driveOnboardingUiProof(page: Page, options?: OnboardingUiP
   assert(result.setupOpen === false, "Setup canvas did not close after activation.");
   assert(result.complete === true, "Completion preference was not saved.");
   assert(result.firstValue?.complete === true, "First-value activation was not completed.");
-  assert(result.firstValue?.campaignName === focusName, "First-value campaign name was not persisted.");
+  assert(result.firstValue?.campaignName === expectedCampaignName, "First-value campaign name was not persisted.");
   assert(
     result.transcript?.complete === true,
     "Setup transcript did not mark required slots complete.\n" + JSON.stringify({
@@ -164,19 +220,20 @@ export async function driveOnboardingUiProof(page: Page, options?: OnboardingUiP
     result.transcript.turns.some((turn) =>
       turn.role === "user" &&
       turn.slotId === "communication_platforms" &&
-      turn.inputMethod === "typed" &&
-      turn.text === focusName,
+      turn.inputMethod === answerInputMethod &&
+      turn.text === focusAnswer,
     ),
-    "Focus answer was not captured as a typed communication-platform setup turn.",
+    "Focus answer was not captured as a " + answerInputMethod + " communication-platform setup turn.\n" +
+      JSON.stringify(result.transcript.turns, null, 2),
   );
   assert(
     result.transcript.turns.some((turn) =>
       turn.role === "user" &&
       turn.slotId === "voice_profile" &&
-      turn.inputMethod === "typed" &&
+      turn.inputMethod === answerInputMethod &&
       turn.text === voiceAnswer,
     ),
-    "Voice/preference answer was not captured as a typed setup turn.",
+    "Voice/preference answer was not captured as a " + answerInputMethod + " setup turn.",
   );
   assert(result.handoff?.deskThreadId, "Assistant handoff did not persist a Desk thread id.");
   assert(result.desk?.activeId === result.handoff.deskThreadId, "Handoff Desk thread is not active.");

@@ -517,9 +517,9 @@ value through both typed-fallback and voice-ready paths, request setup on a clea
 closed after completion or activation, persist its transcript, preserve the required answer input
 methods, bridge a desktop STT final transcript, and seed the Desk assistant handoff. Use
 `npm run onboarding:verify:browser` as the browser-shell proof that the actual static React/Babel
-front end opens setup on a clean install, completes the typed path through the real Store cache,
-captures focus and preference answers in the transcript, saves first value, closes setup, and
-lands on the active Desk handoff thread. Use `npm run desktop:verify-installed` as the packaged-app
-proof that the copied DMG payload can boot from a clean app-data directory and complete that same
-conversational setup path against the installed app server before running notarized desktop release
-checks.
+front end opens setup on a clean install, completes both typed and mocked speech-recognition paths
+through the real Store cache, captures focus and preference answers with the correct input method
+in the transcript, saves first value, records sentiment, closes setup, and lands on the active Desk
+handoff thread. Use `npm run desktop:verify-installed` as the packaged-app proof that the copied
+DMG payload can boot from a clean app-data directory and complete that same conversational setup
+path against the installed app server before running notarized desktop release checks.

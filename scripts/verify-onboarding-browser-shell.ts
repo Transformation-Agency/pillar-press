@@ -275,39 +275,65 @@ async function startServer(state: TestState) {
 }
 
 async function runBrowserShellProof() {
-  const state = createApiState();
-  const server = await startServer(state);
-  const pageErrors: string[] = [];
   const browser = await puppeteer.launch({
     headless: true,
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });
+  const scenarios = [
+    {
+      id: "typed",
+      state: createApiState(),
+      options: {},
+    },
+    {
+      id: "voice",
+      state: createApiState(),
+      options: {
+        answerInputMethod: "voice" as const,
+        focusAnswer: "Substack and book chapters",
+        expectedCampaignName: "Substack focus",
+        voiceAnswer: "I write for operators. Keep it spoken, direct, and useful.",
+        sentimentRating: 4,
+      },
+    },
+  ];
+  const results: unknown[] = [];
 
   try {
-    const page = await browser.newPage();
-    page.on("pageerror", (error) => {
-      pageErrors.push(error instanceof Error ? error.message : String(error));
-    });
-    page.on("console", (message) => {
-      if (message.type() === "error") pageErrors.push(message.text());
-    });
-    await page.setViewport({ width: 1280, height: 900 });
-    await page.goto(server.url, { waitUntil: "domcontentloaded" });
+    for (const scenario of scenarios) {
+      const server = await startServer(scenario.state);
+      const pageErrors: string[] = [];
+      const page = await browser.newPage();
+      try {
+        page.on("pageerror", (error) => {
+          pageErrors.push(error instanceof Error ? error.message : String(error));
+        });
+        page.on("console", (message) => {
+          if (message.type() === "error") pageErrors.push(message.text());
+        });
+        await page.setViewport({ width: 1280, height: 900 });
+        await page.goto(server.url, { waitUntil: "domcontentloaded" });
 
-    const result = await driveOnboardingUiProof(page);
-    assert(pageErrors.length === 0, "Browser shell logged errors:\n" + pageErrors.join("\n"));
+        const result = await driveOnboardingUiProof(page, scenario.options);
+        assert(pageErrors.length === 0, "Browser shell logged errors in " + scenario.id + " scenario:\n" + pageErrors.join("\n"));
+        results.push({
+          id: scenario.id,
+          url: server.url,
+          campaignName: result.firstValue?.campaignName,
+          transcriptTurns: result.transcript?.turns?.length || 0,
+          deskThreadId: result.handoff?.deskThreadId,
+          sentimentRating: result.sentiment?.rating,
+        });
+      } finally {
+        await page.close();
+        await server.close();
+      }
+    }
 
     console.log("ok onboarding browser shell proof");
-    console.log(JSON.stringify({
-      url: server.url,
-      campaignName: result.firstValue?.campaignName,
-      transcriptTurns: result.transcript?.turns?.length || 0,
-      deskThreadId: result.handoff?.deskThreadId,
-      sentimentRating: result.sentiment?.rating,
-    }, null, 2));
+    console.log(JSON.stringify({ scenarios: results }, null, 2));
   } finally {
     await browser.close();
-    await server.close();
   }
 }
 
