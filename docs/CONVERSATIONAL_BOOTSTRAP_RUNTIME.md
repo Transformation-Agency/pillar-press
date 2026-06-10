@@ -486,6 +486,7 @@ A production release candidate must pass:
 - Denied microphone permission falls back to typing.
 - All long-running actions show a busy state.
 - Sentiment prompt appears after setup and records against the setup session.
+- `npm run onboarding:verify`
 - `npm run typecheck`
 - `npm test`
 - `cargo test --manifest-path src-tauri/Cargo.toml`
@@ -498,3 +499,6 @@ Do not redesign the just-released onboarding again before production feedback.
 
 The next build should focus on end-to-end desktop proof: clean install, first-run setup, provider
 or intentional deferral, first focus, preferences saved, Desk handoff, and signed release checks.
+Use `npm run onboarding:verify` as the repeatable local proof that the bootstrap can reach first
+value, persist its transcript, and seed the Desk assistant handoff before running notarized desktop
+release checks.
