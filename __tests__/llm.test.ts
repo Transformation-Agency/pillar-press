@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createAI, LLMError, type LLMAdapter } from "@/lib/llm";
+import { createAI, createAIFromConfig, LLMError, type LLMAdapter } from "@/lib/llm";
 import { resolveMainLLMConfig, resolveTaskLLMConfig, publicLLMStatus } from "@/lib/llm/config";
 import { geminiProvider } from "@/lib/llm/providers/gemini";
 import { openAICompatibleProvider } from "@/lib/llm/providers/openaiCompatible";
@@ -436,6 +436,31 @@ describe("provider adapters", () => {
 });
 
 describe("provider-neutral AI wrapper", () => {
+  it("creates a one-off AI client from an unsaved provider config", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ choices: [{ message: { content: "OK" } }] }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const ai = createAIFromConfig({
+      provider: "openai",
+      model: "gpt-4o-mini",
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: "setup-key",
+      maxTokens: 32,
+    });
+
+    await expect(ai.text("Reply OK")).resolves.toBe("OK");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.openai.com/v1/chat/completions",
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: "Bearer setup-key" }),
+      }),
+    );
+  });
+
   it("uses the JSON repair round-trip and preserves the system preamble shaping", async () => {
     const calls: Array<{ role: string; content: string }[]> = [];
     const adapter: LLMAdapter = {

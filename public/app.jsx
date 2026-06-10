@@ -453,6 +453,35 @@ function DesktopOnboarding() {
     return json.models || [];
   };
 
+  const providerBaseUrl = (provider) => ({
+    openai: "https://api.openai.com/v1",
+    xai: "https://api.x.ai/v1",
+    gemini: "https://generativelanguage.googleapis.com/v1beta",
+    anthropic: "https://api.anthropic.com/v1",
+    ollama: "http://127.0.0.1:11434",
+  }[provider] || "");
+
+  const currentProviderConfig = () => {
+    if (setupMode === "ollama") {
+      return { provider: "ollama", model: model.trim(), baseUrl: "http://127.0.0.1:11434" };
+    }
+    if (setupMode === "docker") {
+      return {
+        provider: "openai-compatible",
+        model: model.trim(),
+        baseUrl: dockerBaseUrl.trim() || "http://localhost:12434/engines/v1",
+      };
+    }
+    return {
+      provider: cloudProvider,
+      model: model.trim(),
+      apiKey: apiKey.trim(),
+      baseUrl: cloudProvider === "openai-compatible"
+        ? cloudBaseUrl.trim()
+        : providerBaseUrl(cloudProvider),
+    };
+  };
+
   const savedModelChoiceComplete = (saved, ollamaStatus, ollamaModels, savedDockerModels) => {
     const active = activeProfileFromSettings(saved);
     if (!active || !active.provider || !active.model) return false;
@@ -599,6 +628,54 @@ function DesktopOnboarding() {
     setBusy(false);
   };
 
+  const listCloudModels = async () => {
+    const config = currentProviderConfig();
+    setBusy(true); setMessage("Listing models from " + providerLabel(config.provider) + ".");
+    try {
+      if (config.provider === "openai-compatible" && !config.baseUrl) throw new Error("Add a base URL first.");
+      if (config.provider !== "openai-compatible" && config.provider !== "ollama" && !config.apiKey) throw new Error("Add an API key first.");
+      const res = await fetch("/api/llm/models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(config),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) throw new Error((json && json.error) || "Could not list models.");
+      const listed = json && Array.isArray(json.models) ? json.models : [];
+      if (listed.length) {
+        setModel(listed[0]);
+        setMessage("Loaded " + listed.length + " model" + (listed.length === 1 ? "" : "s") + ".");
+      } else {
+        setMessage("Provider responded, but no models were listed. You can still type a model name and test it.");
+      }
+    } catch (e) {
+      setMessage((e && e.message) || "Could not list models. You can still type a model name and test it.");
+    }
+    setBusy(false);
+  };
+
+  const testModel = async () => {
+    const config = currentProviderConfig();
+    if (!config.model) {
+      setMessage("Choose or type a model before testing.");
+      return;
+    }
+    setBusy(true); setMessage("Testing " + providerLabel(config.provider) + " " + config.model + ".");
+    try {
+      const res = await fetch("/api/llm/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(config),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) throw new Error((json && json.error) || "The model test failed.");
+      setMessage("Test passed for " + providerLabel(config.provider) + " " + config.model + ".");
+    } catch (e) {
+      setMessage((e && e.message) || "The model test failed.");
+    }
+    setBusy(false);
+  };
+
   const finish = async () => {
     setBusy(true);
     try {
@@ -609,7 +686,7 @@ function DesktopOnboarding() {
         if (!installed || !running || !models.includes(picked)) throw new Error("Install or start Ollama, then pull the selected model.");
         nextProfile = { provider: "ollama", model: picked, baseUrl: "http://127.0.0.1:11434" };
       } else if (setupMode === "docker") {
-        if (!dockerModels.includes(picked)) throw new Error("List Docker models, then choose one of the available models.");
+        if (!dockerBaseUrl.trim()) throw new Error("Add the Docker Model Runner URL.");
         nextProfile = {
           provider: "openai-compatible",
           model: picked,
@@ -689,7 +766,7 @@ function DesktopOnboarding() {
   const canUseModel = setupMode === "ollama"
     ? installed && running && hasModel && !!model.trim()
     : setupMode === "docker"
-      ? !!model.trim() && !!dockerBaseUrl.trim() && dockerModels.includes(model.trim())
+      ? !!model.trim() && !!dockerBaseUrl.trim()
       : !!model.trim() && !!apiKey.trim() && (cloudProvider !== "openai-compatible" || !!cloudBaseUrl.trim());
   const savedProfiles = profilesFromSettings(savedSettings);
 
@@ -771,10 +848,16 @@ function DesktopOnboarding() {
           </div>
         )}
         <label className="eyebrow" style={{ display: "block", marginTop: 18, marginBottom: 6 }}>Model</label>
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(180px, 1fr) auto auto", gap: 8 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(180px, 1fr) auto auto auto", gap: 8 }}>
           <input className="field" value={model} onChange={(e) => setModel(e.target.value)} list="desktop-model-options" placeholder={setupMode === "cloud" ? "model name" : "llama3.2"} />
           <datalist id="desktop-model-options">{(setupMode === "docker" ? dockerModels : setupMode === "cloud" ? (cloudModels[cloudProvider] || []) : modelOptions).map((m) => <option key={m} value={m} />)}</datalist>
-          <button className="btn" disabled={busy || setupMode !== "ollama" || !installed || !running || hasModel} onClick={pullModel}><Icon name="doc" size={14} /> Pull</button>
+          {setupMode === "ollama" && (
+            <button className="btn" disabled={busy || !installed || !running || hasModel || !model.trim()} onClick={pullModel}><Icon name="doc" size={14} /> Pull</button>
+          )}
+          {setupMode === "cloud" && (
+            <button className="btn" disabled={busy || (cloudProvider !== "openai-compatible" && !apiKey.trim()) || (cloudProvider === "openai-compatible" && !cloudBaseUrl.trim())} onClick={listCloudModels}><Icon name="check" size={14} /> List models</button>
+          )}
+          <button className="btn" disabled={busy || !canUseModel} onClick={testModel}><Icon name="play" size={14} /> Test</button>
           <button className="btn primary" disabled={busy || !canUseModel} onClick={finish}>Use model</button>
         </div>
         <label className="eyebrow" style={{ display: "block", marginTop: 14, marginBottom: 6 }}>Profile name</label>

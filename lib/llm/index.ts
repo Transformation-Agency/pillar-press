@@ -115,6 +115,10 @@ export function getAIForTask(task: LLMTask): AI {
   return next;
 }
 
+export function createAIFromConfig(config: LLMConfig): AI {
+  return createAI(createAdapter(config));
+}
+
 export function getFileAI(required: "vision" | "pdf"): LLMAdapter {
   const fileConfig = resolveFileLLMConfig();
   const candidates: LLMConfig[] = [];
