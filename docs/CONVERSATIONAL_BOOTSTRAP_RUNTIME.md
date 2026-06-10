@@ -491,6 +491,7 @@ A production release candidate must pass:
 - All long-running actions show a busy state.
 - Sentiment prompt appears after setup and records against the setup session.
 - `npm run onboarding:verify`
+- `npm run onboarding:verify:browser`
 - `npm run typecheck`
 - `npm test`
 - `cargo test --manifest-path src-tauri/Cargo.toml`
@@ -506,5 +507,8 @@ or intentional deferral, first focus, preferences saved, Desk handoff, and signe
 Use `npm run onboarding:verify` as the repeatable local proof that the bootstrap can reach first
 value through both typed-fallback and voice-ready paths, request setup on a clean first run, stay
 closed after completion or activation, persist its transcript, preserve the required answer input
-methods, bridge a desktop STT final transcript, and seed the Desk assistant handoff before running
-notarized desktop release checks.
+methods, bridge a desktop STT final transcript, and seed the Desk assistant handoff. Use
+`npm run onboarding:verify:browser` as the browser-shell proof that the actual static React/Babel
+front end opens setup on a clean install, completes the typed path through the real Store cache,
+captures focus and preference answers in the transcript, saves first value, closes setup, and
+lands on the active Desk handoff thread before running notarized desktop release checks.

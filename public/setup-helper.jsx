@@ -995,7 +995,14 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
   const [setupProfileDraft, setSetupProfileDraft] = React.useState(null);
   const [profileBusy, setProfileBusy] = React.useState(false);
   const [focusActivation, setFocusActivation] = React.useState(null);
-  const [conversationState, setConversationState] = React.useState(() => ONBOARDING_CONVERSATION.createState());
+  const [conversationState, setConversationStateBase] = React.useState(() => ONBOARDING_CONVERSATION.createState());
+  const conversationStateRef = React.useRef(conversationState);
+  const setConversationState = React.useCallback((updater) => {
+    const current = conversationStateRef.current || ONBOARDING_CONVERSATION.createState();
+    const next = typeof updater === "function" ? updater(current) : updater;
+    conversationStateRef.current = next;
+    setConversationStateBase(next);
+  }, []);
   const transcriptHandlerRef = React.useRef(null);
   const listenSessionRef = React.useRef(null);
   const setupStartedAtRef = React.useRef(Date.now());
@@ -1237,6 +1244,41 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
       ONBOARDING_CONVERSATION.metricForAnswer(ONBOARDING_CONVERSATION.SLOT_IDS.COMMUNICATION_PLATFORMS, inputMethod || "typed"),
     );
     return { focusName };
+  }
+
+  function communicationSetupHasDecision(stateInput) {
+    const stateToCheck = stateInput || conversationState;
+    const slot = stateToCheck && stateToCheck.slots && stateToCheck.slots[ONBOARDING_CONVERSATION.SLOT_IDS.COMMUNICATION_PLATFORMS];
+    return !!(slot && slot.status && slot.status !== "empty");
+  }
+
+  function captureFocusNameAsSetupAnswer(answer, inputMethod) {
+    const clean = String(answer || "").trim();
+    if (!clean || communicationSetupHasDecision()) return;
+    setConversationState((current) => {
+      if (communicationSetupHasDecision(current)) return current;
+      return ONBOARDING_CONVERSATION.captureAnswer(
+        current,
+        ONBOARDING_CONVERSATION.SLOT_IDS.COMMUNICATION_PLATFORMS,
+        clean,
+        inputMethod || "typed",
+      );
+    });
+    setPlatformAnswerCaptured(true);
+    if (!setupProfileDraft) {
+      const profile = ONBOARDING_PROFILE.buildProfileDraft({
+        transcript: clean,
+        currentDraft: setupProfileDraft,
+      });
+      setSetupProfileDraft(profile);
+      if (prefDraft) {
+        setPrefDraft(ONBOARDING_PROFILE.applyProfileToPreferences(profile, prefDraft));
+      }
+    }
+    recordMetric(
+      ONBOARDING_METRIC_EVENTS.ANSWER_CAPTURED,
+      ONBOARDING_CONVERSATION.metricForAnswer(ONBOARDING_CONVERSATION.SLOT_IDS.COMMUNICATION_PLATFORMS, inputMethod || "typed"),
+    );
   }
 
   function voiceSetupHasDecision(stateInput, includeRef = true) {
@@ -1676,6 +1718,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
 
   async function ensureFocus(nameOverride) {
     const clean = String(nameOverride || campaignName || "").trim();
+    captureFocusNameAsSetupAnswer(clean || (activeCampaign && activeCampaign.name) || "Untitled focus", "typed");
     if (activeCampaign && (!clean || clean === activeCampaign.name)) {
       const activation = { campaignId: activeCampaign.id, campaignName: activeCampaign.name || clean || "Current focus", reused: true };
       setFocusActivation(activation);
@@ -1791,6 +1834,36 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     });
   };
 
+  function ensureRequiredSetupAnswersForTranscript(focusNameInput, options) {
+    const skipPreferences = !!(options && options.skipPreferences);
+    let next = conversationStateRef.current || conversationState || ONBOARDING_CONVERSATION.createState();
+    const slots = (next && next.slots) || {};
+    const communicationSlot = slots[ONBOARDING_CONVERSATION.SLOT_IDS.COMMUNICATION_PLATFORMS];
+    const cleanFocus = String(focusNameInput || campaignName || "").trim();
+    if (cleanFocus && (!communicationSlot || communicationSlot.status !== "answered")) {
+      next = ONBOARDING_CONVERSATION.captureAnswer(
+        next,
+        ONBOARDING_CONVERSATION.SLOT_IDS.COMMUNICATION_PLATFORMS,
+        cleanFocus,
+        "typed",
+      );
+    }
+    const latestSlots = (next && next.slots) || {};
+    const voiceProfileSlot = latestSlots[ONBOARDING_CONVERSATION.SLOT_IDS.VOICE_PROFILE];
+    const cleanProfile = String(profileAnswer || "").trim();
+    if (!skipPreferences && cleanProfile && (!voiceProfileSlot || voiceProfileSlot.status !== "answered")) {
+      next = ONBOARDING_CONVERSATION.captureAnswer(
+        next,
+        ONBOARDING_CONVERSATION.SLOT_IDS.VOICE_PROFILE,
+        cleanProfile,
+        "typed",
+      );
+    }
+    conversationStateRef.current = next;
+    setConversationStateBase(next);
+    return next;
+  }
+
   const finish = async (options) => {
     const skipPreferences = !!(options && options.skipPreferences);
     setSetupError("");
@@ -1827,8 +1900,9 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
         setupDurationMs,
         completedFrom: skipPreferences ? "preferences_skipped" : "preferences_saved",
       };
+      const finalConversationState = ensureRequiredSetupAnswersForTranscript(firstValue.campaignName, { skipPreferences });
       const setupTranscriptPayload = ONBOARDING_CONVERSATION && ONBOARDING_CONVERSATION.transcriptForState
-        ? ONBOARDING_CONVERSATION.transcriptForState(conversationState)
+        ? ONBOARDING_CONVERSATION.transcriptForState(finalConversationState)
         : null;
       let completionPayload = {
         routeTarget: firstValue.routeTarget,
