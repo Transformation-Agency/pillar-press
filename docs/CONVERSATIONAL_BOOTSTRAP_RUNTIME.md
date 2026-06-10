@@ -183,6 +183,12 @@ The handoff should include:
 - Provider capabilities.
 - Clear boundaries around memory, web use, publishing, sending, and outside services.
 
+Current King's Press implementation persists this handoff as `onboardingAssistantHandoffV1` and
+seeds a durable Desk thread from the setup transcript. The seeded thread is marked
+`source: "kings_press_setup"`, becomes the active Desk thread, and records a
+`live_assistant_handoff` metric so activation can be correlated to the continuing assistant
+surface.
+
 ## Manifest Schema
 
 The runtime should consume a declarative manifest rather than hard-code setup steps inside UI.
@@ -392,6 +398,7 @@ Current implementation already persists:
 - `onboardingMetricsSummaryV1`
 - `onboardingFirstValueEventV1`
 - `onboardingSentimentV1`
+- `onboardingAssistantHandoffV1`
 
 The next implementation pass should add repair/fallback events and correlate sentiment with the
 setup session id.
@@ -439,10 +446,13 @@ When provider setup succeeds, hand off from deterministic bootstrap to the real 
 
 Deliverables:
 
-- Setup transcript persisted as a desk session.
+- Setup transcript persisted as a Desk thread.
 - Approved profile injected into assistant context.
 - First post-setup assistant prompt.
 - `live_assistant_handoff` metric.
+
+Status: partial. The transcript now seeds the Desk thread and records the handoff metric; the next
+pass should make the approved profile available to the live assistant context explicitly.
 
 ### Slice 5: Voice Runtime Upgrade
 

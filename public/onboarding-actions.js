@@ -20,6 +20,7 @@
     COMPLETED: "onboarding_completed",
     SENTIMENT_SUBMITTED: "sentiment_submitted",
     SENTIMENT_DISMISSED: "sentiment_dismissed",
+    LIVE_ASSISTANT_HANDOFF: "live_assistant_handoff",
   };
 
   const EVENTS = {
@@ -70,6 +71,84 @@
     }
     if (typeof Store.setPref === "function") {
       Object.keys(patch).forEach((key) => Store.setPref(key, patch[key]));
+    }
+  }
+
+  function handoffThreadId(sessionId) {
+    const safe = String(sessionId || "setup")
+      .replace(/[^a-z0-9_-]+/gi, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 80) || "setup";
+    return "setup_handoff_" + safe;
+  }
+
+  function transcriptTurnToMessage(turn, index) {
+    const role = turn && turn.role === "user" ? "user" : "assistant";
+    const content = String((turn && (turn.text || turn.content)) || "").trim();
+    if (!content) return null;
+    return {
+      id: "setup_msg_" + index,
+      role,
+      content,
+    };
+  }
+
+  function buildHandoffThread(handoff, transcript) {
+    const threadId = handoffThreadId(handoff && handoff.sessionId);
+    const turns = transcript && Array.isArray(transcript.turns) ? transcript.turns : [];
+    const messages = turns
+      .map(transcriptTurnToMessage)
+      .filter(Boolean);
+    const campaignName = (handoff && handoff.campaignName) || "your first focus";
+    const providerReady = !!(handoff && handoff.providerReady);
+    messages.push({
+      id: "setup_msg_ready",
+      role: "assistant",
+      content: providerReady
+        ? "Setup is ready for " + campaignName + ". I kept our setup transcript here, so you can continue by telling me what you want to draft, gather, or refine first."
+        : "Setup is saved for " + campaignName + ". Model setup is still deferred, but I kept our setup transcript here so the desk can continue once a provider is ready.",
+    });
+    return {
+      id: threadId,
+      title: "Setup handoff",
+      titleSet: true,
+      source: "kings_press_setup",
+      sessionId: handoff && handoff.sessionId,
+      campaignId: handoff && handoff.campaignId,
+      messages,
+      memory: {
+        note: "Onboarding captured the first focus, provider/voice decision, and essential writing preferences. Continue from this setup context.",
+        covered: turns.length,
+      },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+  }
+
+  function seedDeskHandoffThread(handoff, transcript) {
+    const intent = INTENTS.COMPLETE_ONBOARDING || "complete_onboarding";
+    try {
+      const Store = window.Store;
+      if (!Store || typeof Store.getDesk !== "function" || typeof Store.setDesk !== "function") {
+        return null;
+      }
+      const thread = buildHandoffThread(handoff, transcript);
+      const desk = Store.getDesk() || { threads: [], activeId: null };
+      const threads = Array.isArray(desk.threads) ? desk.threads.slice() : [];
+      const existingIndex = threads.findIndex((item) => item && item.id === thread.id);
+      if (existingIndex >= 0) threads[existingIndex] = Object.assign({}, threads[existingIndex], thread);
+      else threads.unshift(thread);
+      Store.setDesk(Object.assign({}, desk, {
+        threads,
+        activeId: thread.id,
+      }));
+      return {
+        deskThreadId: thread.id,
+        transcriptTurnCount: transcript && Array.isArray(transcript.turns) ? transcript.turns.length : 0,
+      };
+    } catch (error) {
+      console.warn("[Onboarding] " + cleanError(error, "Could not seed setup handoff thread."));
+      return null;
     }
   }
 
@@ -329,7 +408,22 @@
           ? "live_assistant_ready"
           : "scripted_assistant_until_provider_ready",
       };
+      const handoffThread = seedDeskHandoffThread(handoff, transcript);
+      if (handoffThread && handoffThread.deskThreadId) {
+        handoff.deskThreadId = handoffThread.deskThreadId;
+      }
       Store.setPref(flags.handoffPref || "onboardingAssistantHandoffV1", handoff);
+      if (handoffThread && handoffThread.deskThreadId) {
+        persistMetricsEvent({
+          type: METRIC_EVENTS.LIVE_ASSISTANT_HANDOFF,
+          sessionId: options && options.sessionId,
+          firstValueComplete: !!(firstValueEvent && firstValueEvent.complete),
+          routeTarget: handoff.routeTarget,
+          campaignId: handoff.campaignId,
+          deskThreadId: handoffThread.deskThreadId,
+          transcriptTurnCount: handoffThread.transcriptTurnCount,
+        });
+      }
       persistMetricsEvent({
         type: METRIC_EVENTS.COMPLETED,
         sessionId: options && options.sessionId,
@@ -411,6 +505,8 @@
     extractSetupProfile,
     persistMetricsEvent,
     recordMetric,
+    buildHandoffThread,
+    seedDeskHandoffThread,
     submitSentiment,
     dismissSentiment,
     completeOnboarding,

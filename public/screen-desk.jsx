@@ -145,6 +145,7 @@ function Desk({ campaignId, onOpenPiece }) {
 
   const threads = desk.threads || [];
   const active = threads.find((t) => t.id === desk.activeId) || threads[0];
+  const isSetupHandoff = !!(active && active.source === "kings_press_setup");
   const win = contextWindowFor(status);
   const used = active ? deskUsedTokens(active) : 0;
   const pct = Math.min(1, used / win);
@@ -219,7 +220,9 @@ function Desk({ campaignId, onOpenPiece }) {
                 style={{ all: "unset", cursor: "pointer", boxSizing: "border-box", display: "grid", gridTemplateColumns: "1fr auto", gap: 8, width: "100%", padding: "10px 11px", borderRadius: "var(--radius)", marginBottom: 3, background: on ? "var(--paper-2)" : "transparent", border: "1px solid " + (on ? "var(--hair)" : "transparent") }}>
                 <span style={{ minWidth: 0 }}>
                   <span style={{ display: "block", fontFamily: "var(--font-display)", fontSize: 15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.title || "New thread"}</span>
-                  <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)" }}>{(t.messages || []).length} turns</span>
+                  <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)" }}>
+                    {t.source === "kings_press_setup" ? "setup handoff · " : ""}{(t.messages || []).length} turns
+                  </span>
                 </span>
                 <span onClick={(e) => { e.stopPropagation(); deleteThread(t.id); }} title="Delete thread" style={{ color: "var(--ink-3)", padding: 2 }}><Icon name="trash" size={13} /></span>
               </button>
@@ -247,6 +250,12 @@ function Desk({ campaignId, onOpenPiece }) {
               <div className="card" style={{ padding: "12px 14px", color: "var(--ink-2)", fontSize: 14, lineHeight: 1.55 }}>
                 <div className="eyebrow" style={{ marginBottom: 5 }}>Folded memory · {active.memory.covered} turns</div>
                 {active.memory.note}
+              </div>
+            )}
+            {isSetupHandoff && (
+              <div className="card" style={{ padding: "14px 16px", color: "var(--ink-2)", fontSize: 14.5, lineHeight: 1.55, borderColor: "color-mix(in oklab, var(--accent) 28%, var(--hair))" }}>
+                <div className="eyebrow" style={{ marginBottom: 5 }}>Setup handoff</div>
+                This thread starts from your onboarding transcript. Continue here with the same desk: ask for a first draft, gather sources, refine your preferences, or send the thread to the Library when it becomes a piece.
               </div>
             )}
             {active && !(active.messages || []).length && !busy && (

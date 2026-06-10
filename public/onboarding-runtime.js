@@ -144,6 +144,7 @@
     COMPLETED: "onboarding_completed",
     SENTIMENT_SUBMITTED: "sentiment_submitted",
     SENTIMENT_DISMISSED: "sentiment_dismissed",
+    LIVE_ASSISTANT_HANDOFF: "live_assistant_handoff",
   };
 
   const defaultTrust = {
@@ -467,6 +468,7 @@
     const stepId = current.stepId ? getStepById(current.stepId).id : null;
     const rating = clampRating(current.rating);
     const durationMs = Number(current.durationMs);
+    const transcriptTurnCount = Number(current.transcriptTurnCount);
     return {
       id: current.id || ("metric-" + Math.random().toString(36).slice(2, 10) + "-" + Date.now().toString(36)),
       version: METRICS_VERSION,
@@ -482,6 +484,8 @@
       firstValueComplete: current.firstValueComplete === undefined ? null : !!current.firstValueComplete,
       routeTarget: safeMetricString(current.routeTarget, 64) || null,
       campaignId: safeMetricString(current.campaignId, 96) || null,
+      deskThreadId: safeMetricString(current.deskThreadId, 120) || null,
+      transcriptTurnCount: Number.isFinite(transcriptTurnCount) ? Math.max(0, Math.round(transcriptTurnCount)) : null,
       skippedReason: safeMetricString(current.skippedReason, 96) || null,
       rating,
       durationMs: Number.isFinite(durationMs) ? Math.max(0, Math.round(durationMs)) : null,

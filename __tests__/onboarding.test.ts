@@ -861,10 +861,15 @@ describe("browser onboarding action registry", () => {
   it("persists onboarding completion and rich first-value metadata", async () => {
     const window = loadBrowserActions();
     const prefs: Record<string, unknown> = {};
+    let deskState: any = { threads: [], activeId: null };
     window.Store = {
       getPref: (key: string, fallback: unknown) => Object.prototype.hasOwnProperty.call(prefs, key) ? prefs[key] : fallback,
       setPref: (key: string, value: unknown) => {
         prefs[key] = value;
+      },
+      getDesk: () => deskState,
+      setDesk: (next: any) => {
+        deskState = next;
       },
     };
 
@@ -930,7 +935,30 @@ describe("browser onboarding action registry", () => {
       transcriptPref: "onboardingSetupTranscriptV1",
       transcriptTurnCount: 2,
       nextAssistantMode: "live_assistant_ready",
+      deskThreadId: "setup_handoff_session-activation",
     });
+    expect(deskState.activeId).toBe("setup_handoff_session-activation");
+    expect(deskState.threads[0]).toMatchObject({
+      id: "setup_handoff_session-activation",
+      title: "Setup handoff",
+      source: "kings_press_setup",
+      sessionId: "session-activation",
+      campaignId: "camp_1",
+    });
+    expect(deskState.threads[0].messages.map((message: any) => message.role)).toEqual([
+      "assistant",
+      "user",
+      "assistant",
+    ]);
+    expect(deskState.threads[0].messages[2].content).toContain("Setup is ready for Launch plan");
+    expect(prefs.onboardingMetricsEventsV1).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "live_assistant_handoff",
+          deskThreadId: "setup_handoff_session-activation",
+        }),
+      ])
+    );
     expect(prefs.onboardingMetricsSummaryV1).toMatchObject({
       sessionsCompleted: 1,
       firstValueActivations: 1,
