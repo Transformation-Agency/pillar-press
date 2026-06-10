@@ -89,8 +89,10 @@ npm run desktop:verify-installed
 
 `desktop:verify-installed` tests the user-facing installer path: it mounts the
 DMG, copies the app into a temporary Applications folder, launches the copied app
-through macOS LaunchServices, and verifies a fresh local SQLite app-data
-directory with no default campaigns.
+through macOS LaunchServices, verifies a fresh local SQLite app-data directory
+with no default campaigns, and drives the first-run conversational setup through
+a mocked speech-recognition answer, first-value activation, sentiment, and Desk
+handoff.
 
 Developer ID signing and Apple notarization use the stricter signed path:
 ```bash

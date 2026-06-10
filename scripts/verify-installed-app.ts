@@ -250,13 +250,17 @@ try {
     await page.setViewport({ width: 1280, height: 900 });
     await page.goto(`${serverUrl}/`, { waitUntil: "domcontentloaded" });
     const onboarding = await driveOnboardingUiProof(page, {
-      focusName: "Installed App Focus",
-      voiceAnswer: "I write for operators. Keep the setup plainspoken, useful, and direct.",
+      answerInputMethod: "voice",
+      focusAnswer: "Installed journals",
+      expectedCampaignName: "Installed journals focus",
+      voiceAnswer: "I write for operators. Keep the installed setup spoken, useful, and direct.",
+      sentimentRating: 4,
     });
     if (pageErrors.length) {
       throw new Error(`Installed app onboarding UI logged errors:\n${pageErrors.join("\n")}`);
     }
     console.log(`ok installed app conversational onboarding (${onboarding.firstValue?.campaignName})`);
+    console.log(`ok installed app onboarding handoff (${onboarding.handoff?.nextAssistantMode})`);
     console.log(`ok installed app onboarding sentiment (${onboarding.sentiment?.rating}/5)`);
   } finally {
     await browser.close();
