@@ -147,6 +147,9 @@ export async function driveOnboardingUiProof(page: Page, options?: OnboardingUiP
       "Setup stepper is still visible; expected one continuous conversation canvas.",
     );
   }
+  await waitForText(page, "Mute");
+  await clickButton(page, "Mute");
+  await waitForText(page, "Muted");
   await waitForText(page, "Would you like a guided intro");
 
   await clickButton(page, "Yes, guide me");

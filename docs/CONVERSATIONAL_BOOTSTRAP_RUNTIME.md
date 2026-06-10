@@ -83,6 +83,9 @@ For King's Press, the current implementation maps to these files:
 - Captions/transcripts remain visible when speech is used.
 - Voice can be muted or skipped at every voice-dependent step.
 
+Current implementation exposes a setup-toolbar mute toggle. The browser-shell proof toggles it
+before completing typed and mocked speech-recognition setup paths.
+
 ### Permissions
 
 - Value first, permission second.
@@ -520,10 +523,11 @@ value through both typed-fallback and voice-ready paths, request setup on a clea
 closed after completion or activation, persist its transcript, preserve the required answer input
 methods, bridge a desktop STT final transcript, and seed the Desk assistant handoff. Use
 `npm run onboarding:verify:browser` as the browser-shell proof that the actual static React/Babel
-front end opens setup on a clean install, completes both typed and mocked speech-recognition paths
-through the real Store cache, captures focus and preference answers with the correct input method
-in the transcript, saves first value, records sentiment, closes setup, and lands on the active
-Desk handoff thread in `live_assistant_ready` mode when a provider is available. Use
+front end opens setup on a clean install, exposes and toggles the mute control, completes both
+typed and mocked speech-recognition paths through the real Store cache, captures focus and
+preference answers with the correct input method in the transcript, saves first value, records
+sentiment, closes setup, and lands on the active Desk handoff thread in `live_assistant_ready`
+mode when a provider is available. Use
 `npm run desktop:verify-installed` as the packaged-app proof that the copied DMG payload can boot
 from a clean app-data directory and complete that same conversational setup path against the
 installed app server before running notarized desktop release checks.

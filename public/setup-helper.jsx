@@ -194,7 +194,7 @@ function SetupHostPanel({ conversation, mode, onModeChange, actionResults, setup
   );
 }
 
-function SetupConversationCanvas({ children, conversation, mode, onModeChange, actionResults, setupError, conversationState, onBack }) {
+function SetupConversationCanvas({ children, conversation, mode, onModeChange, actionResults, setupError, conversationState, onBack, muted, onToggleMute }) {
   const slotPrompts = (ONBOARDING_CONVERSATION && ONBOARDING_CONVERSATION.slotPrompts) || {};
   const sequence = (ONBOARDING_CONVERSATION && ONBOARDING_CONVERSATION.QUESTION_SEQUENCE) || [];
   const slots = (conversationState && conversationState.slots) || {};
@@ -233,6 +233,17 @@ function SetupConversationCanvas({ children, conversation, mode, onModeChange, a
           <SetupChoiceChip label="Guide me" icon="sparkle" active={mode === "guided"} onClick={() => onModeChange("guided")} />
           <SetupChoiceChip label="Type" icon="doc" active={mode === "text"} onClick={() => onModeChange("text")} />
           <SetupChoiceChip label="Voice" icon="mic" active={mode === "voice"} onClick={() => onModeChange("voice")} />
+          <button
+            className="kp-choice-chip"
+            type="button"
+            data-active={muted ? "true" : "false"}
+            onClick={onToggleMute}
+            aria-pressed={muted ? "true" : "false"}
+            aria-label={muted ? "Unmute setup voice" : "Mute setup voice"}
+          >
+            <Icon name={muted ? "xLogo" : "play"} size={16} />
+            {muted ? "Muted" : "Mute"}
+          </button>
         </div>
       </div>
       {onBack && (
@@ -289,7 +300,7 @@ function SetupConversationCanvas({ children, conversation, mode, onModeChange, a
   );
 }
 
-function SetupShell({ children, conversation, mode, onModeChange, actionResults, setupError, centered, showHost, conversationState, onBack }) {
+function SetupShell({ children, conversation, mode, onModeChange, actionResults, setupError, centered, showHost, conversationState, onBack, muted, onToggleMute }) {
   return (
     <main className={"kp-setup-shell kp-setup-shell-canvas" + (centered ? " kp-setup-shell-centered" : "")}>
       <SetupConversationCanvas
@@ -300,6 +311,8 @@ function SetupShell({ children, conversation, mode, onModeChange, actionResults,
         setupError={setupError}
         conversationState={conversationState}
         onBack={onBack}
+        muted={muted}
+        onToggleMute={onToggleMute}
       >
         {children}
       </SetupConversationCanvas>
@@ -977,6 +990,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
   const [setupError, setSetupError] = React.useState("");
   const [actionResults, setActionResults] = React.useState({});
   const [setupMode, setSetupMode] = React.useState("guided");
+  const [audioMuted, setAudioMuted] = React.useState(false);
   const [campaignName, setCampaignName] = React.useState("");
   const [prefDraft, setPrefDraft] = React.useState(null);
   const [draftStyle, setDraftStyle] = React.useState("Polished");
@@ -1059,6 +1073,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     setConversationState(ONBOARDING_CONVERSATION.createState());
     setIntroAnswer("");
     setIntroVisible(false);
+    setAudioMuted(false);
     recordMetric(ONBOARDING_METRIC_EVENTS.STARTED, { stepId: "intro" });
     const refs = window.Store.activeReferences ? window.Store.activeReferences() : {};
     const throughline = refs.strategy && refs.strategy.throughlines && refs.strategy.throughlines[0];
@@ -1697,7 +1712,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     ));
     setIntroVisible(true);
     recordAction(ONBOARDING_ACTIONS.PLAY_INTRO, ONBOARDING_ACTION_STATUSES.PENDING);
-    if (voiceConnected) {
+    if (voiceConnected && !audioMuted) {
       await ONBOARDING_AUDIO.speakText(introScript, { interrupt: true });
     }
     recordAction(ONBOARDING_ACTIONS.PLAY_INTRO, ONBOARDING_ACTION_STATUSES.SUCCEEDED);
@@ -2799,7 +2814,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
         <OnboardingBrand />
 
         {step === 0 && (
-          <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError} conversationState={conversationState} centered hostless>
+      <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError} conversationState={conversationState} muted={audioMuted} onToggleMute={() => setAudioMuted((value) => !value)} centered hostless>
             <section style={{
               border: "1px solid #D8CEC3", borderRadius: 10, background: "rgba(255, 252, 246, 0.68)",
               overflow: "hidden",
@@ -2840,7 +2855,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
         )}
 
         {step === 1 && (
-          <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError} conversationState={conversationState} onBack={() => goToStep(0)}>
+          <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError} conversationState={conversationState} muted={audioMuted} onToggleMute={() => setAudioMuted((value) => !value)} onBack={() => goToStep(0)}>
             <section style={{
               border: "1px solid #D8CEC3", borderRadius: 10, background: "rgba(255, 252, 246, 0.68)",
               overflow: "hidden",
@@ -2882,7 +2897,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
         )}
 
         {step === 2 && (
-          <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError} conversationState={conversationState} onBack={() => goToStep(1)}>
+          <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError} conversationState={conversationState} muted={audioMuted} onToggleMute={() => setAudioMuted((value) => !value)} onBack={() => goToStep(1)}>
             <section style={{
               border: "1px solid #D8CEC3", borderRadius: 10, background: "rgba(255, 252, 246, 0.68)",
               overflow: "hidden",
@@ -2921,7 +2936,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
         )}
 
         {step === 3 && (
-          <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError} conversationState={conversationState} onBack={() => goToStep(2)}>
+          <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError} conversationState={conversationState} muted={audioMuted} onToggleMute={() => setAudioMuted((value) => !value)} onBack={() => goToStep(2)}>
             <SetupField label="First project or campaign name" helper="Name the first place King's Press should organize drafts, sources, and notes.">
               <input
                 className="kp-setup-input"
@@ -2985,7 +3000,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
         )}
 
         {step === 4 && prefDraft && (
-          <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError} conversationState={conversationState} onBack={() => goToStep(3)}>
+          <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError} conversationState={conversationState} muted={audioMuted} onToggleMute={() => setAudioMuted((value) => !value)} onBack={() => goToStep(3)}>
             <SetupAnswerComposer
               question={preferencesPrompt && preferencesPrompt.question}
               helper={preferencesPrompt && preferencesPrompt.helper}
