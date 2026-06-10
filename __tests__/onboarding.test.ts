@@ -251,8 +251,9 @@ describe("browser onboarding runtime contract", () => {
     expect(runtime.RUNTIME_VERSION).toContain("kings-press-conversational-runtime");
     expect(runtime.pack.id).toBe("kings_press");
     expect(runtime.pack.steps.map((step: any) => step.id)).toEqual([
+      "intro",
+      "voice",
       "connect",
-      "welcome",
       "focus",
       "preferences",
     ]);
@@ -393,7 +394,7 @@ describe("browser onboarding runtime contract", () => {
       type: "answer_captured",
       sessionId: "session-1",
       stepId: "focus",
-      stepIndex: 2,
+      stepIndex: 3,
       inputMethod: "voice",
       conversational: true,
       answerAccepted: true,
@@ -496,9 +497,9 @@ describe("browser onboarding conversation controller", () => {
     const state = conversation.createState();
 
     expect(state.currentSlot).toBe("intro_consent");
-    expect(conversation.promptForStep("connect", state)).toMatchObject({
+    expect(conversation.promptForStep("intro", state)).toMatchObject({
       slotId: "intro_consent",
-      question: "Can I introduce myself and give you a short orientation?",
+      question: "Would you like a guided intro, or a voice-guided intro?",
       answered: false,
     });
   });

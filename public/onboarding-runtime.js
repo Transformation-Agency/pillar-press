@@ -9,37 +9,50 @@
   const METRICS_VERSION = 1;
   const MAX_METRICS_EVENTS = 120;
 
-  const STEP_IDS = ["connect", "welcome", "focus", "preferences"];
+  const STEP_IDS = ["intro", "voice", "connect", "focus", "preferences"];
 
   const steps = [
+    {
+      id: "intro",
+      label: "Intro",
+      title: "I'm King's Press",
+      subtitle: "I help you articulate your thoughts and turn them into clear, publishable work.",
+      hostMessages: [
+        "I can guide you through setup, including voice, models, and the first focus.",
+        "You can also skip setup and go straight to the desk.",
+      ],
+      suggestions: ["Yes, guide me", "Skip setup"],
+      motionState: "idle",
+      primaryAction: "play_intro",
+      secondaryAction: "skip_setup",
+    },
+    {
+      id: "voice",
+      label: "Voice",
+      title: "Set up voice",
+      subtitle: "Add voice now if you want King's Press to read and respond aloud.",
+      hostMessages: [
+        "Voice is optional.",
+        "OpenAI is the simplest first key because it can also power the rest of setup.",
+      ],
+      suggestions: ["OpenAI", "ElevenLabs", "Skip voice"],
+      motionState: "listening",
+      primaryAction: "request_voice",
+      secondaryAction: "skip_voice",
+    },
     {
       id: "connect",
       label: "Connect",
       title: "Let's set up your desk",
-      subtitle: "Choose what to connect now. You can skip anything and change it later.",
+      subtitle: "Choose the model and integrations King's Press can use. You can skip anything and change it later.",
       hostMessages: [
-        "I can get your desk ready in a few minutes.",
-        "Start with what you want connected now. Anything you skip stays available later.",
+        "Now choose the model and any outside tools you want connected.",
+        "Anything you skip stays available later.",
       ],
-      suggestions: ["Fast start", "Guide me", "Type instead"],
+      suggestions: ["Cloud API key", "Ollama", "Explore integrations"],
       motionState: "idle",
       primaryAction: "continue",
       secondaryAction: "skip_setup",
-    },
-    {
-      id: "welcome",
-      label: "Welcome",
-      eyebrow: "Welcome",
-      title: "Welcome to King's Press",
-      subtitle: "I'm King's Press, your desk for turning ideas into clear, publishable work.",
-      hostMessages: [
-        "Here is the short orientation before we shape your first focus.",
-        "If voice is connected, this can be read aloud. Either way, it stays on screen.",
-      ],
-      suggestions: ["Continue", "Skip for now"],
-      motionState: "speaking",
-      primaryAction: "play_intro",
-      secondaryAction: "skip_intro",
     },
     {
       id: "focus",

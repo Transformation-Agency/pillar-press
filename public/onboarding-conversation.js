@@ -22,16 +22,16 @@
 
   const slotPrompts = {
     [SLOT_IDS.INTRO_CONSENT]: {
-      stepId: "connect",
-      question: "Can I introduce myself and give you a short orientation?",
-      helper: "If you want to hear it aloud, I can help set up voice next. You can also skip straight to model setup.",
-      placeholder: "Type yes, introduce yourself, or skip for now.",
+      stepId: "intro",
+      question: "Would you like a guided intro, or a voice-guided intro?",
+      helper: "If yes, I will offer voice setup first, then models and integrations. If you skip, you will go straight to the desk.",
+      placeholder: "Type yes, guide me, or skip setup.",
       actionLabel: "Use answer",
       answerKind: "intro_consent",
       required: false,
     },
     [SLOT_IDS.VOICE_SETUP]: {
-      stepId: "connect_voice",
+      stepId: "voice",
       question: "Can I help you set up voice?",
       helper: "Voice lets you speak setup answers, dictate drafts, and hear work read aloud. OpenAI is the easiest first key because it can also power the rest of setup.",
       placeholder: "Type yes, no, OpenAI, ElevenLabs, or ask how to get a key.",
