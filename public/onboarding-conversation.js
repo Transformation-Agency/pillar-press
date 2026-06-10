@@ -160,7 +160,7 @@
 
   function repairForAnswer(slotId, answer) {
     const normalized = normalizeIntent(slotId, answer);
-    if (normalized.accepted) {
+    if (normalized.accepted && normalized.intent !== "help" && normalized.intent !== "repeat") {
       return Object.assign({}, normalized, {
         needsRepair: false,
         message: "",

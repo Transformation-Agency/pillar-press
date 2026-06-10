@@ -599,6 +599,14 @@ describe("browser onboarding conversation controller", () => {
       "Voice-guided intro",
       "Skip setup",
     ]);
+
+    const help = conversation.repairForAnswer(conversation.SLOT_IDS.VOICE_SETUP, "help me get a key");
+    expect(help).toMatchObject({
+      intent: "help",
+      accepted: true,
+      needsRepair: true,
+    });
+    expect(help.suggestions.map((item: any) => item.label)).toContain("Help me get a key");
   });
 
   it("keeps typed and voice answers semantically equivalent", () => {

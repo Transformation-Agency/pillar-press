@@ -329,6 +329,8 @@ function SetupAnswerComposer({
   placeholder,
   transcript,
   actionLabel,
+  repair,
+  onRepairChoose,
 }) {
   return (
     <div className="kp-answer-composer">
@@ -355,6 +357,7 @@ function SetupAnswerComposer({
           {actionLabel || "Use answer"} <Icon name="arrowR" size={20} />
         </button>
       </div>
+      <SetupRepairChoices repair={repair} onChoose={onRepairChoose} />
     </div>
   );
 }
@@ -1159,15 +1162,51 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     }, payload || {}));
   }
 
+  function repairMessageFor(slotId, stepId, repair) {
+    const prompt = ONBOARDING_CONVERSATION.promptForStep(stepId, conversationState);
+    if (repair && repair.intent === "repeat" && prompt) return prompt.question;
+    if (repair && repair.intent === "help" && prompt) return prompt.helper || prompt.question;
+    return repair && repair.message;
+  }
+
+  function showRepair(slotId, stepId, repair) {
+    setRepairState(Object.assign({}, repair || {}, {
+      slotId,
+      needsRepair: true,
+      message: repairMessageFor(slotId, stepId, repair) || "I am not sure what you meant. Choose one of these, or type a clearer answer.",
+    }));
+    setSetupError("");
+  }
+
   function applyPlatformAnswer(text, inputMethod) {
     const clean = String(text || "").trim();
     if (!clean) return null;
+    const slotId = ONBOARDING_CONVERSATION.SLOT_IDS.COMMUNICATION_PLATFORMS;
+    const repair = ONBOARDING_CONVERSATION.repairForAnswer
+      ? ONBOARDING_CONVERSATION.repairForAnswer(slotId, clean)
+      : null;
+    if (repair && (repair.needsRepair || repair.intent === "help" || repair.intent === "repeat")) {
+      setSetupAnswer(clean);
+      setSetupTranscript(clean);
+      showRepair(slotId, "focus", repair);
+      return { needsRepair: true };
+    }
+    if (repair && repair.intent === "skip") {
+      setSetupAnswer(clean);
+      setSetupTranscript(clean);
+      setRepairState(null);
+      setConversationState((current) => ONBOARDING_CONVERSATION.skipSlot(current, slotId));
+      recordAction(ONBOARDING_ACTIONS.SKIP_FOCUS, ONBOARDING_ACTION_STATUSES.SKIPPED);
+      return { skipped: true };
+    }
     setSetupAnswer(clean);
     setSetupTranscript(clean);
+    setRepairState(null);
+    setSetupError("");
     setPlatformAnswerCaptured(true);
     setConversationState((current) => ONBOARDING_CONVERSATION.captureAnswer(
       current,
-      ONBOARDING_CONVERSATION.SLOT_IDS.COMMUNICATION_PLATFORMS,
+      slotId,
       clean,
       inputMethod || "typed",
     ));
@@ -1211,6 +1250,8 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
   function captureVoiceSetupAnswer(answer, inputMethod) {
     const clean = String(answer || "").trim();
     if (!clean || voiceSetupHasDecision()) return;
+    setRepairState(null);
+    setSetupError("");
     voiceDecisionRef.current = true;
     setConversationState((current) => {
       if (voiceSetupHasDecision(current, false)) return current;
@@ -1229,6 +1270,8 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
 
   function skipVoiceSetup() {
     if (voiceSetupHasDecision()) return;
+    setRepairState(null);
+    setSetupError("");
     voiceDecisionRef.current = true;
     setConversationState((current) => {
       if (voiceSetupHasDecision(current, false)) return current;
@@ -1250,6 +1293,29 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
         saved: !!safe.saved,
       },
     });
+  }
+
+  function handleVoiceSetupAnswer(text, inputMethod) {
+    const clean = String(text || "").trim();
+    if (!clean || voiceSetupHasDecision()) return;
+    const slotId = ONBOARDING_CONVERSATION.SLOT_IDS.VOICE_SETUP;
+    const repair = ONBOARDING_CONVERSATION.repairForAnswer
+      ? ONBOARDING_CONVERSATION.repairForAnswer(slotId, clean)
+      : null;
+    setSetupTranscript(clean);
+    if (repair && (repair.needsRepair || repair.intent === "help" || repair.intent === "repeat")) {
+      showRepair(slotId, "voice", repair);
+      return;
+    }
+    if (repair && (repair.intent === "skip" || repair.intent === "deny")) {
+      skipVoiceSetup();
+      return;
+    }
+    if (repair && (repair.intent === "affirm" || repair.intent === "voice")) {
+      connectAudio();
+      return;
+    }
+    captureVoiceSetupAnswer(clean, inputMethod || "typed");
   }
 
   function acceptIntroFromConnect() {
@@ -1298,9 +1364,28 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
   async function interpretProfileAnswer(text, inputMethod) {
     const clean = String(text || "").trim();
     if (!clean) return;
+    const slotId = ONBOARDING_CONVERSATION.SLOT_IDS.VOICE_PROFILE;
+    const repair = ONBOARDING_CONVERSATION.repairForAnswer
+      ? ONBOARDING_CONVERSATION.repairForAnswer(slotId, clean)
+      : null;
+    if (repair && (repair.needsRepair || repair.intent === "help" || repair.intent === "repeat")) {
+      setProfileAnswer(clean);
+      setSetupTranscript(clean);
+      showRepair(slotId, "preferences", repair);
+      return;
+    }
+    if (repair && repair.intent === "skip") {
+      setProfileAnswer(clean);
+      setSetupTranscript(clean);
+      setRepairState(null);
+      setConversationState((current) => ONBOARDING_CONVERSATION.skipSlot(current, slotId));
+      recordAction(ONBOARDING_ACTIONS.SAVE_PREFERENCES, ONBOARDING_ACTION_STATUSES.SKIPPED);
+      return;
+    }
     setProfileAnswer(clean);
     setProfileBusy(true);
     setSetupError("");
+    setRepairState(null);
     recordAction(ONBOARDING_ACTIONS.EXTRACT_SETUP_PROFILE, ONBOARDING_ACTION_STATUSES.PENDING);
     try {
       let profile = null;
@@ -1419,6 +1504,10 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     if (!clean) return;
     if (step === 0) {
       handleIntroConsentAnswer(clean, "voice");
+      return;
+    }
+    if (step === 1) {
+      handleVoiceSetupAnswer(clean, "voice");
       return;
     }
     if (step === 3) {
@@ -2605,6 +2694,12 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
                   model: profile && profile.model,
                 }))}
               />
+              <div style={{ padding: repairState && repairState.slotId === ONBOARDING_CONVERSATION.SLOT_IDS.VOICE_SETUP ? "0 34px 24px" : 0 }}>
+                <SetupRepairChoices
+                  repair={repairState && repairState.slotId === ONBOARDING_CONVERSATION.SLOT_IDS.VOICE_SETUP ? repairState : null}
+                  onChoose={(suggestion) => handleVoiceSetupAnswer((suggestion && suggestion.value) || "", "button")}
+                />
+              </div>
             </section>
             {audioState === "error" && (
               <p role="alert" style={{ margin: "16px 0 0", color: "#A74732", fontSize: 15.5 }}>{audioError}</p>
@@ -2677,6 +2772,13 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
               transcript={platformAnswerCaptured ? setupTranscript : ""}
               placeholder={focusPrompt && focusPrompt.placeholder}
               actionLabel={focusPrompt && focusPrompt.actionLabel}
+              repair={repairState && repairState.slotId === ONBOARDING_CONVERSATION.SLOT_IDS.COMMUNICATION_PLATFORMS ? repairState : null}
+              onRepairChoose={(suggestion) => {
+                const next = (suggestion && suggestion.value) || "";
+                setSetupAnswer(next);
+                const result = applyPlatformAnswer(next, "button");
+                if (result && result.skipped) goToStep(4);
+              }}
             />
             {platformAnswerCaptured && (
               <p style={{ margin: "14px 0 0", color: "#5E7A46", fontSize: 15 }}>
@@ -2724,6 +2826,10 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
                 const applied = setupAnswer.trim() && !platformAnswerCaptured
                   ? applyPlatformAnswer(setupAnswer, "typed")
                   : null;
+                if (applied && (applied.skipped || applied.needsRepair)) {
+                  if (applied.skipped) goToStep(4);
+                  return;
+                }
                 ensureFocus(applied && applied.focusName).then(() => goToStep(4)).catch(() => null);
               }}
             />
@@ -2748,6 +2854,12 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
               placeholder={preferencesPrompt && preferencesPrompt.placeholder}
               actionLabel={profileBusy ? "Interpreting" : "Use for defaults"}
               onSubmit={() => interpretProfileAnswer(profileAnswer, "typed")}
+              repair={repairState && repairState.slotId === ONBOARDING_CONVERSATION.SLOT_IDS.VOICE_PROFILE ? repairState : null}
+              onRepairChoose={(suggestion) => {
+                const next = (suggestion && suggestion.value) || "";
+                setProfileAnswer(next);
+                interpretProfileAnswer(next, "button");
+              }}
             />
             <div style={{ height: 28 }} />
             <SetupProfileReview profile={setupProfileDraft} />
