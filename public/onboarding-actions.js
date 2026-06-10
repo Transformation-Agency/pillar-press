@@ -55,6 +55,13 @@
     return normalize(intent, STATUSES.SKIPPED, { data: data || null, error: null });
   }
 
+  function markDesktopSetupComplete() {
+    try {
+      const key = flags.computeSetupLocalStorageKey || "kingspress.desktopSetupComplete";
+      if (window.localStorage && key) window.localStorage.setItem(key, "true");
+    } catch (_error) {}
+  }
+
   function setStorePrefs(Store, patch) {
     if (!Store || !patch || typeof patch !== "object") return;
     if (typeof Store.setPrefs === "function") {
@@ -278,6 +285,7 @@
       const Store = window.Store;
       if (!Store || typeof Store.setPref !== "function") throw new Error("Local store is not ready.");
       Store.setPref(flags.onboardingCompletePref, true);
+      markDesktopSetupComplete();
       let firstValueEvent = null;
       if (options && options.firstValueComplete) {
         firstValueEvent = runtime.buildFirstValueEvent
@@ -320,6 +328,7 @@
       if (window.Store && typeof window.Store.setPref === "function") {
         window.Store.setPref(flags.onboardingCompletePref, true);
       }
+      markDesktopSetupComplete();
       persistMetricsEvent({
         type: METRIC_EVENTS.SKIPPED,
         skippedReason: "user_skipped_setup",
@@ -352,6 +361,7 @@
   }
 
   function notifyProviderSetupSaved(settings) {
+    markDesktopSetupComplete();
     emit(EVENTS.PROVIDER_SETUP_SAVED, providerSafeDetail(settings));
   }
 

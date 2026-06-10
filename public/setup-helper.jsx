@@ -119,8 +119,8 @@ function OnboardingBrand() {
 function OnboardingStepper({ step }) {
   return (
     <nav aria-label="Setup progress" style={{
-      display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", alignItems: "center",
-      gap: 14, marginTop: 72, color: "#766A63",
+      display: "grid", gridTemplateColumns: "repeat(" + ONBOARDING_STEPS.length + ", minmax(0, 1fr))", alignItems: "center",
+      gap: 8, marginTop: 72, color: "#766A63",
     }}>
       {ONBOARDING_STEPS.map((item, i) => {
         const label = item.label;
@@ -129,7 +129,7 @@ function OnboardingStepper({ step }) {
         return (
           <div key={label} aria-current={active ? "step" : undefined} style={{
             display: "grid", gridTemplateColumns: "auto auto minmax(24px, 1fr)", alignItems: "center",
-            gap: 14, minWidth: 0,
+            gap: 10, minWidth: 0,
           }}>
             <span style={{
               width: 39, height: 39, borderRadius: 999, display: "grid", placeItems: "center",
@@ -140,11 +140,11 @@ function OnboardingStepper({ step }) {
             }}>{i + 1}</span>
             <span style={{
               color: active ? "#A74732" : "#766A63",
-              fontFamily: "var(--font-serif)", fontSize: 18, whiteSpace: "nowrap",
+              fontFamily: "var(--font-serif)", fontSize: 17, whiteSpace: "nowrap",
               overflow: "hidden", textOverflow: "ellipsis",
             }}>{label}</span>
             {i < ONBOARDING_STEPS.length - 1 && <span aria-hidden="true" style={{
-              height: 1, minWidth: 24, background: "#D8CEC3", opacity: 0.9,
+              height: 1, minWidth: 12, background: "#D8CEC3", opacity: 0.9,
             }} />}
           </div>
         );
@@ -603,7 +603,7 @@ function InlineModelSetup({ status, onSaved }) {
   );
 }
 
-function IntroConsentSetup({ answered, onAccept, onSkip }) {
+function IntroConsentSetup({ answered, onAccept, onSkip, value, onChange, onSubmit, onListen, listening, transcript }) {
   if (answered) return null;
   return (
     <div className="kp-inline-intro-consent">
@@ -612,15 +612,32 @@ function IntroConsentSetup({ answered, onAccept, onSkip }) {
         <h3>Would you like a guided intro, or a voice-guided intro?</h3>
         <p>If yes, I will offer voice setup first, then help connect models and integrations. If not, you can skip setup and go straight to the desk.</p>
       </div>
+      <label className="kp-inline-intro-answer">
+        <span className="sr-only">Answer the guided intro question</span>
+        <textarea
+          className="kp-setup-input"
+          value={value || ""}
+          onChange={(event) => onChange(event.target.value)}
+          rows={2}
+          placeholder="Type yes, guide me, voice-guided intro, or skip setup."
+        />
+        {transcript && (
+          <p className="kp-transcript-preview" aria-live="polite">I heard: <strong>{transcript}</strong></p>
+        )}
+      </label>
       <div className="kp-inline-intro-actions">
         <button className="kp-setup-primary" type="button" onClick={onAccept}>Yes, guide me</button>
+        <button className="kp-setup-outline" type="button" onClick={onListen} disabled={listening} aria-pressed={listening ? "true" : "false"}>
+          <Icon name="mic" size={16} /> {listening ? "Listening" : "Speak answer"}
+        </button>
+        <button className="kp-setup-outline" type="button" onClick={onSubmit} disabled={!String(value || "").trim()}>Use answer</button>
         <button className="kp-setup-outline" type="button" onClick={onSkip}>Skip setup</button>
       </div>
     </div>
   );
 }
 
-function InlineVoiceSetup({ status, audioState, onConnect, onLLMSaved }) {
+function InlineVoiceSetup({ status, audioState, onConnect, onLLMSaved, onVoiceConfigured }) {
   const desktop = window.KINGS_DESKTOP;
   const hasDesktop = !!(desktop && desktop.isDesktop && desktop.isDesktop());
   const [provider, setProvider] = React.useState("openai");
@@ -727,13 +744,16 @@ function InlineVoiceSetup({ status, audioState, onConnect, onLLMSaved }) {
       if (provider === "openai") {
         await saveOpenAIAsStarterLLM();
         await saveVoiceProviderKey();
+        if (onVoiceConfigured) onVoiceConfigured({ provider, method: "api_key", saved: true });
         setMessage("OpenAI key works. I saved it encrypted for voice, setup, and drafting.");
       } else if (provider === "hedra") {
         const saved = await saveVoiceProviderKey();
+        if (onVoiceConfigured) onVoiceConfigured({ provider, method: "api_key", saved });
         setMessage(saved ? "Hedra key works and was saved encrypted for Studio." : "Hedra key works. Open the desktop app to save it for Studio.");
       } else {
         const count = body && Array.isArray(body.voices) ? body.voices.length : 0;
         const saved = await saveVoiceProviderKey();
+        if (onVoiceConfigured) onVoiceConfigured({ provider, method: "api_key", saved, voices: count });
         setMessage(saved
           ? "ElevenLabs key works and was saved encrypted. " + count + " voices available."
           : count ? "ElevenLabs key works. " + count + " voices available." : "ElevenLabs key works, but no voices were returned.");
@@ -891,6 +911,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
   const setupStartedAtRef = React.useRef(Date.now());
   const metricsSessionIdRef = React.useRef(createSetupSessionId());
   const lastStepMetricRef = React.useRef(null);
+  const voiceDecisionRef = React.useRef(false);
   const state = window.Store.getState();
   const campaigns = state.campaigns || [];
   const activeCampaign = window.Store.activeCampaign && window.Store.activeCampaign();
@@ -936,6 +957,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     setupStartedAtRef.current = Date.now();
     metricsSessionIdRef.current = createSetupSessionId();
     lastStepMetricRef.current = null;
+    voiceDecisionRef.current = false;
     setConversationState(ONBOARDING_CONVERSATION.createState());
     setIntroAnswer("");
     setIntroVisible(false);
@@ -1079,6 +1101,57 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
       ONBOARDING_CONVERSATION.metricForAnswer(ONBOARDING_CONVERSATION.SLOT_IDS.COMMUNICATION_PLATFORMS, inputMethod || "typed"),
     );
     return { focusName };
+  }
+
+  function voiceSetupHasDecision(stateInput, includeRef = true) {
+    if (includeRef && voiceDecisionRef.current) return true;
+    const stateToCheck = stateInput || conversationState;
+    const slot = stateToCheck && stateToCheck.slots && stateToCheck.slots[ONBOARDING_CONVERSATION.SLOT_IDS.VOICE_SETUP];
+    return !!(slot && slot.status && slot.status !== "empty");
+  }
+
+  function captureVoiceSetupAnswer(answer, inputMethod) {
+    const clean = String(answer || "").trim();
+    if (!clean || voiceSetupHasDecision()) return;
+    voiceDecisionRef.current = true;
+    setConversationState((current) => {
+      if (voiceSetupHasDecision(current, false)) return current;
+      return ONBOARDING_CONVERSATION.captureAnswer(
+        current,
+        ONBOARDING_CONVERSATION.SLOT_IDS.VOICE_SETUP,
+        clean,
+        inputMethod || "button",
+      );
+    });
+    recordMetric(
+      ONBOARDING_METRIC_EVENTS.ANSWER_CAPTURED,
+      ONBOARDING_CONVERSATION.metricForAnswer(ONBOARDING_CONVERSATION.SLOT_IDS.VOICE_SETUP, inputMethod || "button"),
+    );
+  }
+
+  function skipVoiceSetup() {
+    if (voiceSetupHasDecision()) return;
+    voiceDecisionRef.current = true;
+    setConversationState((current) => {
+      if (voiceSetupHasDecision(current, false)) return current;
+      return ONBOARDING_CONVERSATION.skipSlot(current, ONBOARDING_CONVERSATION.SLOT_IDS.VOICE_SETUP);
+    });
+    recordAction(ONBOARDING_ACTIONS.REQUEST_VOICE, ONBOARDING_ACTION_STATUSES.SKIPPED, {
+      data: { reason: "user_skipped_voice" },
+    });
+  }
+
+  function handleVoiceConfigured(detail) {
+    const safe = detail || {};
+    const provider = safe.provider ? String(safe.provider) : "voice";
+    captureVoiceSetupAnswer(provider + " voice key verified", "button");
+    recordAction(ONBOARDING_ACTIONS.REQUEST_VOICE, ONBOARDING_ACTION_STATUSES.SUCCEEDED, {
+      data: {
+        provider,
+        method: safe.method || "api_key",
+        saved: !!safe.saved,
+      },
+    });
   }
 
   function acceptIntroFromConnect() {
@@ -1315,6 +1388,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
         }
       }
       setAudioState("audio_ready");
+      captureVoiceSetupAnswer("microphone connected", "button");
       recordAction(ONBOARDING_ACTIONS.REQUEST_VOICE, ONBOARDING_ACTION_STATUSES.SUCCEEDED, result || undefined);
     } catch (e) {
       setAudioState("error");
@@ -1340,6 +1414,10 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
   }
 
   async function continueFromVoice() {
+    if (!voiceSetupHasDecision()) {
+      if (voiceConnected) captureVoiceSetupAnswer("microphone connected", "button");
+      else skipVoiceSetup();
+    }
     if (introAccepted && voiceConnected) {
       setIntroVisible(true);
       recordAction(ONBOARDING_ACTIONS.PLAY_INTRO, ONBOARDING_ACTION_STATUSES.PENDING);
@@ -1805,12 +1883,9 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
         .kp-inline-intro-consent {
           padding: 24px 34px;
           display: grid;
-          grid-template-columns: minmax(0, 1fr) auto;
-          gap: 18px;
-          align-items: center;
+          gap: 16px;
         }
         .kp-inline-intro-copy {
-          padding-left: 79px;
           min-width: 0;
         }
         .kp-inline-intro-copy h3 {
@@ -1827,10 +1902,25 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
           font-size: 15.5px;
           line-height: 1.35;
         }
+        .kp-inline-intro-answer {
+          display: grid;
+          gap: 8px;
+        }
+        .sr-only {
+          position: absolute;
+          width: 1px;
+          height: 1px;
+          padding: 0;
+          margin: -1px;
+          overflow: hidden;
+          clip: rect(0, 0, 0, 0);
+          white-space: nowrap;
+          border: 0;
+        }
         .kp-inline-intro-actions {
           display: flex;
           flex-wrap: wrap;
-          justify-content: flex-end;
+          justify-content: flex-start;
           gap: 8px;
         }
         .kp-inline-intro-actions .kp-setup-primary,
@@ -2169,6 +2259,12 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
             }}>
               <IntroConsentSetup
                 answered={false}
+                value={introAnswer}
+                onChange={setIntroAnswer}
+                onSubmit={() => handleIntroConsentAnswer(introAnswer, "typed")}
+                onListen={listenForAnswer}
+                listening={listening}
+                transcript={step === 0 ? setupTranscript : ""}
                 onAccept={() => {
                   acceptIntroFromConnect();
                   goToStep(1);
@@ -2202,6 +2298,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
                 status={providerStatus}
                 audioState={audioState}
                 onConnect={connectAudio}
+                onVoiceConfigured={handleVoiceConfigured}
                 onLLMSaved={(profile) => setProviderStatus((current) => Object.assign({}, current || {}, {
                   provider: profile && profile.provider,
                   model: profile && profile.model,
@@ -2216,7 +2313,10 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
             )}
             <SetupActions
               secondary="Skip voice"
-              onSecondary={() => goToStep(2)}
+              onSecondary={() => {
+                skipVoiceSetup();
+                goToStep(2);
+              }}
               primary="Continue"
               onPrimary={continueFromVoice}
             />

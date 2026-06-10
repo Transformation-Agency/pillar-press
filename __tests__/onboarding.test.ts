@@ -34,6 +34,7 @@ function loadBrowserConversation() {
 
 function createTestWindow() {
   const listeners: Record<string, Array<(event: any) => void>> = {};
+  const storage: Record<string, string> = {};
   const window = {
     KP_ONBOARDING_COPY: {
       AUDIO_INTRO_COPY_VERSION: "test-copy-v1",
@@ -54,6 +55,15 @@ function createTestWindow() {
     dispatchEvent: (event: any) => {
       (listeners[event.type] || []).forEach((handler) => handler(event));
       return true;
+    },
+    localStorage: {
+      getItem: (key: string) => Object.prototype.hasOwnProperty.call(storage, key) ? storage[key] : null,
+      setItem: (key: string, value: string) => {
+        storage[key] = String(value);
+      },
+      removeItem: (key: string) => {
+        delete storage[key];
+      },
     },
   } as Record<string, any>;
   return window;
@@ -563,6 +573,11 @@ describe("browser onboarding conversation controller", () => {
     const conversation = loadBrowserConversation();
     const state = conversation.createState();
 
+    expect(conversation.promptForStep("voice", state)).toMatchObject({
+      slotId: "voice_setup",
+      answerKind: "voice_setup",
+      required: false,
+    });
     expect(conversation.promptForStep("focus", state)).toMatchObject({
       slotId: "communication_platforms",
       question: "Where do you communicate most?",
@@ -783,6 +798,7 @@ describe("browser onboarding action registry", () => {
       },
     });
     expect(prefs.setupHelperCompleteV1).toBe(true);
+    expect(window.localStorage.getItem("kingspress.desktopSetupComplete")).toBe("true");
     expect(prefs.onboardingFirstValueEventV1).toMatchObject({
       complete: true,
       campaignId: "camp_1",
@@ -867,6 +883,17 @@ describe("browser onboarding action registry", () => {
       data: { onboardingComplete: true },
     });
     expect(prefs.setupHelperCompleteV1).toBe(true);
+    expect(window.localStorage.getItem("kingspress.desktopSetupComplete")).toBe("true");
     expect(prefs.onboardingFirstValueEventV1).toBeUndefined();
+  });
+
+  it("marks desktop setup complete when inline provider setup is saved", () => {
+    const window = loadBrowserActions();
+
+    window.KP_ONBOARDING_ACTIONS.notifyProviderSetupSaved({
+      profile: { provider: "openai", model: "gpt-4o-mini", apiKey: "secret" },
+    });
+
+    expect(window.localStorage.getItem("kingspress.desktopSetupComplete")).toBe("true");
   });
 });
