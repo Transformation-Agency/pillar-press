@@ -4,6 +4,30 @@
 const ONBOARDING_COPY = window.KP_ONBOARDING_COPY || {
   getPressIntroScript: () => "I'm King's Press.\n\nTo start, tell me where you communicate most.",
 };
+const ONBOARDING_AUDIO = window.KP_ONBOARDING_AUDIO || {
+  speakText: () => Promise.resolve(),
+};
+const ONBOARDING_RUNTIME = window.KP_CONVERSATIONAL_ONBOARDING || null;
+const ONBOARDING_STEPS = (ONBOARDING_RUNTIME && ONBOARDING_RUNTIME.steps) || [
+  { id: "connect", label: "Connect" },
+  { id: "welcome", label: "Welcome" },
+  { id: "focus", label: "First focus" },
+  { id: "preferences", label: "Preferences" },
+];
+const ONBOARDING_TRUST = (ONBOARDING_RUNTIME && ONBOARDING_RUNTIME.trust) || {
+  reassurance: "You're in control. Nothing connects without your approval.",
+  footer: "King's Press · Your desk for ideas that matter.",
+};
+const ONBOARDING_FLAGS = (ONBOARDING_RUNTIME && ONBOARDING_RUNTIME.flags) || {
+  onboardingCompletePref: "setupHelperCompleteV1",
+};
+const ONBOARDING_ACTIONS = (ONBOARDING_RUNTIME && ONBOARDING_RUNTIME.ACTION_INTENTS) || {};
+const ONBOARDING_ACTION_STATUSES = (ONBOARDING_RUNTIME && ONBOARDING_RUNTIME.ACTION_STATUSES) || {
+  PENDING: "pending",
+  SUCCEEDED: "succeeded",
+  FAILED: "failed",
+  SKIPPED: "skipped",
+};
 
 function OnboardingBrand() {
   return (
@@ -21,13 +45,13 @@ function OnboardingBrand() {
 }
 
 function OnboardingStepper({ step }) {
-  const steps = ["Connect", "Welcome", "First focus", "Preferences"];
   return (
     <nav aria-label="Setup progress" style={{
       display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", alignItems: "center",
       gap: 14, marginTop: 72, color: "#766A63",
     }}>
-      {steps.map((label, i) => {
+      {ONBOARDING_STEPS.map((item, i) => {
+        const label = item.label;
         const active = step === i;
         const done = i < step;
         return (
@@ -117,9 +141,9 @@ function SetupReassurance({ compact }) {
   return (
     <div style={{ marginTop: compact ? 28 : 54, textAlign: "center", color: "#766A63", fontSize: 16 }}>
       <p style={{ margin: 0, display: "inline-flex", alignItems: "center", gap: 10 }}>
-        <Icon name="key" size={15} /> You're in control. Nothing connects without your approval.
+        <Icon name="key" size={15} /> {ONBOARDING_TRUST.reassurance}
       </p>
-      <p style={{ margin: "74px 0 0", opacity: 0.82 }}>King's Press · Your desk for ideas that matter.</p>
+      <p style={{ margin: "74px 0 0", opacity: 0.82 }}>{ONBOARDING_TRUST.footer}</p>
     </div>
   );
 }
@@ -135,9 +159,13 @@ function SetupField({ label, helper, children }) {
 }
 
 function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialStep }) {
-  const [step, setStep] = React.useState(Math.min(initialStep || 0, 3));
+  const [step, setStep] = React.useState(ONBOARDING_RUNTIME
+    ? ONBOARDING_RUNTIME.clampStepIndex(initialStep || 0)
+    : Math.min(initialStep || 0, 3));
   const [providerStatus, setProviderStatus] = React.useState(null);
   const [busy, setBusy] = React.useState(false);
+  const [setupError, setSetupError] = React.useState("");
+  const [actionResults, setActionResults] = React.useState({});
   const [campaignName, setCampaignName] = React.useState("");
   const [prefDraft, setPrefDraft] = React.useState(null);
   const [draftStyle, setDraftStyle] = React.useState("Polished");
@@ -193,9 +221,53 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
 
   const providerConnected = !!(providerStatus && providerStatus.provider && providerStatus.model);
   const voiceConnected = audioState === "audio_ready";
+  const connectRows = ONBOARDING_RUNTIME
+    ? ONBOARDING_RUNTIME.getConnectItems({
+      providerConnected,
+      voiceConnected,
+      voicePending: audioState === "requesting_microphone",
+      integrationsTouched,
+    })
+    : [
+      { id: "models", icon: "db", title: "AI & models", description: "Choose the models King's Press can use to think and create.", status: providerConnected ? "Connected" : "Not connected", label: "Set up" },
+      { id: "voice", icon: "mic", title: "Voice", description: "Connect a microphone for voice input and guided setup.", status: voiceConnected ? "Connected" : "Optional", label: audioState === "requesting_microphone" ? "Connecting" : "Connect" },
+      { id: "integrations", icon: "globe", title: "Integrations", description: "Bring in sources, media, and tools. You can add more anytime.", status: integrationsTouched ? "Optional" : "Not connected", label: "Explore" },
+    ];
+
+  function recordAction(intent, status, payload) {
+    if (!intent) return;
+    const result = ONBOARDING_RUNTIME
+      ? ONBOARDING_RUNTIME.normalizeActionResult(intent, Object.assign({ status }, payload || {}))
+      : Object.assign({ intent, status, updatedAt: Date.now() }, payload || {});
+    setActionResults((current) => Object.assign({}, current, { [intent]: result }));
+  }
+
+  function goToStep(next) {
+    setSetupError("");
+    setStep(ONBOARDING_RUNTIME ? ONBOARDING_RUNTIME.clampStepIndex(next) : Math.max(0, Math.min(3, next)));
+  }
+
+  function runConnectAction(item) {
+    if (item.id === "models") {
+      recordAction(ONBOARDING_ACTIONS.OPEN_PROVIDER_SETUP, ONBOARDING_ACTION_STATUSES.PENDING);
+      if (onOpenProviderSetup) onOpenProviderSetup();
+      return;
+    }
+    if (item.id === "voice") {
+      connectAudio();
+      return;
+    }
+    if (item.id === "integrations") {
+      setIntegrationsTouched(true);
+      recordAction(ONBOARDING_ACTIONS.EXPLORE_INTEGRATIONS, ONBOARDING_ACTION_STATUSES.SKIPPED, {
+        data: { reason: "explored_later" },
+      });
+    }
+  }
 
   async function connectAudio() {
     setAudioError("");
+    recordAction(ONBOARDING_ACTIONS.REQUEST_VOICE, ONBOARDING_ACTION_STATUSES.PENDING);
     setAudioState("requesting_microphone");
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -207,17 +279,22 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
         await window.KINGS_DESKTOP.startVoiceSession();
       }
       setAudioState("audio_ready");
+      recordAction(ONBOARDING_ACTIONS.REQUEST_VOICE, ONBOARDING_ACTION_STATUSES.SUCCEEDED);
     } catch (e) {
       setAudioState("error");
-      setAudioError((e && e.message) || "Audio setup failed. You can continue by typing.");
+      const message = (e && e.message) || "Audio setup failed. You can continue by typing.";
+      setAudioError(message);
+      recordAction(ONBOARDING_ACTIONS.REQUEST_VOICE, ONBOARDING_ACTION_STATUSES.FAILED, { error: message });
     }
   }
 
   async function introduce() {
     setIntroVisible(true);
+    recordAction(ONBOARDING_ACTIONS.PLAY_INTRO, ONBOARDING_ACTION_STATUSES.PENDING);
     if (voiceConnected) {
       await ONBOARDING_AUDIO.speakText(introScript, { interrupt: true });
     }
+    recordAction(ONBOARDING_ACTIONS.PLAY_INTRO, ONBOARDING_ACTION_STATUSES.SUCCEEDED);
   }
 
   async function ensureFocus() {
@@ -225,17 +302,25 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     if (activeCampaign && (!clean || clean === activeCampaign.name)) return activeCampaign.id;
     const name = clean || "Untitled focus";
     setBusy(true);
+    recordAction(ONBOARDING_ACTIONS.SAVE_FOCUS, ONBOARDING_ACTION_STATUSES.PENDING);
     try {
       const tempId = window.Store.addCampaign(name);
       if (window.Store.whenCampaignSaved) await window.Store.whenCampaignSaved(tempId);
+      recordAction(ONBOARDING_ACTIONS.SAVE_FOCUS, ONBOARDING_ACTION_STATUSES.SUCCEEDED, { data: { campaignId: tempId } });
       return tempId;
+    } catch (e) {
+      const message = (e && e.message) || "Could not save the first focus.";
+      recordAction(ONBOARDING_ACTIONS.SAVE_FOCUS, ONBOARDING_ACTION_STATUSES.FAILED, { error: message });
+      setSetupError(message);
+      throw e;
     } finally {
       setBusy(false);
     }
   }
 
   const savePreferences = () => {
-    if (!prefDraft || !window.Store.activeReferences) return;
+    if (!prefDraft || !window.Store.activeReferences) return Promise.resolve(null);
+    recordAction(ONBOARDING_ACTIONS.SAVE_PREFERENCES, ONBOARDING_ACTION_STATUSES.PENDING);
     const refs = window.Store.activeReferences() || {};
     const throughline = {
       tag: (prefDraft.throughlineTag || "core").trim(),
@@ -271,17 +356,38 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
       selfVision: Object.assign({}, refs.selfVision || {}, { body: prefDraft.selfVision }),
       gateSpec: Object.assign({}, refs.gateSpec || {}, { body: prefDraft.gateSpec }),
     };
-    window.Store.updateReferences(patch);
+    const saved = window.Store.updateReferences(patch);
+    return Promise.resolve(saved).then((result) => {
+      recordAction(ONBOARDING_ACTIONS.SAVE_PREFERENCES, ONBOARDING_ACTION_STATUSES.SUCCEEDED);
+      return result;
+    }).catch((e) => {
+      const message = (e && e.message) || "Could not save preferences.";
+      recordAction(ONBOARDING_ACTIONS.SAVE_PREFERENCES, ONBOARDING_ACTION_STATUSES.FAILED, { error: message });
+      setSetupError(message);
+      throw e;
+    });
   };
 
   const finish = async () => {
-    if (!activeCampaign && campaignName.trim()) await ensureFocus();
-    savePreferences();
-    if (onComplete) onComplete();
+    setSetupError("");
+    setBusy(true);
+    try {
+      if (!activeCampaign && campaignName.trim()) await ensureFocus();
+      await savePreferences();
+      recordAction(ONBOARDING_ACTIONS.COMPLETE_ONBOARDING, ONBOARDING_ACTION_STATUSES.SUCCEEDED);
+      if (onComplete) onComplete();
+    } catch (e) {
+      const message = (e && e.message) || "Could not finish setup.";
+      setSetupError(message);
+      recordAction(ONBOARDING_ACTIONS.COMPLETE_ONBOARDING, ONBOARDING_ACTION_STATUSES.FAILED, { error: message });
+    } finally {
+      setBusy(false);
+    }
   };
 
   const skip = () => {
-    window.Store.setPref("setupHelperCompleteV1", true);
+    recordAction(ONBOARDING_ACTIONS.SKIP_ONBOARDING, ONBOARDING_ACTION_STATUSES.SKIPPED);
+    window.Store.setPref(ONBOARDING_FLAGS.onboardingCompletePref, true);
     if (onClose) onClose();
   };
 
@@ -396,41 +502,30 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
               border: "1px solid #D8CEC3", borderRadius: 10, background: "rgba(255, 252, 246, 0.68)",
               overflow: "hidden",
             }}>
-              <SetupPanelRow
-                icon="db"
-                title="AI & models"
-                description="Choose the models King's Press can use to think and create."
-                status={providerConnected ? "Connected" : "Not connected"}
-                action="Set up"
-                onClick={onOpenProviderSetup}
-                disabled={!hasDesktopBridge}
-              />
-              <SetupPanelRow
-                icon="mic"
-                title="Voice"
-                description="Connect a microphone for voice input and guided setup."
-                status={voiceConnected ? "Connected" : "Optional"}
-                action={audioState === "requesting_microphone" ? "Connecting" : "Connect"}
-                onClick={connectAudio}
-                disabled={audioState === "requesting_microphone"}
-              />
-              <SetupPanelRow
-                icon="globe"
-                title="Integrations"
-                description="Bring in sources, media, and tools. You can add more anytime."
-                status={integrationsTouched ? "Optional" : "Not connected"}
-                action="Explore"
-                onClick={() => setIntegrationsTouched(true)}
-              />
+              {connectRows.map((item) => (
+                <SetupPanelRow
+                  key={item.id}
+                  icon={item.icon}
+                  title={item.title}
+                  description={item.description}
+                  status={item.status}
+                  action={item.label}
+                  onClick={() => runConnectAction(item)}
+                  disabled={(item.id === "models" && !hasDesktopBridge) || item.pending}
+                />
+              ))}
             </section>
             {audioState === "error" && (
               <p role="alert" style={{ margin: "16px 0 0", color: "#A74732", fontSize: 15.5 }}>{audioError}</p>
+            )}
+            {setupError && (
+              <p role="alert" style={{ margin: "16px 0 0", color: "#A74732", fontSize: 15.5 }}>{setupError}</p>
             )}
             <SetupActions
               secondary="Skip setup"
               onSecondary={skip}
               primary="Continue"
-              onPrimary={() => setStep(1)}
+              onPrimary={() => goToStep(1)}
             />
             <SetupReassurance />
           </main>
@@ -471,7 +566,10 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
                     <button className="kp-setup-primary" onClick={introduce} style={{ minWidth: 330 }}>
                       Yes, introduce yourself
                     </button>
-                    <button className="kp-setup-link" onClick={() => setStep(2)}>Skip for now</button>
+                    <button className="kp-setup-link" onClick={() => {
+                      recordAction(ONBOARDING_ACTIONS.SKIP_INTRO, ONBOARDING_ACTION_STATUSES.SKIPPED);
+                      goToStep(2);
+                    }}>Skip for now</button>
                   </div>
                 </>
               ) : (
@@ -481,8 +579,11 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
                     color: "#766A63", font: "20px/1.68 var(--font-serif)", textAlign: "center",
                   }}>{introScript}</pre>
                   <div style={{ marginTop: 42, display: "grid", justifyItems: "center", gap: 18 }}>
-                    <button className="kp-setup-primary" onClick={() => setStep(2)}>Continue <Icon name="arrowR" size={22} /></button>
-                    <button className="kp-setup-link" onClick={() => setStep(2)}>Skip for now</button>
+                    <button className="kp-setup-primary" onClick={() => goToStep(2)}>Continue <Icon name="arrowR" size={22} /></button>
+                    <button className="kp-setup-link" onClick={() => {
+                      recordAction(ONBOARDING_ACTIONS.SKIP_INTRO, ONBOARDING_ACTION_STATUSES.SKIPPED);
+                      goToStep(2);
+                    }}>Skip for now</button>
                   </div>
                 </>
               )}
@@ -503,7 +604,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
                 className="kp-setup-input"
                 value={campaignName}
                 onChange={(e) => setCampaignName(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") ensureFocus().then(() => setStep(3)); }}
+                onKeyDown={(e) => { if (e.key === "Enter") ensureFocus().then(() => goToStep(3)); }}
                 placeholder="e.g. Smoke Test"
                 style={{ fontFamily: "var(--font-serif)", fontSize: 25, height: 75 }}
               />
@@ -527,11 +628,17 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
             </div>
             <SetupActions
               secondary="Skip for now"
-              onSecondary={() => setStep(3)}
+              onSecondary={() => {
+                recordAction(ONBOARDING_ACTIONS.SKIP_FOCUS, ONBOARDING_ACTION_STATUSES.SKIPPED);
+                goToStep(3);
+              }}
               primary="Continue"
               busy={busy}
-              onPrimary={() => ensureFocus().then(() => setStep(3))}
+              onPrimary={() => ensureFocus().then(() => goToStep(3)).catch(() => null)}
             />
+            {setupError && (
+              <p role="alert" style={{ margin: "16px 0 0", color: "#A74732", fontSize: 15.5 }}>{setupError}</p>
+            )}
             <SetupReassurance />
           </main>
         )}
@@ -655,7 +762,11 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
               onSecondary={finish}
               primary="Finish setup"
               onPrimary={finish}
+              busy={busy}
             />
+            {setupError && (
+              <p role="alert" style={{ margin: "16px 0 0", color: "#A74732", fontSize: 15.5 }}>{setupError}</p>
+            )}
             <SetupReassurance compact />
           </main>
         )}

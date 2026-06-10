@@ -351,7 +351,9 @@ function DesktopOnboarding() {
   const [taskDefaults, setTaskDefaults] = React.useState({});
 
   const desktop = window.KINGS_DESKTOP;
-  const setupCompleteKey = "kingspress.desktopSetupComplete";
+  const setupCompleteKey = (window.KP_CONVERSATIONAL_ONBOARDING &&
+    window.KP_CONVERSATIONAL_ONBOARDING.flags &&
+    window.KP_CONVERSATIONAL_ONBOARDING.flags.computeSetupLocalStorageKey) || "kingspress.desktopSetupComplete";
   const modelOptions = ["llama3.2", "mistral", "qwen2.5:7b", "gemma3:4b"];
   const cloudModels = {
     openai: ["gpt-4o-mini", "gpt-4.1-mini", "gpt-4o"],
@@ -917,6 +919,9 @@ function App() {
   const active = state.pieces.find((p) => p.id === state.activePieceId);
   const inWorkspace = view === "workspace" && active;
   const hasDesktopBridge = !!(window.KINGS_DESKTOP && window.KINGS_DESKTOP.isDesktop && window.KINGS_DESKTOP.isDesktop());
+  const setupCompletePref = (window.KP_CONVERSATIONAL_ONBOARDING &&
+    window.KP_CONVERSATIONAL_ONBOARDING.flags &&
+    window.KP_CONVERSATIONAL_ONBOARDING.flags.onboardingCompletePref) || "setupHelperCompleteV1";
 
   const openPiece = (id) => { window.Store.setActive(id); setView("workspace"); };
   const goLibrary = () => { setView("library"); window.Store.setActive(null); };
@@ -925,7 +930,7 @@ function App() {
     let cancelled = false;
     Promise.resolve(window.Store.ready).then(() => {
       if (cancelled) return;
-      if (!window.Store.getPref("setupHelperCompleteV1", false)) setSetupOpen(true);
+      if (!window.Store.getPref(setupCompletePref, false)) setSetupOpen(true);
     });
     return () => { cancelled = true; };
   }, []);
@@ -1042,7 +1047,7 @@ function App() {
           open={setupOpen}
           onClose={() => setSetupOpen(false)}
           onOpenProviderSetup={openModelSetup}
-          onComplete={() => { window.Store.setPref("setupHelperCompleteV1", true); setSetupOpen(false); }}
+          onComplete={() => { window.Store.setPref(setupCompletePref, true); setSetupOpen(false); }}
         />
       )}
       <CampaignCreateDialog open={campaignCreateOpen} onClose={() => setCampaignCreateOpen(false)} onCreate={createCampaign} />

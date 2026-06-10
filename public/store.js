@@ -550,10 +550,12 @@
     /* ---- References ---- */
     updateReferences(patch) {
       const c = api.activeCampaign();
-      if (!c) return;
+      if (!c) return Promise.resolve(null);
       c.references = Object.assign({}, c.references, patch);
       emit();
-      bg(apiSend("PUT", "/campaigns/" + c.id + "/references", { patch }), "PUT references");
+      const saved = apiSend("PUT", "/campaigns/" + c.id + "/references", { patch });
+      bg(saved, "PUT references");
+      return saved;
     },
     setReferenceSection(key, value) {
       const c = api.activeCampaign();
