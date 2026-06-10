@@ -151,16 +151,18 @@ function SetupHostPanel({ conversation, mode, onModeChange, actionResults, setup
   );
 }
 
-function SetupShell({ children, conversation, mode, onModeChange, actionResults, setupError, centered }) {
+function SetupShell({ children, conversation, mode, onModeChange, actionResults, setupError, centered, hostless }) {
   return (
-    <main className={"kp-setup-shell" + (centered ? " kp-setup-shell-centered" : "")}>
-      <SetupHostPanel
-        conversation={conversation}
-        mode={mode}
-        onModeChange={onModeChange}
-        actionResults={actionResults}
-        setupError={setupError}
-      />
+    <main className={"kp-setup-shell" + (centered ? " kp-setup-shell-centered" : "") + (hostless ? " kp-setup-shell-hostless" : "")}>
+      {!hostless && (
+        <SetupHostPanel
+          conversation={conversation}
+          mode={mode}
+          onModeChange={onModeChange}
+          actionResults={actionResults}
+          setupError={setupError}
+        />
+      )}
       <section className="kp-setup-stage">
         {children}
       </section>
@@ -810,6 +812,19 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
           align-items: center;
           min-height: calc(100vh - 286px);
         }
+        .kp-setup-shell-hostless {
+          grid-template-columns: minmax(0, 1fr);
+          justify-items: center;
+          margin-top: 86px;
+        }
+        .kp-setup-shell-hostless .kp-setup-stage {
+          width: min(760px, 100%);
+          text-align: center;
+        }
+        .kp-welcome-screen {
+          width: min(720px, 100%);
+          margin: 0 auto;
+        }
         .kp-host-panel {
           position: sticky;
           top: 28px;
@@ -992,6 +1007,9 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
             margin-top: 42px;
             min-height: 0;
           }
+          .kp-setup-shell-hostless {
+            margin-top: 54px;
+          }
           .kp-host-panel {
             position: static;
           }
@@ -1044,8 +1062,8 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
         )}
 
         {step === 1 && (
-          <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError} centered>
-            <div style={{ width: "min(660px, 100%)" }}>
+          <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError} centered hostless>
+            <div className="kp-welcome-screen">
               <div style={{
                 color: "#766A63", fontSize: 13, letterSpacing: "0.34em", textTransform: "uppercase",
                 marginBottom: 25,
@@ -1071,18 +1089,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
                       Voice is not connected yet, so I'll keep my introduction on screen. You can still type your setup answers.
                     </p>
                   )}
-                  <SetupAnswerComposer
-                    question="You can also answer by typing or voice."
-                    value={introAnswer}
-                    onChange={setIntroAnswer}
-                    onSubmit={() => handleIntroConsentAnswer(introAnswer)}
-                    onListen={listenForAnswer}
-                    listening={listening}
-                    transcript={setupTranscript}
-                    placeholder="Type yes, introduce yourself, or skip for now."
-                    actionLabel="Use answer"
-                  />
-                  <div style={{ marginTop: 44, display: "grid", justifyItems: "center", gap: 22 }}>
+                  <div style={{ marginTop: 48, display: "grid", justifyItems: "center", gap: 22 }}>
                     <button className="kp-setup-primary" onClick={introduce} style={{ minWidth: 330 }}>
                       Yes, introduce yourself
                     </button>
