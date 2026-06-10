@@ -296,7 +296,7 @@ function SetupConversationCanvas({ conversation, mode, onModeChange, actionResul
   );
 }
 
-function SetupShell({ children, conversation, mode, onModeChange, actionResults, setupError, centered, showHost, conversationState }) {
+function SetupShell({ children, conversation, mode, onModeChange, actionResults, setupError, centered, showHost, conversationState, onBack }) {
   const renderConversation = showHost !== false;
   return (
     <main className={"kp-setup-shell kp-setup-shell-canvas" + (centered ? " kp-setup-shell-centered" : "") + (!renderConversation ? " kp-setup-shell-hostless" : "")}>
@@ -309,6 +309,14 @@ function SetupShell({ children, conversation, mode, onModeChange, actionResults,
           setupError={setupError}
           conversationState={conversationState}
         />
+      )}
+      {onBack && (
+        <div className="kp-setup-back-row">
+          <button className="kp-setup-back" type="button" onClick={onBack} aria-label="Go back to the previous setup step">
+            <span aria-hidden="true">←</span>
+            Back
+          </button>
+        </div>
       )}
       <section className="kp-setup-stage">
         {children}
@@ -1979,6 +1987,34 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
           width: min(980px, 100%);
           justify-self: center;
         }
+        .kp-setup-back-row {
+          width: min(980px, 100%);
+          justify-self: center;
+          margin: -2px 0 -8px;
+        }
+        .kp-setup-back {
+          min-height: 40px;
+          display: inline-flex;
+          align-items: center;
+          gap: 9px;
+          border: 1px solid rgba(216, 206, 195, 0.84);
+          border-radius: 999px;
+          background: rgba(255, 252, 246, 0.58);
+          color: #766A63;
+          padding: 7px 15px;
+          font: 15px var(--font-sans);
+          cursor: pointer;
+          transition: color 140ms ease, border-color 140ms ease, background 140ms ease;
+        }
+        .kp-setup-back:hover {
+          color: #A74732;
+          border-color: rgba(167, 71, 50, 0.46);
+          background: rgba(255, 252, 246, 0.88);
+        }
+        .kp-setup-back:focus-visible {
+          outline: 3px solid rgba(167, 71, 50, 0.22);
+          outline-offset: 3px;
+        }
         .kp-setup-shell-canvas.kp-setup-shell-centered {
           align-items: start;
           min-height: 0;
@@ -2679,7 +2715,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
         )}
 
         {step === 1 && (
-          <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError} conversationState={conversationState}>
+          <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError} conversationState={conversationState} onBack={() => goToStep(0)}>
             <section style={{
               border: "1px solid #D8CEC3", borderRadius: 10, background: "rgba(255, 252, 246, 0.68)",
               overflow: "hidden",
@@ -2721,7 +2757,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
         )}
 
         {step === 2 && (
-          <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError} conversationState={conversationState}>
+          <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError} conversationState={conversationState} onBack={() => goToStep(1)}>
             <section style={{
               border: "1px solid #D8CEC3", borderRadius: 10, background: "rgba(255, 252, 246, 0.68)",
               overflow: "hidden",
@@ -2760,7 +2796,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
         )}
 
         {step === 3 && (
-          <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError} conversationState={conversationState}>
+          <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError} conversationState={conversationState} onBack={() => goToStep(2)}>
             <SetupAnswerComposer
               question={focusPrompt && focusPrompt.question}
               helper={focusPrompt && focusPrompt.helper}
@@ -2841,7 +2877,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
         )}
 
         {step === 4 && prefDraft && (
-          <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError} conversationState={conversationState}>
+          <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError} conversationState={conversationState} onBack={() => goToStep(3)}>
             <SetupAnswerComposer
               question={preferencesPrompt && preferencesPrompt.question}
               helper={preferencesPrompt && preferencesPrompt.helper}
