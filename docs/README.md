@@ -11,9 +11,11 @@ storage, and uses local models by default.
    Supabase replacement, Gather scheduling, and release QA.
 2. `LOCAL_DEV.md` - browser dev, desktop dev, desktop build, and LLM
    configuration examples.
-3. `BUILD_BRIEF.md` - feature scope and acceptance criteria.
-4. `API_SPEC.md` - route contracts.
-5. `DATA_MODEL.md` - entity relationships and hosted compatibility notes.
+3. `CONVERSATIONAL_BOOTSTRAP_RUNTIME.md` - reusable first-run conversation
+   runtime, manifest model, activation gates, and next implementation slices.
+4. `BUILD_BRIEF.md` - feature scope and acceptance criteria.
+5. `API_SPEC.md` - route contracts.
+6. `DATA_MODEL.md` - entity relationships and hosted compatibility notes.
 
 ## Runtime Shape
 
