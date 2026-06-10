@@ -187,7 +187,9 @@ Current King's Press implementation persists this handoff as `onboardingAssistan
 seeds a durable Desk thread from the setup transcript. The seeded thread is marked
 `source: "kings_press_setup"`, becomes the active Desk thread, and records a
 `live_assistant_handoff` metric so activation can be correlated to the continuing assistant
-surface.
+surface. Desk chat calls now pass the active campaign id to `/api/desk/chat`; the route verifies
+campaign scope, loads the approved references/setup profile, serializes them through
+`buildRefContext`, and injects that context into the server-side assistant prompt.
 
 ## Manifest Schema
 
@@ -451,8 +453,10 @@ Deliverables:
 - First post-setup assistant prompt.
 - `live_assistant_handoff` metric.
 
-Status: partial. The transcript now seeds the Desk thread and records the handoff metric; the next
-pass should make the approved profile available to the live assistant context explicitly.
+Status: implemented for the Desk surface. The transcript seeds a durable Desk thread, the handoff
+metric is recorded, and `/api/desk/chat` injects the active campaign's approved references/profile
+into the live assistant context. Future app manifests can repeat this pattern for their own
+post-setup assistant surfaces.
 
 ### Slice 5: Voice Runtime Upgrade
 

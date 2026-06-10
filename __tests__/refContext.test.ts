@@ -154,4 +154,38 @@ describe("buildRefContext", () => {
   it("omits GATE PREFERENCES when body is missing", () => {
     expect(buildRefContext({ gateSpec: {} })).toBe("");
   });
+
+  it("appends an approved setup profile block when onboarding saved one", () => {
+    const out = buildRefContext({
+      setupProfile: {
+        profile: {
+          selfStatement: "I am an operator writing for builders.",
+          communicationPlatforms: [{ platform: "LinkedIn" }, { platform: "Substack" }],
+          voiceProfile: {
+            toneWords: ["clear", "practical"],
+            avoid: ["hype"],
+          },
+          publicationDefaults: {
+            defaultOutputTypes: ["article", "newsletter"],
+            preserveRawLanguage: "polish_lightly",
+          },
+          permissions: {
+            mayUseSavedMemory: false,
+            mayUseUploadedVoiceExamples: true,
+            mayUseWebResearch: false,
+            mayPublishOrSend: false,
+          },
+        },
+      },
+    });
+
+    expect(out).toContain("APPROVED SETUP PROFILE:");
+    expect(out).toContain("Self statement: I am an operator writing for builders.");
+    expect(out).toContain("Communication platforms: LinkedIn, Substack");
+    expect(out).toContain("Writing formats: article, newsletter");
+    expect(out).toContain("Tone words: clear, practical");
+    expect(out).toContain("Avoid: hype");
+    expect(out).toContain("Preservation preference: polish_lightly");
+    expect(out).toContain("Permissions: memory=not approved; examples=approved; web=not approved; publish/send=not approved");
+  });
 });

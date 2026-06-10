@@ -42,13 +42,14 @@ function deskUsedTokens(thread) {
   return 320 + live + memory;
 }
 
-async function deskChatComplete(thread) {
+async function deskChatComplete(thread, campaignId) {
   const res = await fetch("/api/desk/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify({
       mode: "desk",
       task: "utility",
+      campaignId,
       messages: (thread.messages || []).map((m) => ({ role: m.role, content: m.content })),
       memory: thread.memory && thread.memory.note,
     }),
@@ -174,7 +175,7 @@ function Desk({ campaignId, onOpenPiece }) {
     });
     updateThread(t);
     try {
-      const answer = await deskChatComplete(t);
+      const answer = await deskChatComplete(t, campaignId);
       t = Object.assign({}, t, {
         messages: t.messages.concat([{ id: deskUid("msg_"), role: "assistant", content: answer || "(No response returned.)" }]),
         updatedAt: Date.now(),
