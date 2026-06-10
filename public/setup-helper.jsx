@@ -116,49 +116,20 @@ function OnboardingBrand() {
   );
 }
 
-function OnboardingStepper({ step }) {
-  return (
-    <nav aria-label="Setup progress" style={{
-      display: "grid", gridTemplateColumns: "repeat(" + ONBOARDING_STEPS.length + ", minmax(0, 1fr))", alignItems: "center",
-      gap: 8, marginTop: 72, color: "#766A63",
-    }}>
-      {ONBOARDING_STEPS.map((item, i) => {
-        const label = item.label;
-        const active = step === i;
-        const done = i < step;
-        return (
-          <div key={label} aria-current={active ? "step" : undefined} style={{
-            display: "grid", gridTemplateColumns: "auto auto minmax(24px, 1fr)", alignItems: "center",
-            gap: 10, minWidth: 0,
-          }}>
-            <span style={{
-              width: 39, height: 39, borderRadius: 999, display: "grid", placeItems: "center",
-              border: "1px solid " + (active ? "#A74732" : "#D8CEC3"),
-              color: active ? "#A74732" : (done ? "#766A63" : "#766A63"),
-              background: active ? "rgba(167, 71, 50, 0.045)" : "transparent",
-              fontFamily: "var(--font-serif)", fontSize: 17,
-            }}>{i + 1}</span>
-            <span style={{
-              color: active ? "#A74732" : "#766A63",
-              fontFamily: "var(--font-serif)", fontSize: 17, whiteSpace: "nowrap",
-              overflow: "hidden", textOverflow: "ellipsis",
-            }}>{label}</span>
-            {i < ONBOARDING_STEPS.length - 1 && <span aria-hidden="true" style={{
-              height: 1, minWidth: 12, background: "#D8CEC3", opacity: 0.9,
-            }} />}
-          </div>
-        );
-      })}
-    </nav>
-  );
-}
-
 function getActionStatusLabel(status) {
   if (status === ONBOARDING_ACTION_STATUSES.PENDING) return "Working";
   if (status === ONBOARDING_ACTION_STATUSES.SUCCEEDED) return "Done";
   if (status === ONBOARDING_ACTION_STATUSES.FAILED) return "Needs attention";
   if (status === ONBOARDING_ACTION_STATUSES.SKIPPED) return "Skipped";
   return "Ready";
+}
+
+function shouldShowActionResult(result) {
+  if (!result) return false;
+  if (result.status === ONBOARDING_ACTION_STATUSES.SKIPPED || result.status === "skipped") return false;
+  if (result.intent === ONBOARDING_ACTIONS.PLAY_INTRO || result.intent === "play_intro") return false;
+  if (result.intent === ONBOARDING_ACTIONS.SKIP_INTRO || result.intent === "skip_intro") return false;
+  return true;
 }
 
 function SetupMotionMark({ state }) {
@@ -182,6 +153,7 @@ function SetupChoiceChip({ label, active, onClick, icon }) {
 function SetupHostPanel({ conversation, mode, onModeChange, actionResults, setupError }) {
   const results = Object.values(actionResults || {})
     .filter(Boolean)
+    .filter(shouldShowActionResult)
     .sort((a, b) => (a.updatedAt || 0) - (b.updatedAt || 0))
     .slice(-4);
   return (
@@ -222,7 +194,7 @@ function SetupHostPanel({ conversation, mode, onModeChange, actionResults, setup
   );
 }
 
-function SetupConversationCanvas({ conversation, mode, onModeChange, actionResults, setupError, conversationState }) {
+function SetupConversationCanvas({ children, conversation, mode, onModeChange, actionResults, setupError, conversationState, onBack }) {
   const slotPrompts = (ONBOARDING_CONVERSATION && ONBOARDING_CONVERSATION.slotPrompts) || {};
   const sequence = (ONBOARDING_CONVERSATION && ONBOARDING_CONVERSATION.QUESTION_SEQUENCE) || [];
   const slots = (conversationState && conversationState.slots) || {};
@@ -242,6 +214,11 @@ function SetupConversationCanvas({ conversation, mode, onModeChange, actionResul
       };
     })
     .filter(Boolean);
+  const results = Object.values(actionResults || {})
+    .filter(Boolean)
+    .filter(shouldShowActionResult)
+    .sort((a, b) => (a.updatedAt || 0) - (b.updatedAt || 0))
+    .slice(-4);
   return (
     <section className="kp-conversation-canvas" aria-label="King's Press setup conversation">
       <div className="kp-conversation-toolbar">
@@ -258,6 +235,14 @@ function SetupConversationCanvas({ conversation, mode, onModeChange, actionResul
           <SetupChoiceChip label="Voice" icon="mic" active={mode === "voice"} onClick={() => onModeChange("voice")} />
         </div>
       </div>
+      {onBack && (
+        <div className="kp-conversation-nav">
+          <button className="kp-setup-back" type="button" onClick={onBack} aria-label="Go back to the previous setup turn">
+            <span aria-hidden="true">←</span>
+            Back
+          </button>
+        </div>
+      )}
       <div className="kp-conversation-thread">
         {(conversation.messages || []).map((message, index) => (
           <div key={"assistant-" + index} className="kp-chat-turn kp-chat-turn-assistant">
@@ -265,18 +250,36 @@ function SetupConversationCanvas({ conversation, mode, onModeChange, actionResul
             <p>{message}</p>
           </div>
         ))}
-        {currentPrompt && (
+        {answeredTurns.map((turn) => (
+          <React.Fragment key={turn.id}>
+            <div className="kp-chat-turn kp-chat-turn-assistant">
+              <span className="kp-chat-avatar" aria-hidden="true">K</span>
+              <p>{turn.prompt.question}</p>
+            </div>
+            <div className="kp-chat-turn kp-chat-turn-user">
+              <p>{turn.text}</p>
+            </div>
+          </React.Fragment>
+        ))}
+        {currentPrompt && currentPrompt.slotStatus !== "answered" && currentPrompt.slotStatus !== "skipped" && (
           <div className="kp-chat-turn kp-chat-turn-assistant">
             <span className="kp-chat-avatar" aria-hidden="true">K</span>
             <p>{currentPrompt.question}</p>
           </div>
         )}
-        {answeredTurns.map((turn) => (
-          <div key={turn.id} className="kp-chat-turn kp-chat-turn-user">
-            <p>{turn.text}</p>
-          </div>
-        ))}
       </div>
+      <div className="kp-conversation-composer">
+        {children}
+      </div>
+      {!!results.length && (
+        <div className="kp-conversation-status" aria-label="Recent setup actions">
+          {results.map((result) => (
+            <span key={(result.intent || "action") + (result.updatedAt || "")} data-status={result.status}>
+              {getActionStatusLabel(result.status)}: {(result.intent || "setup").replace(/_/g, " ")}
+            </span>
+          ))}
+        </div>
+      )}
       {setupError && (
         <div className="kp-conversation-status" aria-live="polite">
           <strong role="alert">{setupError}</strong>
@@ -287,30 +290,19 @@ function SetupConversationCanvas({ conversation, mode, onModeChange, actionResul
 }
 
 function SetupShell({ children, conversation, mode, onModeChange, actionResults, setupError, centered, showHost, conversationState, onBack }) {
-  const renderConversation = showHost !== false;
   return (
-    <main className={"kp-setup-shell kp-setup-shell-canvas" + (centered ? " kp-setup-shell-centered" : "") + (!renderConversation ? " kp-setup-shell-hostless" : "")}>
-      {renderConversation && (
-        <SetupConversationCanvas
-          conversation={conversation}
-          mode={mode}
-          onModeChange={onModeChange}
-          actionResults={actionResults}
-          setupError={setupError}
-          conversationState={conversationState}
-        />
-      )}
-      {onBack && (
-        <div className="kp-setup-back-row">
-          <button className="kp-setup-back" type="button" onClick={onBack} aria-label="Go back to the previous setup step">
-            <span aria-hidden="true">←</span>
-            Back
-          </button>
-        </div>
-      )}
-      <section className="kp-setup-stage">
+    <main className={"kp-setup-shell kp-setup-shell-canvas" + (centered ? " kp-setup-shell-centered" : "")}>
+      <SetupConversationCanvas
+        conversation={conversation}
+        mode={mode}
+        onModeChange={onModeChange}
+        actionResults={actionResults}
+        setupError={setupError}
+        conversationState={conversationState}
+        onBack={onBack}
+      >
         {children}
-      </section>
+      </SetupConversationCanvas>
     </main>
   );
 }
@@ -867,7 +859,7 @@ function InlineVoiceSetup({ status, audioState, onConnect, onLLMSaved, onVoiceCo
       <div className="kp-inline-voice-head">
         <span aria-hidden="true" className="kp-inline-model-icon"><Icon name="mic" size={25} /></span>
         <div>
-          <p className="kp-inline-step-label">Optional before the intro</p>
+          <p className="kp-inline-step-label">Optional voice</p>
           <h3>Add voice if you want me to read aloud</h3>
           <p>Paste a voice API key and I can respond over audio. OpenAI is the easiest first key because it can also power the rest of setup.</p>
         </div>
@@ -1334,9 +1326,6 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
       "yes, introduce yourself",
       "button",
     ));
-    recordAction(ONBOARDING_ACTIONS.PLAY_INTRO, ONBOARDING_ACTION_STATUSES.PENDING, {
-      data: { waitingForWelcomeStep: true },
-    });
   }
 
   function skipIntroFromConnect() {
@@ -1983,15 +1972,15 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
           cursor: pointer;
         }
         .kp-setup-shell {
-          margin-top: 76px;
+          margin-top: 44px;
           display: grid;
-          grid-template-columns: minmax(280px, 0.82fr) minmax(0, 1.65fr);
-          gap: clamp(34px, 5vw, 72px);
+          grid-template-columns: minmax(0, 1fr);
+          gap: 0;
           align-items: start;
         }
         .kp-setup-shell-centered {
           align-items: center;
-          min-height: calc(100vh - 286px);
+          min-height: calc(100vh - 170px);
         }
         .kp-setup-shell-hostless {
           grid-template-columns: minmax(0, 1fr);
@@ -2007,8 +1996,8 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
         }
         .kp-setup-shell-canvas {
           grid-template-columns: minmax(0, 1fr);
-          gap: 34px;
-          margin-top: 54px;
+          gap: 0;
+          margin-top: 42px;
         }
         .kp-setup-shell-canvas .kp-setup-stage {
           width: min(980px, 100%);
@@ -2047,10 +2036,10 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
           min-height: 0;
         }
         .kp-conversation-canvas {
-          width: min(980px, 100%);
+          width: min(940px, 100%);
           justify-self: center;
           border: 1px solid rgba(216, 206, 195, 0.74);
-          border-radius: 18px;
+          border-radius: 22px;
           background:
             linear-gradient(180deg, rgba(255, 252, 246, 0.78), rgba(255, 252, 246, 0.52)),
             rgba(255, 252, 246, 0.54);
@@ -2094,6 +2083,9 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
           flex-wrap: wrap;
           justify-content: flex-end;
           gap: 8px;
+        }
+        .kp-conversation-nav {
+          padding: 14px clamp(18px, 4vw, 38px) 0;
         }
         .kp-conversation-thread {
           position: relative;
@@ -2165,8 +2157,22 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
           font-weight: 400;
         }
         .kp-conversation-status span[data-status="succeeded"] { color: #5E7A46; }
+        .kp-conversation-status span[data-status="skipped"] { display: none; }
         .kp-conversation-status span[data-status="failed"],
         .kp-conversation-status strong { color: #A74732; }
+        .kp-conversation-composer {
+          border-top: 1px solid rgba(216, 206, 195, 0.62);
+          background: rgba(247, 242, 235, 0.34);
+          padding: clamp(18px, 3vw, 30px);
+        }
+        .kp-conversation-composer > section {
+          border-color: rgba(216, 206, 195, 0.82) !important;
+          background: rgba(255, 252, 246, 0.46) !important;
+          box-shadow: none;
+        }
+        .kp-conversation-composer > .kp-answer-composer {
+          margin-top: 0;
+        }
         .kp-welcome-screen {
           width: min(720px, 100%);
           margin: 0 auto;
@@ -2296,12 +2302,12 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
           font-size: 12.5px;
         }
         .kp-inline-model-setup {
-          padding: 24px 34px 26px;
+          padding: 22px 26px 24px;
           display: grid;
           gap: 13px;
         }
         .kp-inline-intro-consent {
-          padding: 24px 34px;
+          padding: 22px 26px;
           display: grid;
           gap: 16px;
         }
@@ -2471,7 +2477,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
         }
         .kp-inline-voice-setup {
           border-top: 1px solid #D8CEC3;
-          padding: 24px 34px 26px;
+          padding: 22px 26px 24px;
           display: grid;
           gap: 13px;
         }
@@ -2533,7 +2539,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
           min-width: 0;
         }
         .kp-answer-composer {
-          margin: 34px auto 0;
+          margin: 0 auto;
           max-width: 680px;
           display: grid;
           gap: 14px;
@@ -2698,7 +2704,6 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
       `}</style>
       <div style={{ width: "min(1120px, calc(100% - 72px))", margin: "0 auto", padding: "44px 0 34px" }}>
         <OnboardingBrand />
-        <OnboardingStepper step={step} />
 
         {step === 0 && (
           <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError} conversationState={conversationState} centered hostless>

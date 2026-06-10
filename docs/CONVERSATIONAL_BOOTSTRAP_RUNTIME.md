@@ -433,6 +433,10 @@ Deliverables:
 - Old turns scroll upward with progress preserved.
 - No tutorial cards.
 
+Status: implemented for the setup helper surface. The visible stepper has been removed, prior
+answers render as user bubbles, each setup node keeps its controls inside the same conversation
+canvas, and skipped bookkeeping statuses are hidden from the user-facing transcript.
+
 ### Slice 3: Intent Repair
 
 Add deterministic intent normalization and repair.
