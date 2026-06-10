@@ -9,6 +9,12 @@ export const setupProfileSchema = z.object({
     priority: z.enum(["primary", "secondary", "occasional"]).default("primary"),
     notes: z.string().max(600).optional(),
   })).default([]),
+  selfStatement: z.string().max(3000).optional().default(""),
+  primaryAudience: z.string().max(500).optional().default(""),
+  throughline: z.string().max(800).optional().default(""),
+  draftStyle: z.enum(["polished", "plainspoken", "strategic", "conversational", "not_set"]).default("not_set"),
+  voiceRules: z.array(z.string().min(1).max(240)).default([]),
+  redLines: z.array(z.string().min(1).max(240)).default([]),
   writingHelpFirst: z.string().max(1000).optional().default(""),
   voiceProfile: z.object({
     userDescription: z.string().max(3000).default(""),
@@ -73,6 +79,12 @@ Return only JSON matching this shape:
 {
   "brand": "pillar_press" | "kings_press",
   "communicationPlatforms": [{"platform": "string", "priority": "primary" | "secondary" | "occasional", "notes": "string"}],
+  "selfStatement": "string",
+  "primaryAudience": "string",
+  "throughline": "string",
+  "draftStyle": "polished" | "plainspoken" | "strategic" | "conversational" | "not_set",
+  "voiceRules": ["string"],
+  "redLines": ["string"],
   "writingHelpFirst": "string",
   "voiceProfile": {
     "userDescription": "string",
@@ -95,6 +107,12 @@ Return only JSON matching this shape:
 }
 
 Rules:
+- Extract where the user communicates most.
+- Extract who the user is and what the app should sound like on their behalf.
+- Extract the primary audience.
+- Extract the core throughline or point of view.
+- Extract the preferred draft style.
+- Extract explicit tone rules and do-nots only when stated.
 - Do not infer permission to use saved memory.
 - Do not infer permission to use web research.
 - Do not infer permission to publish, post, send, share, or connect services.

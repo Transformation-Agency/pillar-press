@@ -9,6 +9,18 @@ const ONBOARDING_AUDIO = window.KP_ONBOARDING_AUDIO || {
 };
 const ONBOARDING_RUNTIME = window.KP_CONVERSATIONAL_ONBOARDING || null;
 const ONBOARDING_ACTION_REGISTRY = window.KP_ONBOARDING_ACTIONS || null;
+const ONBOARDING_PROFILE = window.KP_ONBOARDING_PROFILE || {
+  buildProfileDraft: ({ transcript }) => ({
+    version: "fallback",
+    brand: "kings_press",
+    sourceTranscript: String(transcript || ""),
+    communicationPlatforms: [],
+    publicationDefaults: { defaultOutputTypes: ["custom"], preserveRawLanguage: "polish_lightly", humanReviewRequired: true },
+    permissions: { mayUseSavedMemory: false, mayUseUploadedVoiceExamples: false, mayUseWebResearch: false, mayPublishOrSend: false },
+  }),
+  applyProfileToPreferences: (_profile, draft) => Object.assign({}, draft || {}),
+  draftStyleForProfile: () => "Polished",
+};
 const ONBOARDING_STEPS = (ONBOARDING_RUNTIME && ONBOARDING_RUNTIME.steps) || [
   { id: "connect", label: "Connect" },
   { id: "welcome", label: "Welcome" },
@@ -210,6 +222,45 @@ function SetupAnswerComposer({
   );
 }
 
+function SetupProfileReview({ profile }) {
+  if (!profile) return null;
+  const platforms = (profile.communicationPlatforms || []).map((item) => item.platform).filter(Boolean);
+  const outputs = (profile.publicationDefaults && profile.publicationDefaults.defaultOutputTypes) || [];
+  const permissions = profile.permissions || {};
+  const permissionText = [
+    permissions.mayUseSavedMemory ? "Memory approved" : "Memory off",
+    permissions.mayUseWebResearch ? "Web research approved" : "Web research off",
+    permissions.mayPublishOrSend ? "Publish/send approved" : "Publish/send off",
+  ];
+  return (
+    <section className="kp-profile-review" aria-label="Setup profile review">
+      <div>
+        <p className="kp-profile-eyebrow">Here is what I understood</p>
+        <h2>Review before saving</h2>
+        <p>Nothing has been saved yet. Edit the fields below before you finish setup.</p>
+      </div>
+      <div className="kp-profile-grid">
+        <div>
+          <span>Communicates mostly on</span>
+          <strong>{platforms.length ? platforms.join(", ") : "Not set yet"}</strong>
+        </div>
+        <div>
+          <span>Default formats</span>
+          <strong>{outputs.length ? outputs.map((item) => item.replace(/_/g, " ")).join(", ") : "Custom"}</strong>
+        </div>
+        <div>
+          <span>Draft approach</span>
+          <strong>{ONBOARDING_PROFILE.draftStyleForProfile(profile)}</strong>
+        </div>
+        <div>
+          <span>Permissions</span>
+          <strong>{permissionText.join(" · ")}</strong>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function SetupStatusChip({ label }) {
   return (
     <span style={{
@@ -309,6 +360,9 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
   const [setupTranscript, setSetupTranscript] = React.useState("");
   const [listening, setListening] = React.useState(false);
   const [platformAnswerCaptured, setPlatformAnswerCaptured] = React.useState(false);
+  const [profileAnswer, setProfileAnswer] = React.useState("");
+  const [setupProfileDraft, setSetupProfileDraft] = React.useState(null);
+  const [profileBusy, setProfileBusy] = React.useState(false);
   const transcriptHandlerRef = React.useRef(null);
   const listenSessionRef = React.useRef(null);
   const state = window.Store.getState();
@@ -426,6 +480,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
 
   function goToStep(next) {
     setSetupError("");
+    setSetupTranscript("");
     stopListeningSession();
     setStep(ONBOARDING_RUNTIME ? ONBOARDING_RUNTIME.clampStepIndex(next) : Math.max(0, Math.min(3, next)));
   }
@@ -436,6 +491,11 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     setSetupAnswer(clean);
     setSetupTranscript(clean);
     setPlatformAnswerCaptured(true);
+    const profile = ONBOARDING_PROFILE.buildProfileDraft({
+      transcript: clean,
+      currentDraft: setupProfileDraft,
+    });
+    setSetupProfileDraft(profile);
     const platformNames = clean
       .split(/,|\band\b|\n/i)
       .map((item) => item.trim())
@@ -444,7 +504,8 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     const focusName = ((platformNames[0] || clean) + " focus").trim();
     if (prefDraft) {
       const firstPlatform = platformNames[0] || clean;
-      setPrefDraft(Object.assign({}, prefDraft, {
+      const seededDraft = ONBOARDING_PROFILE.applyProfileToPreferences(profile, prefDraft);
+      setPrefDraft(Object.assign({}, seededDraft, {
         audienceNote: prefDraft.audienceNote || ("Communicates most on: " + clean),
         strategy: prefDraft.strategy || ("Primary communication places: " + clean),
         throughlineNote: prefDraft.throughlineNote || ("First setup answer: " + clean),
@@ -454,6 +515,67 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
       setCampaignName(focusName || "First focus");
     }
     return { focusName };
+  }
+
+  function mergeProfileIntoPreferences(profile) {
+    if (!profile) return;
+    setSetupProfileDraft(profile);
+    setDraftStyle(ONBOARDING_PROFILE.draftStyleForProfile(profile));
+    setPrefDraft((current) => {
+      const seeded = ONBOARDING_PROFILE.applyProfileToPreferences(profile, current || {});
+      const selfStatement = profile.selfStatement || (profile.voiceProfile && profile.voiceProfile.userDescription) || "";
+      const rules = (profile.voiceRules || []).join("\n");
+      const redLines = (profile.redLines || []).join("\n");
+      return Object.assign({}, seeded, {
+        selfVision: seeded.selfVision || selfStatement,
+        audienceName: seeded.audienceName || profile.primaryAudience || "",
+        throughlineName: seeded.throughlineName || profile.throughline || "",
+        voiceRules: seeded.voiceRules || rules,
+        redLines: seeded.redLines || redLines,
+      });
+    });
+  }
+
+  async function interpretProfileAnswer(text) {
+    const clean = String(text || "").trim();
+    if (!clean) return;
+    setProfileAnswer(clean);
+    setProfileBusy(true);
+    setSetupError("");
+    recordAction(ONBOARDING_ACTIONS.EXTRACT_SETUP_PROFILE, ONBOARDING_ACTION_STATUSES.PENDING);
+    try {
+      let profile = null;
+      if (ONBOARDING_ACTION_REGISTRY && ONBOARDING_ACTION_REGISTRY.extractSetupProfile) {
+        const result = await ONBOARDING_ACTION_REGISTRY.extractSetupProfile({
+          brand: "kings_press",
+          transcript: clean,
+          currentDraft: setupProfileDraft,
+        });
+        if (result.status === ONBOARDING_ACTION_STATUSES.SUCCEEDED && result.data && result.data.profileDraft) {
+          profile = Object.assign({ version: "server" }, result.data.profileDraft, { sourceTranscript: clean });
+          recordAction(ONBOARDING_ACTIONS.EXTRACT_SETUP_PROFILE, ONBOARDING_ACTION_STATUSES.SUCCEEDED, result);
+        }
+      }
+      if (!profile) {
+        profile = ONBOARDING_PROFILE.buildProfileDraft({
+          transcript: clean,
+          currentDraft: setupProfileDraft,
+        });
+        recordAction(ONBOARDING_ACTIONS.EXTRACT_SETUP_PROFILE, ONBOARDING_ACTION_STATUSES.SUCCEEDED, { data: { fallback: "local" } });
+      }
+      mergeProfileIntoPreferences(profile);
+    } catch (e) {
+      const profile = ONBOARDING_PROFILE.buildProfileDraft({
+        transcript: clean,
+        currentDraft: setupProfileDraft,
+      });
+      mergeProfileIntoPreferences(profile);
+      recordAction(ONBOARDING_ACTIONS.EXTRACT_SETUP_PROFILE, ONBOARDING_ACTION_STATUSES.FAILED, {
+        error: (e && e.message) || "Could not interpret setup answer. I kept your text for manual editing.",
+      });
+    } finally {
+      setProfileBusy(false);
+    }
   }
 
   function handleIntroConsentAnswer(text) {
@@ -485,6 +607,10 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     }
     if (step === 2) {
       applyPlatformAnswer(clean);
+      return;
+    }
+    if (step === 3) {
+      interpretProfileAnswer(clean);
     }
   }
 
@@ -623,6 +749,14 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     if (!prefDraft || !window.Store.activeReferences) return Promise.resolve(null);
     recordAction(ONBOARDING_ACTIONS.SAVE_PREFERENCES, ONBOARDING_ACTION_STATUSES.PENDING);
     const refs = window.Store.activeReferences() || {};
+    const keepBody = (next, current) => {
+      const clean = String(next || "").trim();
+      return clean || String((current && current.body) || "");
+    };
+    const keepRules = (next, current) => {
+      const parsed = String(next || "").split("\n").map((x) => x.trim()).filter(Boolean);
+      return parsed.length ? parsed : ((current && current.rules) || []);
+    };
     const throughline = {
       tag: (prefDraft.throughlineTag || "core").trim(),
       name: prefDraft.throughlineName.trim(),
@@ -636,10 +770,11 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     const strategyList = (refs.strategy && refs.strategy.throughlines) || [];
     const audienceList = (refs.audiences && refs.audiences.list) || [];
     const registerBody = prefDraft.registerBody.trim() ||
+      ((refs.registers && refs.registers.body) || "") ||
       ("Default draft style: " + draftStyle.toLowerCase() + ".");
     const patch = {
       strategy: Object.assign({}, refs.strategy || {}, {
-        body: prefDraft.strategy,
+        body: keepBody(prefDraft.strategy, refs.strategy),
         throughlines: throughline.name || throughline.note
           ? [throughline].concat(strategyList.slice(1))
           : strategyList,
@@ -649,14 +784,21 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
       }),
       registers: Object.assign({}, refs.registers || {}, { body: registerBody }),
       voiceRules: Object.assign({}, refs.voiceRules || {}, {
-        rules: prefDraft.voiceRules.split("\n").map((x) => x.trim()).filter(Boolean),
+        rules: keepRules(prefDraft.voiceRules, refs.voiceRules),
       }),
       redLines: Object.assign({}, refs.redLines || {}, {
-        rules: prefDraft.redLines.split("\n").map((x) => x.trim()).filter(Boolean),
+        rules: keepRules(prefDraft.redLines, refs.redLines),
       }),
-      selfVision: Object.assign({}, refs.selfVision || {}, { body: prefDraft.selfVision }),
-      gateSpec: Object.assign({}, refs.gateSpec || {}, { body: prefDraft.gateSpec }),
+      selfVision: Object.assign({}, refs.selfVision || {}, { body: keepBody(prefDraft.selfVision, refs.selfVision) }),
+      gateSpec: Object.assign({}, refs.gateSpec || {}, { body: keepBody(prefDraft.gateSpec, refs.gateSpec) }),
     };
+    if (setupProfileDraft) {
+      patch.setupProfile = {
+        version: (setupProfileDraft && setupProfileDraft.version) || 1,
+        approvedAt: new Date().toISOString(),
+        profile: setupProfileDraft,
+      };
+    }
     const saved = ONBOARDING_ACTION_REGISTRY && ONBOARDING_ACTION_REGISTRY.savePreferences
       ? ONBOARDING_ACTION_REGISTRY.savePreferences(patch)
       : window.Store.updateReferences(patch);
@@ -672,12 +814,17 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     });
   };
 
-  const finish = async () => {
+  const finish = async (options) => {
+    const skipPreferences = !!(options && options.skipPreferences);
     setSetupError("");
     setBusy(true);
     try {
       if (!activeCampaign && campaignName.trim()) await ensureFocus();
-      await savePreferences();
+      if (skipPreferences) {
+        recordAction(ONBOARDING_ACTIONS.SAVE_PREFERENCES, ONBOARDING_ACTION_STATUSES.SKIPPED);
+      } else {
+        await savePreferences();
+      }
       if (ONBOARDING_ACTION_REGISTRY && ONBOARDING_ACTION_REGISTRY.completeOnboarding) {
         const result = await ONBOARDING_ACTION_REGISTRY.completeOnboarding({ firstValueComplete: true });
         if (result.status === ONBOARDING_ACTION_STATUSES.FAILED) throw new Error(result.error);
@@ -990,6 +1137,56 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
           font-size: 14.5px;
           line-height: 1.45;
         }
+        .kp-profile-review {
+          margin: 0 0 28px;
+          border: 1px solid rgba(167, 71, 50, 0.24);
+          border-radius: 12px;
+          background: rgba(255, 252, 246, 0.72);
+          padding: 24px;
+          display: grid;
+          gap: 20px;
+        }
+        .kp-profile-review h2 {
+          margin: 5px 0 7px;
+          font: 28px/1.15 var(--font-serif);
+          font-weight: 500;
+          color: #2A211E;
+        }
+        .kp-profile-review p {
+          margin: 0;
+          color: #766A63;
+          line-height: 1.45;
+        }
+        .kp-profile-eyebrow {
+          font-size: 12px;
+          letter-spacing: 0.22em;
+          text-transform: uppercase;
+        }
+        .kp-profile-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+          gap: 12px;
+        }
+        .kp-profile-grid div {
+          border: 1px solid #D8CEC3;
+          border-radius: 10px;
+          padding: 14px;
+          background: rgba(247, 242, 235, 0.44);
+        }
+        .kp-profile-grid span {
+          display: block;
+          color: #766A63;
+          font-size: 12px;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+          margin-bottom: 8px;
+        }
+        .kp-profile-grid strong {
+          display: block;
+          color: #2A211E;
+          font: 16px/1.35 var(--font-serif);
+          font-weight: 500;
+        }
         @keyframes kpHostPulse {
           0% { transform: scale(0.92); box-shadow: 0 0 0 0 rgba(167, 71, 50, 0.24); }
           70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(167, 71, 50, 0); }
@@ -1200,6 +1397,20 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
             <p style={{ margin: "22px 0 34px", color: "#766A63", fontSize: 21, lineHeight: 1.5 }}>
               Start with the basics. You can refine everything later.
             </p>
+            <SetupAnswerComposer
+              question="Tell me how this desk should sound for you."
+              value={profileAnswer}
+              onChange={setProfileAnswer}
+              onSubmit={() => interpretProfileAnswer(profileAnswer)}
+              onListen={listenForAnswer}
+              listening={listening}
+              disabled={profileBusy}
+              transcript={step === 3 ? setupTranscript : ""}
+              placeholder="e.g. Clear, useful, direct. I write for independent operators and want drafts that preserve my point of view."
+              actionLabel={profileBusy ? "Interpreting" : "Use for defaults"}
+            />
+            <div style={{ height: 28 }} />
+            <SetupProfileReview profile={setupProfileDraft} />
             <section style={{
               border: "1px solid #D8CEC3", borderRadius: 10, background: "rgba(255, 252, 246, 0.64)",
               overflow: "hidden",
@@ -1308,9 +1519,9 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
             </section>
             <SetupActions
               secondary="Do this later"
-              onSecondary={finish}
+              onSecondary={() => finish({ skipPreferences: true })}
               primary="Finish setup"
-              onPrimary={finish}
+              onPrimary={() => finish()}
               busy={busy}
             />
             {setupError && (

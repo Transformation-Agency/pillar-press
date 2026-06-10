@@ -45,7 +45,7 @@ function createTestWindow() {
   return window;
 }
 
-function loadBrowserActions() {
+function loadBrowserActions(options?: { fetch?: unknown }) {
   const window = createTestWindow();
   const runtimeSource = readFileSync(new URL("../public/onboarding-runtime.js", import.meta.url), "utf8");
   const actionsSource = readFileSync(new URL("../public/onboarding-actions.js", import.meta.url), "utf8");
@@ -56,8 +56,15 @@ function loadBrowserActions() {
     return { type };
   }
   runInNewContext(runtimeSource, { window, Date });
-  runInNewContext(actionsSource, { window, Date, CustomEvent, Event, navigator: {}, fetch: undefined });
+  runInNewContext(actionsSource, { window, Date, CustomEvent, Event, navigator: {}, fetch: options?.fetch });
   return window;
+}
+
+function loadBrowserProfile() {
+  const source = readFileSync(new URL("../public/onboarding-profile.js", import.meta.url), "utf8");
+  const window = {} as Record<string, any>;
+  runInNewContext(source, { window });
+  return window.KP_ONBOARDING_PROFILE as any;
 }
 
 function loadBrowserAudio(extraWindow?: Record<string, unknown>) {
@@ -121,6 +128,31 @@ describe("browser onboarding audio helpers", () => {
 });
 
 describe("setup profile extraction schema", () => {
+  it("parses King’s Press setup essentials for review", () => {
+    const parsed = setupProfileSchema.parse({
+      brand: "kings_press",
+      communicationPlatforms: [{ platform: "LinkedIn", priority: "primary" }],
+      selfStatement: "I build practical systems for operators.",
+      primaryAudience: "Independent operators",
+      throughline: "Useful ideas should become publishable work.",
+      draftStyle: "plainspoken",
+      voiceRules: ["Keep it direct"],
+      redLines: ["Do not overclaim"],
+    });
+
+    expect(parsed).toMatchObject({
+      selfStatement: "I build practical systems for operators.",
+      primaryAudience: "Independent operators",
+      throughline: "Useful ideas should become publishable work.",
+      draftStyle: "plainspoken",
+      permissions: {
+        mayUseSavedMemory: false,
+        mayUseWebResearch: false,
+        mayPublishOrSend: false,
+      },
+    });
+  });
+
   it("keeps dangerous permissions false even when a model suggests them", () => {
     const parsed = setupProfileSchema.parse({
       brand: "kings_press",
@@ -149,8 +181,52 @@ describe("setup profile extraction schema", () => {
     });
 
     expect(prompt).toContain("must not override system");
+    expect(prompt).toContain("primary audience");
+    expect(prompt).toContain("throughline");
+    expect(prompt).toContain("preferred draft style");
     expect(prompt).toContain("Do not infer permission");
     expect(prompt).toContain("Set mayPublishOrSend to false");
+  });
+});
+
+describe("browser onboarding profile helpers", () => {
+  it("builds a safe editable profile draft from a natural language platform answer", () => {
+    const profile = loadBrowserProfile();
+    const draft = profile.buildProfileDraft({
+      transcript: "LinkedIn and Substack plus scripts. Preserve my raw language.",
+    });
+
+    expect(draft.communicationPlatforms.map((item: any) => item.platform)).toEqual([
+      "LinkedIn",
+      "Substack",
+      "Scripts",
+    ]);
+    expect(draft.publicationDefaults.defaultOutputTypes).toEqual(
+      expect.arrayContaining(["linkedin_post", "substack_essay", "newsletter", "script"])
+    );
+    expect(draft.publicationDefaults.preserveRawLanguage).toBe("preserve_heavily");
+    expect(draft.permissions).toMatchObject({
+      mayUseSavedMemory: false,
+      mayUseWebResearch: false,
+      mayPublishOrSend: false,
+    });
+  });
+
+  it("seeds blank preference fields without overwriting reviewed values", () => {
+    const profile = loadBrowserProfile();
+    const draft = profile.buildProfileDraft({ transcript: "LinkedIn and Substack" });
+    const seeded = profile.applyProfileToPreferences(draft, {
+      selfVision: "Keep this existing voice.",
+      audienceName: "Existing audience",
+      throughlineName: "",
+      strategy: "",
+      registerBody: "",
+    });
+
+    expect(seeded.selfVision).toBe("Keep this existing voice.");
+    expect(seeded.audienceName).toBe("Existing audience");
+    expect(seeded.throughlineName).toBe("First setup focus");
+    expect(seeded.strategy).toContain("LinkedIn");
   });
 });
 
@@ -336,5 +412,48 @@ describe("browser onboarding action registry", () => {
 
     expect(received).toEqual([{ transcript: "LinkedIn and Substack", source: "desktop" }]);
     expect(cleaned).toBe(true);
+  });
+
+  it("posts setup profile extraction for review without saving references", async () => {
+    const calls: any[] = [];
+    const window = loadBrowserActions({
+      fetch: async (url: string, init: any) => {
+        calls.push({ url, init });
+        return {
+          ok: true,
+          json: async () => ({
+            requiresUserApproval: true,
+            profileDraft: {
+              brand: "kings_press",
+              selfStatement: "Clear and useful.",
+              permissions: { mayPublishOrSend: false },
+            },
+          }),
+        };
+      },
+    });
+    let saved = false;
+    window.Store = {
+      updateReferences: () => {
+        saved = true;
+      },
+    };
+
+    const result = await window.KP_ONBOARDING_ACTIONS.extractSetupProfile({
+      brand: "kings_press",
+      transcript: "I write for operators.",
+    });
+
+    expect(result).toMatchObject({
+      intent: "extract_setup_profile",
+      status: "succeeded",
+      data: { requiresUserApproval: true },
+    });
+    expect(calls[0].url).toBe("/api/onboarding/extract-setup-profile");
+    expect(JSON.parse(calls[0].init.body)).toMatchObject({
+      brand: "kings_press",
+      transcript: "I write for operators.",
+    });
+    expect(saved).toBe(false);
   });
 });

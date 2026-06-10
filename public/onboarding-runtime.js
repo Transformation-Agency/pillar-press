@@ -77,6 +77,7 @@
     SKIP_INTRO: "skip_intro",
     SAVE_FOCUS: "save_focus",
     SKIP_FOCUS: "skip_focus",
+    EXTRACT_SETUP_PROFILE: "extract_setup_profile",
     SAVE_PREFERENCES: "save_preferences",
     COMPLETE_ONBOARDING: "complete_onboarding",
     SKIP_ONBOARDING: "skip_onboarding",
@@ -188,6 +189,11 @@
       label: "Save preferences",
       requiresApproval: true,
       persistentEffect: "campaign_references",
+    },
+    [ACTION_INTENTS.EXTRACT_SETUP_PROFILE]: {
+      label: "Interpret setup answer",
+      requiresApproval: false,
+      persistentEffect: "none",
     },
     [ACTION_INTENTS.COMPLETE_ONBOARDING]: {
       label: "Complete onboarding",

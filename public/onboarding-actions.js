@@ -153,6 +153,30 @@
     }
   }
 
+  async function extractSetupProfile(payload) {
+    const intent = INTENTS.EXTRACT_SETUP_PROFILE || "extract_setup_profile";
+    try {
+      const response = await fetch("/api/onboarding/extract-setup-profile", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(payload || {}),
+      });
+      const body = await response.json().catch(function () { return null; });
+      if (!response.ok) {
+        throw new Error((body && (body.error || body.message)) || "Could not interpret setup answer.");
+      }
+      return succeeded(intent, {
+        profileDraft: body && body.profileDraft,
+        requiresUserApproval: !!(body && body.requiresUserApproval),
+      });
+    } catch (error) {
+      return failed(intent, error, "Could not interpret setup answer.");
+    }
+  }
+
   async function completeOnboarding(options) {
     const intent = INTENTS.COMPLETE_ONBOARDING || "complete_onboarding";
     try {
@@ -221,6 +245,7 @@
     exploreIntegrations,
     saveFocus,
     savePreferences,
+    extractSetupProfile,
     completeOnboarding,
     skipOnboarding,
     onProviderSetupSaved,
