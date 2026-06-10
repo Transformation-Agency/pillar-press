@@ -277,6 +277,7 @@ async function startServer(state: TestState) {
 async function runBrowserShellProof() {
   const browser = await puppeteer.launch({
     headless: true,
+    protocolTimeout: 120000,
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });
   const scenarios = [

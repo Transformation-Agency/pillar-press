@@ -63,7 +63,12 @@ function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
 
+function trace(message: string) {
+  if (process.env.KP_ONBOARDING_PROOF_DEBUG) console.log(`[onboarding-proof] ${message}`);
+}
+
 async function clickButton(page: Page, label: string) {
+  trace(`click ${label}`);
   await page.evaluate(`
     (() => {
       const targetLabel = ${JSON.stringify(label)};
@@ -77,26 +82,69 @@ async function clickButton(page: Page, label: string) {
 }
 
 async function typeInto(page: Page, selector: string, value: string) {
-  await page.waitForSelector(selector, { visible: true });
-  await page.click(selector, { count: 3 });
-  await page.keyboard.type(value);
+  trace(`type ${selector}`);
+  await page.evaluate(
+    ({ selector, value }) => {
+      const input = document.querySelector(selector);
+      if (!(input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement)) {
+        throw new Error("Missing input: " + selector);
+      }
+      const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), "value")?.set;
+      input.focus();
+      if (setter) setter.call(input, value);
+      else input.value = value;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    },
+    { selector, value },
+  );
 }
 
 async function typeIntoFirstTextarea(page: Page, value: string) {
-  await page.waitForSelector("textarea", { visible: true });
-  const areas = await page.$$("textarea");
-  assert(areas[0], "No textarea was available for setup answer entry.");
-  await areas[0].click({ count: 3 });
-  await page.keyboard.type(value);
+  trace("type first textarea");
+  await page.evaluate((value) => {
+    const area = document.querySelector("textarea");
+    if (!(area instanceof HTMLTextAreaElement)) {
+      throw new Error("No textarea was available for setup answer entry.");
+    }
+    const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(area), "value")?.set;
+    area.focus();
+    if (setter) setter.call(area, value);
+    else area.value = value;
+    area.dispatchEvent(new Event("input", { bubbles: true }));
+    area.dispatchEvent(new Event("change", { bubbles: true }));
+  }, value);
 }
 
 async function waitForText(page: Page, text: string) {
-  try {
-    await page.waitForFunction(`document.body.innerText.includes(${JSON.stringify(text)})`);
-  } catch (error) {
-    const body = await page.evaluate("document.body.innerText") as string;
-    throw new Error("Timed out waiting for text: " + text + "\n\nCurrent page text:\n" + body.slice(0, 4000), { cause: error });
+  trace(`wait text ${text}`);
+  const startedAt = Date.now();
+  let body = "";
+  let lastError: unknown = null;
+  while (Date.now() - startedAt < 30000) {
+    try {
+      body = await page.evaluate(() => document.body.innerText) as string;
+      if (body.includes(text)) return;
+    } catch (error) {
+      lastError = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
   }
+  throw new Error("Timed out waiting for text: " + text + "\n\nCurrent page text:\n" + body.slice(0, 4000), { cause: lastError });
+}
+
+async function waitForPageState(page: Page, predicate: () => boolean, message: string) {
+  const startedAt = Date.now();
+  let lastError: unknown = null;
+  while (Date.now() - startedAt < 30000) {
+    try {
+      if (await page.evaluate(predicate)) return;
+    } catch (error) {
+      lastError = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  throw new Error(message, { cause: lastError });
 }
 
 async function installSpeechRecognitionMock(page: Page, transcripts: string[]) {
@@ -132,6 +180,7 @@ async function installSpeechRecognitionMock(page: Page, transcripts: string[]) {
 }
 
 export async function driveOnboardingUiProof(page: Page, options?: OnboardingUiProofOptions): Promise<OnboardingUiProofResult> {
+  trace("start");
   const focusName = options?.focusName || DEFAULT_ONBOARDING_UI_PROOF.focusName;
   const focusAnswer = options?.focusAnswer || focusName;
   const voiceAnswer = options?.voiceAnswer || DEFAULT_ONBOARDING_UI_PROOF.voiceAnswer;
@@ -140,7 +189,18 @@ export async function driveOnboardingUiProof(page: Page, options?: OnboardingUiP
   const expectedCampaignName = options?.expectedCampaignName || focusName;
   const sentimentRating = Math.max(1, Math.min(5, Math.round(Number(options?.sentimentRating || 5))));
 
-  await page.waitForSelector(".kp-conversation-canvas", { visible: true, timeout: 30000 });
+  // The desktop bundle still uses in-browser Babel. Polling the page while Babel is
+  // compiling can wedge Chromium protocol calls on slower machines, so give the
+  // shell a short grace period before the readiness assertion.
+  await new Promise((resolve) => setTimeout(resolve, 5000));
+  trace("assert setup ready");
+  const setupReady = await page.evaluate(() => {
+    const canvas = document.querySelector(".kp-conversation-canvas");
+    if (!canvas) return false;
+    const rect = canvas.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0 && document.body.innerText.includes("Would you like a guided intro");
+  });
+  assert(setupReady, "Setup conversation canvas did not become visible.");
   if (options?.requireNoStepper !== false) {
     assert(
       await page.$("nav[aria-label='Setup progress']") === null,
@@ -187,19 +247,29 @@ export async function driveOnboardingUiProof(page: Page, options?: OnboardingUiP
   await waitForText(page, "HERE IS WHAT I UNDERSTOOD");
   await clickButton(page, "Finish setup");
 
-  await page.waitForFunction(`
-    !document.querySelector(".kp-conversation-canvas") &&
-      window.Store &&
-      window.Store.getPref("setupHelperCompleteV1", false) === true
-  `, { timeout: 30000 });
+  await waitForPageState(
+    page,
+    () => {
+      const Store = (window as any).Store;
+      return !document.querySelector(".kp-conversation-canvas") &&
+        Boolean(Store) &&
+        Store.getPref("setupHelperCompleteV1", false) === true;
+    },
+    "Setup did not close after activation.",
+  );
 
   await waitForText(page, "Was setup useful?");
   await clickButton(page, String(sentimentRating));
-  await page.waitForFunction(`
-    window.Store &&
-      !!window.Store.getPref("onboardingSentimentV1", null) &&
-      window.Store.getPref("onboardingMetricsSummaryV1", {}).sentimentResponses >= 1
-  `, { timeout: 30000 });
+  await waitForPageState(
+    page,
+    () => {
+      const Store = (window as any).Store;
+      return Boolean(Store) &&
+        !!Store.getPref("onboardingSentimentV1", null) &&
+        Store.getPref("onboardingMetricsSummaryV1", {}).sentimentResponses >= 1;
+    },
+    "Setup sentiment was not persisted.",
+  );
 
   const result = await page.evaluate(`
     (() => {
