@@ -491,14 +491,14 @@ describe("browser onboarding runtime contract", () => {
 });
 
 describe("browser onboarding conversation controller", () => {
-  it("initializes at one active voice setup question", () => {
+  it("initializes at one active introduction consent question", () => {
     const conversation = loadBrowserConversation();
     const state = conversation.createState();
 
-    expect(state.currentSlot).toBe("voice_setup");
+    expect(state.currentSlot).toBe("intro_consent");
     expect(conversation.promptForStep("connect", state)).toMatchObject({
-      slotId: "voice_setup",
-      question: "Can I help you set up voice?",
+      slotId: "intro_consent",
+      question: "Can I introduce myself and give you a short orientation?",
       answered: false,
     });
   });
@@ -507,8 +507,8 @@ describe("browser onboarding conversation controller", () => {
     const conversation = loadBrowserConversation();
     let state = conversation.createState();
 
+    state = conversation.captureAnswer(state, conversation.SLOT_IDS.INTRO_CONSENT, "yes, introduce yourself", "button");
     state = conversation.captureAnswer(state, conversation.SLOT_IDS.VOICE_SETUP, "yes, use OpenAI", "typed");
-    state = conversation.captureAnswer(state, conversation.SLOT_IDS.INTRO_CONSENT, "skip", "button");
     state = conversation.captureAnswer(state, conversation.SLOT_IDS.COMMUNICATION_PLATFORMS, "Mostly LinkedIn and Substack", "typed");
 
     expect(state.slots.communication_platforms).toMatchObject({
@@ -531,10 +531,10 @@ describe("browser onboarding conversation controller", () => {
   it("does not advance on blank input", () => {
     const conversation = loadBrowserConversation();
     const state = conversation.createState();
-    const next = conversation.captureAnswer(state, conversation.SLOT_IDS.VOICE_SETUP, "   ", "typed");
+    const next = conversation.captureAnswer(state, conversation.SLOT_IDS.INTRO_CONSENT, "   ", "typed");
 
-    expect(next.currentSlot).toBe("voice_setup");
-    expect(next.slots.voice_setup.status).toBe("empty");
+    expect(next.currentSlot).toBe("intro_consent");
+    expect(next.slots.intro_consent.status).toBe("empty");
   });
 
   it("keeps typed and voice answers semantically equivalent", () => {

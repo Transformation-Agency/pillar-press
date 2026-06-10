@@ -1,7 +1,7 @@
 /* Deterministic first-run onboarding copy. This is app-owned product language,
    not model output. Keep copy versioned so future changes are intentional. */
 (function () {
-  const AUDIO_INTRO_COPY_VERSION = "2026-06-09.kings-press-audio-intro.v1";
+  const AUDIO_INTRO_COPY_VERSION = "2026-06-10.kings-press-orientation.v2";
 
   const PRESS_BRAND_LABEL = {
     pillar_press: "Pillar Press",
@@ -12,7 +12,6 @@
     return [
       "Audio is connected.",
       "You can speak or type from here.",
-      "May I introduce myself?",
     ].join("\n\n");
   }
 

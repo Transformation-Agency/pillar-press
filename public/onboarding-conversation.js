@@ -7,36 +7,36 @@
 
   const CONVERSATION_VERSION = "2026-06-10.kings-press-conversation-controller.v1";
   const SLOT_IDS = {
-    VOICE_SETUP: "voice_setup",
     INTRO_CONSENT: "intro_consent",
+    VOICE_SETUP: "voice_setup",
     COMMUNICATION_PLATFORMS: "communication_platforms",
     VOICE_PROFILE: "voice_profile",
   };
   const REQUIRED_SLOTS = [SLOT_IDS.COMMUNICATION_PLATFORMS, SLOT_IDS.VOICE_PROFILE];
   const QUESTION_SEQUENCE = [
-    SLOT_IDS.VOICE_SETUP,
     SLOT_IDS.INTRO_CONSENT,
+    SLOT_IDS.VOICE_SETUP,
     SLOT_IDS.COMMUNICATION_PLATFORMS,
     SLOT_IDS.VOICE_PROFILE,
   ];
 
   const slotPrompts = {
-    [SLOT_IDS.VOICE_SETUP]: {
+    [SLOT_IDS.INTRO_CONSENT]: {
       stepId: "connect",
+      question: "Can I introduce myself and give you a short orientation?",
+      helper: "If you want to hear it aloud, I can help set up voice next. You can also skip straight to model setup.",
+      placeholder: "Type yes, introduce yourself, or skip for now.",
+      actionLabel: "Use answer",
+      answerKind: "intro_consent",
+      required: false,
+    },
+    [SLOT_IDS.VOICE_SETUP]: {
+      stepId: "connect_voice",
       question: "Can I help you set up voice?",
       helper: "Voice lets you speak setup answers, dictate drafts, and hear work read aloud. OpenAI is the easiest first key because it can also power the rest of setup.",
       placeholder: "Type yes, no, OpenAI, ElevenLabs, or ask how to get a key.",
       actionLabel: "Use answer",
       answerKind: "voice_setup",
-      required: false,
-    },
-    [SLOT_IDS.INTRO_CONSENT]: {
-      stepId: "welcome",
-      question: "May I introduce myself?",
-      helper: "You can say yes, introduce yourself, or skip for now.",
-      placeholder: "Type yes, introduce yourself, or skip for now.",
-      actionLabel: "Use answer",
-      answerKind: "intro_consent",
       required: false,
     },
     [SLOT_IDS.COMMUNICATION_PLATFORMS]: {

@@ -23,18 +23,18 @@ const ONBOARDING_PROFILE = window.KP_ONBOARDING_PROFILE || {
 };
 const ONBOARDING_CONVERSATION = window.KP_ONBOARDING_CONVERSATION || {
   SLOT_IDS: {
-    VOICE_SETUP: "voice_setup",
     INTRO_CONSENT: "intro_consent",
+    VOICE_SETUP: "voice_setup",
     COMMUNICATION_PLATFORMS: "communication_platforms",
     VOICE_PROFILE: "voice_profile",
   },
-  createState: () => ({ slots: {}, currentSlot: "voice_setup" }),
+  createState: () => ({ slots: {}, currentSlot: "intro_consent" }),
   promptForStep: (stepId) => stepId === "connect"
     ? {
-      slotId: "voice_setup",
-      question: "Can I help you set up voice?",
-      helper: "Voice lets you speak setup answers, dictate drafts, and hear work read aloud.",
-      placeholder: "Type yes, no, or ask how to get a key.",
+      slotId: "intro_consent",
+      question: "Can I introduce myself and give you a short orientation?",
+      helper: "If you want to hear it aloud, I can help set up voice next.",
+      placeholder: "Type yes, introduce yourself, or skip for now.",
       actionLabel: "Use answer",
       progressText: "",
     }
@@ -602,6 +602,23 @@ function InlineModelSetup({ status, onSaved }) {
   );
 }
 
+function IntroConsentSetup({ answered, onAccept, onSkip }) {
+  if (answered) return null;
+  return (
+    <div className="kp-inline-intro-consent">
+      <div className="kp-inline-intro-copy">
+        <p className="kp-inline-step-label">First question</p>
+        <h3>Can I introduce myself and give you a short orientation?</h3>
+        <p>If you want to hear it aloud, I can help set up voice next. You can also skip straight to model setup.</p>
+      </div>
+      <div className="kp-inline-intro-actions">
+        <button className="kp-setup-primary" type="button" onClick={onAccept}>Yes, introduce yourself</button>
+        <button className="kp-setup-outline" type="button" onClick={onSkip}>Skip to model setup</button>
+      </div>
+    </div>
+  );
+}
+
 function InlineVoiceSetup({ status, audioState, onConnect, onLLMSaved }) {
   const desktop = window.KINGS_DESKTOP;
   const hasDesktop = !!(desktop && desktop.isDesktop && desktop.isDesktop());
@@ -732,9 +749,9 @@ function InlineVoiceSetup({ status, audioState, onConnect, onLLMSaved }) {
       <div className="kp-inline-voice-head">
         <span aria-hidden="true" className="kp-inline-model-icon"><Icon name="mic" size={25} /></span>
         <div>
-          <p className="kp-inline-step-label">First question</p>
-          <h3>Can I help you set up voice?</h3>
-          <p>Voice lets you speak setup answers, dictate drafts, and hear work read aloud. OpenAI is the easiest first key because it can also power the rest of setup.</p>
+          <p className="kp-inline-step-label">Optional before the intro</p>
+          <h3>Add voice if you want me to read aloud</h3>
+          <p>Paste a voice API key and I can respond over audio. OpenAI is the easiest first key because it can also power the rest of setup.</p>
         </div>
         <SetupStatusChip label={connected ? "Connected" : "Optional"} />
       </div>
@@ -919,6 +936,8 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     metricsSessionIdRef.current = createSetupSessionId();
     lastStepMetricRef.current = null;
     setConversationState(ONBOARDING_CONVERSATION.createState());
+    setIntroAnswer("");
+    setIntroVisible(false);
     recordMetric(ONBOARDING_METRIC_EVENTS.STARTED, { stepId: "connect" });
     const refs = window.Store.activeReferences ? window.Store.activeReferences() : {};
     const throughline = refs.strategy && refs.strategy.throughlines && refs.strategy.throughlines[0];
@@ -947,6 +966,23 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     lastStepMetricRef.current = stepId;
     recordMetric(ONBOARDING_METRIC_EVENTS.STEP_VIEWED, { stepId });
   }, [open, step]);
+
+  React.useEffect(() => {
+    if (!open || step !== 1 || audioState !== "audio_ready" || introVisible) return undefined;
+    let active = true;
+    setIntroVisible(true);
+    recordAction(ONBOARDING_ACTIONS.PLAY_INTRO, ONBOARDING_ACTION_STATUSES.PENDING);
+    ONBOARDING_AUDIO.speakText(introScript, { interrupt: true })
+      .then(() => {
+        if (active) recordAction(ONBOARDING_ACTIONS.PLAY_INTRO, ONBOARDING_ACTION_STATUSES.SUCCEEDED);
+      })
+      .catch((error) => {
+        if (active) recordAction(ONBOARDING_ACTIONS.PLAY_INTRO, ONBOARDING_ACTION_STATUSES.FAILED, {
+          error: (error && error.message) || "Could not read the orientation aloud.",
+        });
+      });
+    return () => { active = false; };
+  }, [open, step, audioState, introVisible, introScript]);
 
   React.useEffect(() => {
     if (!open) {
@@ -980,6 +1016,9 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
   const preferencesPrompt = ONBOARDING_CONVERSATION.promptForStep("preferences", conversationState);
   const providerConnected = !!(providerStatus && providerStatus.provider && providerStatus.model);
   const voiceConnected = audioState === "audio_ready";
+  const introAccepted = introAnswer === "yes";
+  const introSkipped = introAnswer === "skip";
+  const introChoiceMade = introAccepted || introSkipped;
   const connectRows = ONBOARDING_RUNTIME
     ? ONBOARDING_RUNTIME.getConnectItems({
       providerConnected,
@@ -1056,6 +1095,30 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
       ONBOARDING_CONVERSATION.metricForAnswer(ONBOARDING_CONVERSATION.SLOT_IDS.COMMUNICATION_PLATFORMS, inputMethod || "typed"),
     );
     return { focusName };
+  }
+
+  function acceptIntroFromConnect() {
+    setIntroAnswer("yes");
+    setSetupError("");
+    setConversationState((current) => ONBOARDING_CONVERSATION.captureAnswer(
+      current,
+      ONBOARDING_CONVERSATION.SLOT_IDS.INTRO_CONSENT,
+      "yes, introduce yourself",
+      "button",
+    ));
+    recordAction(ONBOARDING_ACTIONS.PLAY_INTRO, ONBOARDING_ACTION_STATUSES.PENDING, {
+      data: { waitingForWelcomeStep: true },
+    });
+  }
+
+  function skipIntroFromConnect() {
+    setIntroAnswer("skip");
+    setSetupError("");
+    setConversationState((current) => ONBOARDING_CONVERSATION.skipSlot(
+      current,
+      ONBOARDING_CONVERSATION.SLOT_IDS.INTRO_CONSENT,
+    ));
+    recordAction(ONBOARDING_ACTIONS.SKIP_INTRO, ONBOARDING_ACTION_STATUSES.SKIPPED);
   }
 
   function mergeProfileIntoPreferences(profile) {
@@ -1738,6 +1801,43 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
           display: grid;
           gap: 13px;
         }
+        .kp-inline-intro-consent {
+          padding: 24px 34px;
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) auto;
+          gap: 18px;
+          align-items: center;
+        }
+        .kp-inline-intro-copy {
+          padding-left: 79px;
+          min-width: 0;
+        }
+        .kp-inline-intro-copy h3 {
+          margin: 2px 0 0;
+          font-family: var(--font-serif);
+          font-size: 27px;
+          font-weight: 500;
+          color: #2A211E;
+        }
+        .kp-inline-intro-copy p:not(.kp-inline-step-label) {
+          margin: 6px 0 0;
+          max-width: 650px;
+          color: #766A63;
+          font-size: 15.5px;
+          line-height: 1.35;
+        }
+        .kp-inline-intro-actions {
+          display: flex;
+          flex-wrap: wrap;
+          justify-content: flex-end;
+          gap: 8px;
+        }
+        .kp-inline-intro-actions .kp-setup-primary,
+        .kp-inline-intro-actions .kp-setup-outline {
+          min-height: 40px;
+          font-size: 15.5px;
+          padding: 0 16px;
+        }
         .kp-inline-model-head {
           display: grid;
           grid-template-columns: 62px minmax(0, 1fr) auto;
@@ -2040,11 +2140,14 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
           .kp-inline-model-fields,
           .kp-inline-model-actions,
           .kp-inline-model-message,
-          .kp-inline-voice-controls { padding-left: 0; margin-left: 0; }
+          .kp-inline-voice-controls,
+          .kp-inline-intro-copy { padding-left: 0; margin-left: 0; }
           .kp-inline-model-fields,
           .kp-inline-voice-controls { grid-template-columns: 1fr; }
+          .kp-inline-intro-consent { grid-template-columns: 1fr; }
           .kp-inline-model-actions,
-          .kp-inline-voice-actions { justify-content: flex-start; }
+          .kp-inline-voice-actions,
+          .kp-inline-intro-actions { justify-content: flex-start; }
         }
       `}</style>
       <div style={{ width: "min(1120px, calc(100% - 72px))", margin: "0 auto", padding: "44px 0 34px" }}>
@@ -2057,40 +2160,51 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
               Let's set up your desk
             </h1>
             <p style={{ margin: "22px 0 42px", color: "#766A63", fontSize: 21, lineHeight: 1.5 }}>
-              First, decide whether you want to speak your answers. Then choose the model King's Press can use to help finish setup.
+              I can orient you first, then help connect voice and the model King's Press can use to finish setup.
             </p>
             <section style={{
               border: "1px solid #D8CEC3", borderRadius: 10, background: "rgba(255, 252, 246, 0.68)",
               overflow: "hidden",
             }}>
-              <InlineVoiceSetup
-                status={providerStatus}
-                audioState={audioState}
-                onConnect={connectAudio}
-                onLLMSaved={(profile) => setProviderStatus((current) => Object.assign({}, current || {}, {
-                  provider: profile && profile.provider,
-                  model: profile && profile.model,
-                }))}
+              <IntroConsentSetup
+                answered={introChoiceMade}
+                onAccept={acceptIntroFromConnect}
+                onSkip={skipIntroFromConnect}
               />
-              <InlineModelSetup
-                status={providerStatus}
-                onSaved={(profile) => setProviderStatus((current) => Object.assign({}, current || {}, {
-                  provider: profile && profile.provider,
-                  model: profile && profile.model,
-                }))}
-              />
-              {connectRows.filter((item) => item.id !== "models" && item.id !== "voice").map((item) => (
-                <SetupPanelRow
-                  key={item.id}
-                  icon={item.icon}
-                  title={item.title}
-                  description={item.description}
-                  status={item.status}
-                  action={item.label}
-                  onClick={() => runConnectAction(item)}
-                  disabled={item.pending}
+              {introAccepted && (
+                <InlineVoiceSetup
+                  status={providerStatus}
+                  audioState={audioState}
+                  onConnect={connectAudio}
+                  onLLMSaved={(profile) => setProviderStatus((current) => Object.assign({}, current || {}, {
+                    provider: profile && profile.provider,
+                    model: profile && profile.model,
+                  }))}
                 />
-              ))}
+              )}
+              {introChoiceMade && (
+                <>
+                  <InlineModelSetup
+                    status={providerStatus}
+                    onSaved={(profile) => setProviderStatus((current) => Object.assign({}, current || {}, {
+                      provider: profile && profile.provider,
+                      model: profile && profile.model,
+                    }))}
+                  />
+                  {connectRows.filter((item) => item.id !== "models" && item.id !== "voice").map((item) => (
+                    <SetupPanelRow
+                      key={item.id}
+                      icon={item.icon}
+                      title={item.title}
+                      description={item.description}
+                      status={item.status}
+                      action={item.label}
+                      onClick={() => runConnectAction(item)}
+                      disabled={item.pending}
+                    />
+                  ))}
+                </>
+              )}
             </section>
             {audioState === "error" && (
               <p role="alert" style={{ margin: "16px 0 0", color: "#A74732", fontSize: 15.5 }}>{audioError}</p>
@@ -2101,8 +2215,14 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
             <SetupActions
               secondary="Skip setup"
               onSecondary={skip}
-              primary="Continue"
-              onPrimary={() => goToStep(1)}
+              primary={introSkipped ? "Continue" : "Continue to intro"}
+              onPrimary={() => {
+                if (!introChoiceMade) {
+                  setSetupError("Choose whether you want the short orientation first.");
+                  return;
+                }
+                goToStep(introSkipped ? 2 : 1);
+              }}
             />
             <SetupReassurance />
           </SetupShell>
@@ -2116,53 +2236,38 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
                 marginBottom: 25,
               }}>Welcome</div>
               <h1 style={{ margin: 0, fontFamily: "var(--font-serif)", fontSize: "clamp(46px, 5vw, 66px)", fontWeight: 500, lineHeight: 1.08 }}>
-                May I introduce myself?
+                Welcome to King's Press
               </h1>
-              {!introVisible ? (
-                <>
-                  <p style={{ margin: "30px auto 0", maxWidth: 560, color: "#766A63", fontFamily: "var(--font-serif)", fontSize: 27, lineHeight: 1.38 }}>
-                    I'm King's Press—your desk for turning ideas into clear, publishable work.
-                  </p>
-                  <p style={{ margin: "30px auto 0", maxWidth: 540, color: "#766A63", fontFamily: "var(--font-serif)", fontSize: 21, lineHeight: 1.42 }}>
-                    I'll help you think, draft, refine, and prepare your work so it's ready to be read and remembered.
-                  </p>
-                  {!voiceConnected && (
-                    <p style={{
-                      margin: "36px auto 0", paddingTop: 27, borderTop: "1px solid #D8CEC3",
-                      maxWidth: 430, color: "#766A63", fontSize: 17, lineHeight: 1.5,
-                      display: "flex", gap: 12, alignItems: "flex-start", textAlign: "left",
-                    }}>
-                      <Icon name="warn" size={18} style={{ color: "#A74732", flexShrink: 0, marginTop: 3 }} />
-                      Voice is not connected yet, so I'll keep my introduction on screen. You can still type your setup answers.
-                    </p>
-                  )}
-                  <div style={{ marginTop: 48, display: "grid", justifyItems: "center", gap: 22 }}>
-                    <button className="kp-setup-primary" onClick={introduce} style={{ minWidth: 330 }}>
-                      Yes, introduce yourself
-                    </button>
-                    <button className="kp-setup-link" onClick={() => {
-                      setConversationState((current) => ONBOARDING_CONVERSATION.skipSlot(current, ONBOARDING_CONVERSATION.SLOT_IDS.INTRO_CONSENT));
-                      recordAction(ONBOARDING_ACTIONS.SKIP_INTRO, ONBOARDING_ACTION_STATUSES.SKIPPED);
-                      goToStep(2);
-                    }}>Skip for now</button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <pre style={{
-                    whiteSpace: "pre-wrap", margin: "34px auto 0", maxWidth: 680,
-                    color: "#766A63", font: "20px/1.68 var(--font-serif)", textAlign: "center",
-                  }}>{introScript}</pre>
-                  <div style={{ marginTop: 42, display: "grid", justifyItems: "center", gap: 18 }}>
-                    <button className="kp-setup-primary" onClick={() => goToStep(2)}>Continue <Icon name="arrowR" size={22} /></button>
-                    <button className="kp-setup-link" onClick={() => {
-                      setConversationState((current) => ONBOARDING_CONVERSATION.skipSlot(current, ONBOARDING_CONVERSATION.SLOT_IDS.INTRO_CONSENT));
-                      recordAction(ONBOARDING_ACTIONS.SKIP_INTRO, ONBOARDING_ACTION_STATUSES.SKIPPED);
-                      goToStep(2);
-                    }}>Skip for now</button>
-                  </div>
-                </>
+              <pre style={{
+                whiteSpace: "pre-wrap", margin: "34px auto 0", maxWidth: 680,
+                color: "#766A63", font: "20px/1.68 var(--font-serif)", textAlign: "center",
+              }}>{introScript}</pre>
+              {!voiceConnected && (
+                <p style={{
+                  margin: "34px auto 0", paddingTop: 25, borderTop: "1px solid #D8CEC3",
+                  maxWidth: 430, color: "#766A63", fontSize: 17, lineHeight: 1.5,
+                  display: "flex", gap: 12, alignItems: "flex-start", textAlign: "left",
+                }}>
+                  <Icon name="warn" size={18} style={{ color: "#A74732", flexShrink: 0, marginTop: 3 }} />
+                  Voice is not connected yet, so this orientation stays on screen. You can still type your setup answers.
+                </p>
               )}
+              <div style={{ marginTop: 42, display: "grid", justifyItems: "center", gap: 18 }}>
+                <button className="kp-setup-primary" onClick={() => {
+                  setConversationState((current) => ONBOARDING_CONVERSATION.captureAnswer(
+                    current,
+                    ONBOARDING_CONVERSATION.SLOT_IDS.INTRO_CONSENT,
+                    "orientation viewed",
+                    "button",
+                  ));
+                  goToStep(2);
+                }}>Continue <Icon name="arrowR" size={22} /></button>
+                <button className="kp-setup-link" onClick={() => {
+                  setConversationState((current) => ONBOARDING_CONVERSATION.skipSlot(current, ONBOARDING_CONVERSATION.SLOT_IDS.INTRO_CONSENT));
+                  recordAction(ONBOARDING_ACTIONS.SKIP_INTRO, ONBOARDING_ACTION_STATUSES.SKIPPED);
+                  goToStep(2);
+                }}>Skip for now</button>
+              </div>
             </div>
           </SetupShell>
         )}
