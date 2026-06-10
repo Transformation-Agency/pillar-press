@@ -15,6 +15,12 @@
       label: "Connect",
       title: "Let's set up your desk",
       subtitle: "Choose what to connect now. You can skip anything and change it later.",
+      hostMessages: [
+        "I can get your desk ready in a few minutes.",
+        "Start with what you want connected now. Anything you skip stays available later.",
+      ],
+      suggestions: ["Fast start", "Guide me", "Type instead"],
+      motionState: "idle",
       primaryAction: "continue",
       secondaryAction: "skip_setup",
     },
@@ -24,6 +30,12 @@
       eyebrow: "Welcome",
       title: "May I introduce myself?",
       subtitle: "I'm King's Press, your desk for turning ideas into clear, publishable work.",
+      hostMessages: [
+        "Before we shape your setup, I can give you a short orientation.",
+        "If voice is connected, I can read it aloud. Either way, it stays on screen.",
+      ],
+      suggestions: ["Yes, introduce yourself", "Skip for now"],
+      motionState: "speaking",
       primaryAction: "play_intro",
       secondaryAction: "skip_intro",
     },
@@ -32,6 +44,12 @@
       label: "First focus",
       title: "What are you working on first?",
       subtitle: "Your first focus helps organize drafts, sources, Gather runs, and notes in one place.",
+      hostMessages: [
+        "Give this first workspace a simple name.",
+        "It can be a project, campaign, book draft, launch plan, or whatever you are making first.",
+      ],
+      suggestions: ["Use recent focus", "New focus", "Skip for now"],
+      motionState: "listening",
       primaryAction: "save_focus",
       secondaryAction: "skip_focus",
     },
@@ -40,6 +58,12 @@
       label: "Preferences",
       title: "Set your defaults",
       subtitle: "Start with the basics. You can refine everything later.",
+      hostMessages: [
+        "Now give me the essentials: your voice, your audience, and the throughline.",
+        "I will save only what you approve here. Advanced rules can wait.",
+      ],
+      suggestions: ["Polished", "Plainspoken", "Strategic", "Conversational"],
+      motionState: "thinking",
       primaryAction: "finish_setup",
       secondaryAction: "skip_preferences",
     },
@@ -212,6 +236,17 @@
     return steps.find((step) => step.id === id) || steps[0];
   }
 
+  function getStepConversation(id) {
+    const step = getStepById(id);
+    return {
+      id: step.id,
+      label: step.label,
+      messages: step.hostMessages || [],
+      suggestions: step.suggestions || [],
+      motionState: step.motionState || "idle",
+    };
+  }
+
   function getStepIndex(id) {
     const index = steps.findIndex((step) => step.id === id);
     return index >= 0 ? index : 0;
@@ -324,6 +359,7 @@
     actionMetadata,
     clampStepIndex,
     getStepById,
+    getStepConversation,
     getStepIndex,
     createInitialState,
     normalizeActionResult,

@@ -188,6 +188,17 @@ describe("browser onboarding runtime contract", () => {
       canEnterWorkspace: true,
     });
   });
+
+  it("provides short conversation prompts and suggestions for every visible step", () => {
+    const runtime = loadBrowserRuntime();
+
+    for (const stepId of runtime.STEP_IDS) {
+      const conversation = runtime.getStepConversation(stepId);
+      expect(conversation.messages.length).toBeGreaterThan(0);
+      expect(conversation.suggestions.length).toBeGreaterThan(0);
+      expect(["idle", "speaking", "listening", "thinking"]).toContain(conversation.motionState);
+    }
+  });
 });
 
 describe("browser onboarding action registry", () => {

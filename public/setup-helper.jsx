@@ -72,13 +72,99 @@ function OnboardingStepper({ step }) {
               fontFamily: "var(--font-serif)", fontSize: 18, whiteSpace: "nowrap",
               overflow: "hidden", textOverflow: "ellipsis",
             }}>{label}</span>
-            {i < steps.length - 1 && <span aria-hidden="true" style={{
+            {i < ONBOARDING_STEPS.length - 1 && <span aria-hidden="true" style={{
               height: 1, minWidth: 24, background: "#D8CEC3", opacity: 0.9,
             }} />}
           </div>
         );
       })}
     </nav>
+  );
+}
+
+function getActionStatusLabel(status) {
+  if (status === ONBOARDING_ACTION_STATUSES.PENDING) return "Working";
+  if (status === ONBOARDING_ACTION_STATUSES.SUCCEEDED) return "Done";
+  if (status === ONBOARDING_ACTION_STATUSES.FAILED) return "Needs attention";
+  if (status === ONBOARDING_ACTION_STATUSES.SKIPPED) return "Skipped";
+  return "Ready";
+}
+
+function SetupMotionMark({ state }) {
+  const mode = state || "idle";
+  return (
+    <span className={"kp-host-orb kp-host-orb-" + mode} aria-hidden="true">
+      <span />
+    </span>
+  );
+}
+
+function SetupChoiceChip({ label, active, onClick, icon }) {
+  return (
+    <button className="kp-choice-chip" data-active={active ? "true" : "false"} onClick={onClick}>
+      {icon && <Icon name={icon} size={16} />}
+      {label}
+    </button>
+  );
+}
+
+function SetupHostPanel({ conversation, mode, onModeChange, actionResults, setupError }) {
+  const results = Object.values(actionResults || {})
+    .filter(Boolean)
+    .sort((a, b) => (a.updatedAt || 0) - (b.updatedAt || 0))
+    .slice(-4);
+  return (
+    <aside className="kp-host-panel" aria-label="Setup conversation">
+      <div className="kp-host-heading">
+        <SetupMotionMark state={setupError ? "error" : conversation.motionState} />
+        <div>
+          <div className="kp-host-kicker">King's Press is guiding setup</div>
+          <h2>{conversation.label}</h2>
+        </div>
+      </div>
+      <div className="kp-host-messages">
+        {(conversation.messages || []).map((message, index) => (
+          <p key={index}>{message}</p>
+        ))}
+      </div>
+      <div className="kp-host-choices" aria-label="Setup mode">
+        <SetupChoiceChip label="Fast start" icon="play" active={mode === "fast"} onClick={() => onModeChange("fast")} />
+        <SetupChoiceChip label="Guide me" icon="sparkle" active={mode === "guided"} onClick={() => onModeChange("guided")} />
+        <SetupChoiceChip label="Type instead" icon="doc" active={mode === "text"} onClick={() => onModeChange("text")} />
+        <SetupChoiceChip label="Voice optional" icon="mic" active={mode === "voice"} onClick={() => onModeChange("voice")} />
+      </div>
+      {!!results.length && (
+        <div className="kp-action-timeline" aria-label="Recent setup actions">
+          {results.map((result) => (
+            <div key={(result.intent || "action") + (result.updatedAt || "")} data-status={result.status}>
+              <span aria-hidden="true" />
+              <p>
+                <strong>{getActionStatusLabel(result.status)}</strong>
+                <em>{(result.intent || "setup").replace(/_/g, " ")}</em>
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+      {setupError && <p className="kp-host-error" role="alert">{setupError}</p>}
+    </aside>
+  );
+}
+
+function SetupShell({ children, conversation, mode, onModeChange, actionResults, setupError, centered }) {
+  return (
+    <main className={"kp-setup-shell" + (centered ? " kp-setup-shell-centered" : "")}>
+      <SetupHostPanel
+        conversation={conversation}
+        mode={mode}
+        onModeChange={onModeChange}
+        actionResults={actionResults}
+        setupError={setupError}
+      />
+      <section className="kp-setup-stage">
+        {children}
+      </section>
+    </main>
   );
 }
 
@@ -167,6 +253,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
   const [busy, setBusy] = React.useState(false);
   const [setupError, setSetupError] = React.useState("");
   const [actionResults, setActionResults] = React.useState({});
+  const [setupMode, setSetupMode] = React.useState("guided");
   const [campaignName, setCampaignName] = React.useState("");
   const [prefDraft, setPrefDraft] = React.useState(null);
   const [draftStyle, setDraftStyle] = React.useState("Polished");
@@ -239,6 +326,10 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
 
   if (!open) return null;
 
+  const currentStep = ONBOARDING_STEPS[step] || ONBOARDING_STEPS[0];
+  const conversation = ONBOARDING_RUNTIME && ONBOARDING_RUNTIME.getStepConversation
+    ? ONBOARDING_RUNTIME.getStepConversation(currentStep.id)
+    : { id: currentStep.id, label: currentStep.label, messages: [], suggestions: [], motionState: "idle" };
   const providerConnected = !!(providerStatus && providerStatus.provider && providerStatus.model);
   const voiceConnected = audioState === "audio_ready";
   const connectRows = ONBOARDING_RUNTIME
@@ -470,6 +561,10 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
           outline: 3px solid rgba(167, 71, 50, 0.22);
           outline-offset: 2px;
         }
+        .kp-choice-chip:focus-visible {
+          outline: 3px solid rgba(167, 71, 50, 0.22);
+          outline-offset: 2px;
+        }
         .kp-setup-primary {
           min-height: 61px;
           min-width: 238px;
@@ -538,7 +633,170 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
           font: 17px var(--font-serif);
           cursor: pointer;
         }
+        .kp-setup-shell {
+          margin-top: 76px;
+          display: grid;
+          grid-template-columns: minmax(280px, 0.82fr) minmax(0, 1.65fr);
+          gap: clamp(34px, 5vw, 72px);
+          align-items: start;
+        }
+        .kp-setup-shell-centered {
+          align-items: center;
+          min-height: calc(100vh - 286px);
+        }
+        .kp-host-panel {
+          position: sticky;
+          top: 28px;
+          border: 1px solid rgba(216, 206, 195, 0.82);
+          border-radius: 14px;
+          background: rgba(255, 252, 246, 0.58);
+          padding: 24px;
+          color: #2A211E;
+          box-shadow: 0 18px 50px rgba(42, 33, 30, 0.045);
+        }
+        .kp-host-heading {
+          display: flex;
+          gap: 14px;
+          align-items: center;
+        }
+        .kp-host-heading h2 {
+          margin: 3px 0 0;
+          font: 24px var(--font-serif);
+          color: #2A211E;
+        }
+        .kp-host-kicker {
+          color: #766A63;
+          font-size: 12px;
+        }
+        .kp-host-orb {
+          width: 42px;
+          height: 42px;
+          border-radius: 999px;
+          display: grid;
+          place-items: center;
+          background: rgba(167, 71, 50, 0.10);
+          flex-shrink: 0;
+        }
+        .kp-host-orb > span {
+          width: 14px;
+          height: 14px;
+          border-radius: 999px;
+          background: #A74732;
+          box-shadow: 0 0 0 0 rgba(167, 71, 50, 0.26);
+        }
+        .kp-host-orb-listening > span,
+        .kp-host-orb-speaking > span,
+        .kp-host-orb-thinking > span {
+          animation: kpHostPulse 1.45s ease-in-out infinite;
+        }
+        .kp-host-orb-error {
+          background: rgba(167, 71, 50, 0.16);
+        }
+        .kp-host-messages {
+          margin-top: 22px;
+          display: grid;
+          gap: 12px;
+        }
+        .kp-host-messages p {
+          margin: 0;
+          padding: 14px 15px;
+          border-radius: 12px;
+          background: rgba(247, 242, 235, 0.82);
+          border: 1px solid rgba(216, 206, 195, 0.68);
+          color: #766A63;
+          line-height: 1.48;
+          font-size: 15.5px;
+        }
+        .kp-host-choices {
+          margin-top: 20px;
+          display: flex;
+          flex-wrap: wrap;
+          gap: 9px;
+        }
+        .kp-choice-chip {
+          min-height: 38px;
+          border: 1px solid #D8CEC3;
+          border-radius: 999px;
+          background: rgba(255, 252, 246, 0.7);
+          color: #766A63;
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          padding: 0 13px;
+          font: 14.5px var(--font-body);
+          cursor: pointer;
+        }
+        .kp-choice-chip[data-active="true"] {
+          border-color: #A74732;
+          color: #A74732;
+          background: rgba(167, 71, 50, 0.055);
+        }
+        .kp-action-timeline {
+          margin-top: 22px;
+          padding-top: 18px;
+          border-top: 1px solid rgba(216, 206, 195, 0.78);
+          display: grid;
+          gap: 12px;
+        }
+        .kp-action-timeline div {
+          display: grid;
+          grid-template-columns: 12px minmax(0, 1fr);
+          gap: 10px;
+          align-items: start;
+        }
+        .kp-action-timeline div > span {
+          width: 9px;
+          height: 9px;
+          margin-top: 5px;
+          border-radius: 999px;
+          background: #766A63;
+        }
+        .kp-action-timeline div[data-status="succeeded"] > span { background: #5E7A46; }
+        .kp-action-timeline div[data-status="failed"] > span { background: #A74732; }
+        .kp-action-timeline div[data-status="pending"] > span { background: #B9894C; animation: kpHostPulse 1.2s ease-in-out infinite; }
+        .kp-action-timeline p {
+          margin: 0;
+          display: grid;
+          gap: 2px;
+        }
+        .kp-action-timeline strong {
+          font-size: 13px;
+          color: #2A211E;
+        }
+        .kp-action-timeline em {
+          font-style: normal;
+          color: #766A63;
+          font-size: 12.5px;
+        }
+        .kp-host-error {
+          margin: 18px 0 0;
+          color: #A74732;
+          font-size: 14px;
+          line-height: 1.45;
+        }
+        .kp-setup-stage {
+          min-width: 0;
+        }
+        @keyframes kpHostPulse {
+          0% { transform: scale(0.92); box-shadow: 0 0 0 0 rgba(167, 71, 50, 0.24); }
+          70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(167, 71, 50, 0); }
+          100% { transform: scale(0.92); box-shadow: 0 0 0 0 rgba(167, 71, 50, 0); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .kp-host-orb > span,
+          .kp-action-timeline div[data-status="pending"] > span {
+            animation: none;
+          }
+        }
         @media (max-width: 780px) {
+          .kp-setup-shell, .kp-setup-shell-centered {
+            grid-template-columns: 1fr;
+            margin-top: 42px;
+            min-height: 0;
+          }
+          .kp-host-panel {
+            position: static;
+          }
           .kp-setup-row { grid-template-columns: 1fr !important; }
         }
       `}</style>
@@ -547,7 +805,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
         <OnboardingStepper step={step} />
 
         {step === 0 && (
-          <main style={{ marginTop: 86 }}>
+          <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError}>
             <h1 style={{ margin: 0, fontFamily: "var(--font-serif)", fontSize: "clamp(50px, 6vw, 76px)", fontWeight: 500, lineHeight: 1.04 }}>
               Let's set up your desk
             </h1>
@@ -584,14 +842,11 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
               onPrimary={() => goToStep(1)}
             />
             <SetupReassurance />
-          </main>
+          </SetupShell>
         )}
 
         {step === 1 && (
-          <main style={{
-            minHeight: "calc(100vh - 290px)", display: "grid", placeItems: "center",
-            padding: "72px 0 42px", textAlign: "center",
-          }}>
+          <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError} centered>
             <div style={{ width: "min(660px, 100%)" }}>
               <div style={{
                 color: "#766A63", fontSize: 13, letterSpacing: "0.34em", textTransform: "uppercase",
@@ -644,11 +899,11 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
                 </>
               )}
             </div>
-          </main>
+          </SetupShell>
         )}
 
         {step === 2 && (
-          <main style={{ marginTop: 86 }}>
+          <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError}>
             <h1 style={{ margin: 0, fontFamily: "var(--font-serif)", fontSize: "clamp(46px, 5.3vw, 66px)", fontWeight: 500, lineHeight: 1.08 }}>
               What are you working on first?
             </h1>
@@ -696,11 +951,11 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
               <p role="alert" style={{ margin: "16px 0 0", color: "#A74732", fontSize: 15.5 }}>{setupError}</p>
             )}
             <SetupReassurance />
-          </main>
+          </SetupShell>
         )}
 
         {step === 3 && prefDraft && (
-          <main style={{ marginTop: 86 }}>
+          <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError}>
             <h1 style={{ margin: 0, fontFamily: "var(--font-serif)", fontSize: "clamp(52px, 5.8vw, 76px)", fontWeight: 500, lineHeight: 1.04 }}>
               Set your defaults
             </h1>
@@ -824,7 +1079,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
               <p role="alert" style={{ margin: "16px 0 0", color: "#A74732", fontSize: 15.5 }}>{setupError}</p>
             )}
             <SetupReassurance compact />
-          </main>
+          </SetupShell>
         )}
       </div>
     </div>
