@@ -8,6 +8,7 @@ export function anthropicProvider(config: LLMConfig): LLMAdapter {
     throw new LLMError(500, "llm_config", "Missing Anthropic API key.", "anthropic");
   }
   const client = new Anthropic({ apiKey: config.apiKey });
+  const maxTokens = Math.min(config.maxTokens, 8192);
 
   async function finalText(stream: ReturnType<Anthropic["messages"]["stream"]>): Promise<string> {
     const resp = await stream.finalMessage();
@@ -22,7 +23,7 @@ export function anthropicProvider(config: LLMConfig): LLMAdapter {
       try {
         return await finalText(client.messages.stream({
           model: config.model,
-          max_tokens: config.maxTokens,
+          max_tokens: maxTokens,
           messages,
         }));
       } catch (err) {
@@ -33,7 +34,7 @@ export function anthropicProvider(config: LLMConfig): LLMAdapter {
       try {
         return await finalText(client.messages.stream({
           model: config.model,
-          max_tokens: config.maxTokens,
+          max_tokens: maxTokens,
           ...(system ? { system } : {}),
           messages: [{ role: "user", content: content as Anthropic.MessageParam["content"] }],
         }));

@@ -721,12 +721,7 @@ function DesktopOnboarding() {
       nextProfile.label = profileName.trim() || providerLabel(nextProfile.provider) + " " + nextProfile.model;
       const priorProfiles = profilesFromSettings(savedSettings);
       const profiles = priorProfiles.filter((p) => p.id !== nextProfile.id).concat(nextProfile);
-      const priorDefaultId = savedSettings && savedSettings.defaultProfileId;
-      const currentTaskDefaults = taskDefaults || {};
-      const nextTaskDefaults = Object.fromEntries(taskOptions.map((task) => {
-        const current = currentTaskDefaults[task.id];
-        return [task.id, (!current || current === priorDefaultId) ? nextProfile.id : current];
-      }));
+      const nextTaskDefaults = Object.fromEntries(taskOptions.map((task) => [task.id, nextProfile.id]));
       const nextSettings = {
         provider: nextProfile.provider,
         model: nextProfile.model,
@@ -738,6 +733,9 @@ function DesktopOnboarding() {
       };
       const cleanedSettings = withoutEmptyOptionals(nextSettings);
       await desktop.saveLLMSettings(cleanedSettings);
+      if (nextProfile.provider === "openai" && nextProfile.apiKey && desktop.saveMediaProviderKey) {
+        await desktop.saveMediaProviderKey("openai", nextProfile.apiKey, { baseUrl: "https://api.openai.com/v1" });
+      }
       setSavedSettings(cleanedSettings);
       setTaskDefaults(nextTaskDefaults);
       window.localStorage.setItem(setupCompleteKey, "true");

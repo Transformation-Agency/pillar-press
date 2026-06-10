@@ -285,14 +285,12 @@ describe("browser onboarding runtime contract", () => {
     expect(runtime.manifest.graph.map((node: any) => node.id)).toEqual([
       "intro",
       "voice",
-      "connect",
       "focus",
       "preferences",
     ]);
     expect(runtime.pack.steps.map((step: any) => step.id)).toEqual([
       "intro",
       "voice",
-      "connect",
       "focus",
       "preferences",
     ]);
@@ -441,7 +439,7 @@ describe("browser onboarding runtime contract", () => {
       type: "answer_captured",
       sessionId: "session-1",
       stepId: "focus",
-      stepIndex: 3,
+      stepIndex: 2,
       inputMethod: "voice",
       conversational: true,
       answerAccepted: true,

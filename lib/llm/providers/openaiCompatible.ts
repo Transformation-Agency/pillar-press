@@ -1,4 +1,4 @@
-import { LLMError } from "@/lib/llm/errors";
+import { LLMError, providerRequestError, providerResponseError } from "@/lib/llm/errors";
 import { PROVIDER_CAPABILITIES } from "@/lib/llm/config";
 import type { AIMessage, LLMAdapter, LLMConfig } from "@/lib/llm/types";
 
@@ -10,6 +10,12 @@ function contentToText(content: string | Array<{ type?: string; text?: string }>
   if (typeof content === "string") return content;
   if (Array.isArray(content)) return content.map((part) => (part?.type === "text" ? part.text ?? "" : "")).join("");
   return "";
+}
+
+function maxTokensForRequest(config: LLMConfig): number {
+  if (config.provider === "openai") return Math.min(config.maxTokens, 16000);
+  if (config.provider === "xai") return Math.min(config.maxTokens, 8192);
+  return config.maxTokens;
 }
 
 export function openAICompatibleProvider(config: LLMConfig): LLMAdapter {
@@ -33,14 +39,14 @@ export function openAICompatibleProvider(config: LLMConfig): LLMAdapter {
           body: JSON.stringify({
             model: config.model,
             messages,
-            max_tokens: config.maxTokens,
+            max_tokens: maxTokensForRequest(config),
           }),
         });
       } catch (err) {
-        throw new LLMError(502, "llm", `${config.provider} request failed.`, config.provider, (err as Error)?.message);
+        throw providerRequestError(config.provider, err);
       }
       if (!res.ok) {
-        throw new LLMError(res.status, "llm", `${config.provider} request failed.`, config.provider);
+        throw await providerResponseError(config.provider, res);
       }
       const json = (await res.json()) as ChatResponse;
       const text = contentToText(json.choices?.[0]?.message?.content);

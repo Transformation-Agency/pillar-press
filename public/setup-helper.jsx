@@ -68,10 +68,10 @@ const ONBOARDING_CONVERSATION = window.KP_ONBOARDING_CONVERSATION || {
 const ONBOARDING_STEPS = (ONBOARDING_RUNTIME && ONBOARDING_RUNTIME.steps) || [
   { id: "intro", label: "Intro" },
   { id: "voice", label: "Voice" },
-  { id: "connect", label: "Connect" },
   { id: "focus", label: "First focus" },
   { id: "preferences", label: "Preferences" },
 ];
+const KINGSPRESS_LLM_TASKS = ["gather", "weave", "draft", "review", "revision", "outputs", "utility", "mediaPrompt", "file"];
 const ONBOARDING_TRUST = (ONBOARDING_RUNTIME && ONBOARDING_RUNTIME.trust) || {
   reassurance: "You're in control. Nothing connects without your approval.",
   footer: "King's Press · Your desk for ideas that matter.",
@@ -612,7 +612,7 @@ function InlineModelSetup({ status, onSaved }) {
       const profile = Object.assign({}, config);
       profile.id = profileIdFor(profile);
       profile.label = profileName.trim() || providerLabel(profile.provider) + " " + profile.model;
-      const taskDefaults = Object.fromEntries(["gather", "weave", "draft", "review", "revision", "outputs", "utility", "mediaPrompt", "file"].map((task) => [task, profile.id]));
+      const taskDefaults = Object.fromEntries(KINGSPRESS_LLM_TASKS.map((task) => [task, profile.id]));
       const settings = {
         provider: profile.provider,
         model: profile.model,
@@ -623,6 +623,9 @@ function InlineModelSetup({ status, onSaved }) {
         taskDefaults,
       };
       await desktop.saveLLMSettings(settings);
+      if (profile.provider === "openai" && profile.apiKey && desktop.saveMediaProviderKey) {
+        await desktop.saveMediaProviderKey("openai", profile.apiKey, { baseUrl: profile.baseUrl });
+      }
       setMessage("Model saved.");
       if (onSaved) onSaved(profile);
       if (window.KP_ONBOARDING_ACTIONS && window.KP_ONBOARDING_ACTIONS.notifyProviderSetupSaved) {
@@ -770,6 +773,7 @@ function InlineVoiceSetup({ status, audioState, onConnect, onLLMSaved, onVoiceCo
       url: "https://www.hedra.com/",
     },
   };
+  const savedOpenAIStarter = provider === "openai" && status && status.provider === "openai" && status.model;
 
   const profileIdFor = (profile) =>
     String([profile.provider, profile.baseUrl || "", profile.model].join("-"))
@@ -792,7 +796,7 @@ function InlineVoiceSetup({ status, audioState, onConnect, onLLMSaved, onVoiceCo
       apiKey: apiKey.trim(),
     };
     profile.id = profileIdFor(profile);
-    const taskDefaults = Object.fromEntries(["gather", "weave", "draft", "review", "revision", "outputs", "utility", "mediaPrompt", "file"].map((task) => [task, profile.id]));
+    const taskDefaults = Object.fromEntries(KINGSPRESS_LLM_TASKS.map((task) => [task, profile.id]));
     await desktop.saveLLMSettings({
       provider: profile.provider,
       model: profile.model,
@@ -876,7 +880,7 @@ function InlineVoiceSetup({ status, audioState, onConnect, onLLMSaved, onVoiceCo
           <h3>Add voice if you want me to read aloud</h3>
           <p>Paste a voice API key and I can respond over audio. OpenAI is the easiest first key because it can also power the rest of setup.</p>
         </div>
-        <SetupStatusChip label={connected ? "Connected" : "Optional"} />
+        <SetupStatusChip label={connected ? "Connected" : savedOpenAIStarter ? "Key saved" : "Optional"} />
       </div>
       <div className="kp-inline-voice-controls">
         <label>
@@ -892,7 +896,13 @@ function InlineVoiceSetup({ status, audioState, onConnect, onLLMSaved, onVoiceCo
         </label>
         <label>
           <span>{providerLabels[provider]} API key</span>
-          <input className="kp-setup-input" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Paste your API key" />
+          <input
+            className="kp-setup-input"
+            type="password"
+            value={apiKey}
+            onChange={(event) => setApiKey(event.target.value)}
+            placeholder={savedOpenAIStarter ? "OpenAI key already saved" : "Paste your API key"}
+          />
         </label>
         <div className="kp-inline-voice-actions">
           <button className="kp-setup-outline" type="button" onClick={() => setHelpOpen((value) => !value)}>
@@ -912,6 +922,9 @@ function InlineVoiceSetup({ status, audioState, onConnect, onLLMSaved, onVoiceCo
           <p>{helpCopy[provider].body}</p>
           <a href={helpCopy[provider].url} target="_blank" rel="noreferrer">Open provider instructions</a>
         </div>
+      )}
+      {savedOpenAIStarter && !apiKey.trim() && (
+        <p className="kp-inline-model-message" role="status">OpenAI is already saved encrypted for setup, drafting, and voice. Paste a new key only if you want to replace it.</p>
       )}
       {message && <p className="kp-inline-model-message" role="status">{message}</p>}
     </div>
@@ -1133,7 +1146,15 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     : { id: currentStep.id, label: currentStep.label, messages: [], suggestions: [], motionState: "idle" };
   const focusPrompt = ONBOARDING_CONVERSATION.promptForStep("focus", conversationState);
   const preferencesPrompt = ONBOARDING_CONVERSATION.promptForStep("preferences", conversationState);
-  const providerConnected = !!(providerStatus && providerStatus.provider && providerStatus.model);
+  const savedProviderAction = actionResults[ONBOARDING_ACTIONS.OPEN_PROVIDER_SETUP || "open_provider_setup"];
+  const providerConnected = !!(
+    (providerStatus && providerStatus.provider && providerStatus.model) ||
+    (savedProviderAction &&
+      savedProviderAction.status === ONBOARDING_ACTION_STATUSES.SUCCEEDED &&
+      savedProviderAction.data &&
+      savedProviderAction.data.provider &&
+      savedProviderAction.data.model)
+  );
   const voiceConnected = audioState === "audio_ready";
   const introAccepted = introAnswer === "yes";
   const introSkipped = introAnswer === "skip";
@@ -1562,7 +1583,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     }
     if (consent === "no") {
       skipIntroFromConnect();
-      goToStep(2);
+      skip();
       return;
     }
     const fallbackRepair = ONBOARDING_CONVERSATION.repairForAnswer
@@ -1584,11 +1605,11 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
       handleVoiceSetupAnswer(clean, "voice");
       return;
     }
-    if (activeStep === "focus" || activeStep === 3) {
+    if (activeStep === "focus" || activeStep === 2) {
       applyPlatformAnswer(clean, "voice");
       return;
     }
-    if (activeStep === "preferences" || activeStep === 4) {
+    if (activeStep === "preferences" || activeStep === 3) {
       interpretProfileAnswer(clean, "voice");
     }
   }
@@ -2898,51 +2919,12 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
 
         {step === 2 && (
           <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError} conversationState={conversationState} muted={audioMuted} onToggleMute={() => setAudioMuted((value) => !value)} onBack={() => goToStep(1)}>
-            <section style={{
-              border: "1px solid #D8CEC3", borderRadius: 10, background: "rgba(255, 252, 246, 0.68)",
-              overflow: "hidden",
-            }}>
-              <InlineModelSetup
-                status={providerStatus}
-                onSaved={(profile) => setProviderStatus((current) => Object.assign({}, current || {}, {
-                  provider: profile && profile.provider,
-                  model: profile && profile.model,
-                }))}
-              />
-              {connectRows.filter((item) => item.id !== "models" && item.id !== "voice").map((item) => (
-                <SetupPanelRow
-                  key={item.id}
-                  icon={item.icon}
-                  title={item.title}
-                  description={item.description}
-                  status={item.status}
-                  action={item.label}
-                  onClick={() => runConnectAction(item)}
-                  disabled={item.pending}
-                />
-              ))}
-            </section>
-            {setupError && (
-              <p role="alert" style={{ margin: "16px 0 0", color: "#A74732", fontSize: 15.5 }}>{setupError}</p>
-            )}
-            <SetupActions
-              secondary="Skip setup"
-              onSecondary={skip}
-              primary="Continue"
-              onPrimary={() => goToStep(3)}
-            />
-            <SetupReassurance />
-          </SetupShell>
-        )}
-
-        {step === 3 && (
-          <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError} conversationState={conversationState} muted={audioMuted} onToggleMute={() => setAudioMuted((value) => !value)} onBack={() => goToStep(2)}>
             <SetupField label="First project or campaign name" helper="Name the first place King's Press should organize drafts, sources, and notes.">
               <input
                 className="kp-setup-input"
                 value={campaignName}
                 onChange={(e) => setCampaignName(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") ensureFocus().then(() => goToStep(4)); }}
+                onKeyDown={(e) => { if (e.key === "Enter") ensureFocus().then(() => goToStep(3)); }}
                 placeholder="e.g. Smoke Test"
                 style={{ fontFamily: "var(--font-serif)", fontSize: 25, height: 75 }}
               />
@@ -2950,7 +2932,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
                 <button className="kp-setup-outline" type="button" onClick={() => listenForAnswer("focus")} disabled={listening} aria-pressed={listening ? "true" : "false"}>
                   <Icon name="mic" size={16} /> {listening ? "Listening" : "Speak answer"}
                 </button>
-                {setupTranscript && step === 3 && (
+                {setupTranscript && step === 2 && (
                   <p className="kp-transcript-preview" aria-live="polite">I heard: <strong>{setupTranscript}</strong></p>
                 )}
               </div>
@@ -2984,12 +2966,12 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
               onSecondary={() => {
                 setConversationState((current) => ONBOARDING_CONVERSATION.skipSlot(current, ONBOARDING_CONVERSATION.SLOT_IDS.COMMUNICATION_PLATFORMS));
                 recordAction(ONBOARDING_ACTIONS.SKIP_FOCUS, ONBOARDING_ACTION_STATUSES.SKIPPED);
-                goToStep(4);
+                goToStep(3);
               }}
               primary="Continue"
               busy={busy}
               onPrimary={() => {
-                ensureFocus().then(() => goToStep(4)).catch(() => null);
+                ensureFocus().then(() => goToStep(3)).catch(() => null);
               }}
             />
             {setupError && (
@@ -2999,8 +2981,8 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
           </SetupShell>
         )}
 
-        {step === 4 && prefDraft && (
-          <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError} conversationState={conversationState} muted={audioMuted} onToggleMute={() => setAudioMuted((value) => !value)} onBack={() => goToStep(3)}>
+        {step === 3 && prefDraft && (
+          <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError} conversationState={conversationState} muted={audioMuted} onToggleMute={() => setAudioMuted((value) => !value)} onBack={() => goToStep(2)}>
             <SetupAnswerComposer
               question={preferencesPrompt && preferencesPrompt.question}
               helper={preferencesPrompt && preferencesPrompt.helper}
@@ -3009,7 +2991,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
               onListen={() => listenForAnswer("preferences")}
               listening={listening}
               disabled={profileBusy}
-              transcript={step === 4 ? setupTranscript : ""}
+              transcript={step === 3 ? setupTranscript : ""}
               placeholder={preferencesPrompt && preferencesPrompt.placeholder}
               actionLabel={profileBusy ? "Interpreting" : "Use for defaults"}
               onSubmit={() => interpretProfileAnswer(profileAnswer, "typed")}

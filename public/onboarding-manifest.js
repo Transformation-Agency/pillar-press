@@ -59,20 +59,6 @@
       secondaryAction: "skip_voice",
     },
     {
-      id: "connect",
-      label: "Connect",
-      title: "Let's set up your desk",
-      subtitle: "Choose the model and integrations King's Press can use. You can skip anything and change it later.",
-      hostMessages: [
-        "Now choose the model and any outside tools you want connected.",
-        "Anything you skip stays available later.",
-      ],
-      suggestions: ["Cloud API key", "Ollama", "Explore integrations"],
-      motionState: "idle",
-      primaryAction: "continue",
-      secondaryAction: "skip_setup",
-    },
-    {
       id: "focus",
       label: "First focus",
       title: "What are you working on first?",

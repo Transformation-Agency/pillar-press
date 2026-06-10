@@ -8,6 +8,7 @@ import {
   DEFAULT_XAI_BASE_URL,
 } from "@/lib/llm/config";
 import { LLMError } from "@/lib/llm";
+import { providerMessage } from "@/lib/llm/errors";
 
 const Body = z.object({
   provider: z.enum(["anthropic", "openai", "openai-compatible", "xai", "ollama", "gemini"]).default("openai-compatible"),
@@ -86,7 +87,15 @@ export async function POST(req: Request) {
 
     const res = await fetch(url, { headers });
     if (!res.ok) {
-      return NextResponse.json({ models: [], error: "Could not list models from this provider." }, { status: res.status });
+      const contentType = res.headers.get("content-type") || "";
+      const detail = contentType.includes("application/json")
+        ? await res.json().catch(() => null)
+        : await res.text().catch(() => "");
+      return NextResponse.json({
+        models: [],
+        error: providerMessage(body.provider, res.status, detail),
+        code: "llm",
+      }, { status: res.status });
     }
     const payload = await res.json();
     if (body.provider === "gemini") return NextResponse.json({ models: normalizeGeminiModels(payload as GeminiModelsResponse) });

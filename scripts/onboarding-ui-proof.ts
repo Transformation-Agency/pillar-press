@@ -216,9 +216,6 @@ export async function driveOnboardingUiProof(page: Page, options?: OnboardingUiP
   await waitForText(page, "Can I help you set up voice?");
   await clickButton(page, "Skip voice");
 
-  await waitForText(page, "AI & models");
-  await clickButton(page, "Continue");
-
   await waitForText(page, "First project or campaign name");
   if (answerInputMethod === "voice") {
     await installSpeechRecognitionMock(page, [focusAnswer, voiceAnswer]);
