@@ -180,6 +180,47 @@ async function loadRuntime(context: ProofContext) {
   return { runtime, conversation, profile, actions };
 }
 
+function assertManifestContract(runtime: any, scenarioId: string) {
+  assert(runtime.manifestValidation?.valid === true, scenarioId + ": King’s Press onboarding manifest is invalid.");
+  assert(runtime.manifestValidation.errors.length === 0, scenarioId + ": manifest validation reported errors.");
+  assert(runtime.manifestValidation.summary.steps >= 5, scenarioId + ": manifest did not expose the expected setup steps.");
+  assert(runtime.manifestValidation.summary.requiredSlots >= 2, scenarioId + ": manifest did not expose required setup slots.");
+  assert(runtime.pack?.id === "kings_press", scenarioId + ": runtime pack is not scoped to King’s Press.");
+  assert(runtime.pack?.graph?.length >= 5, scenarioId + ": runtime pack does not expose deterministic graph nodes.");
+
+  const broken = runtime.validateManifest({
+    id: "broken_pack",
+    appName: "Broken Pack",
+    version: "test.invalid",
+    steps: [{ id: "intro", label: "Intro", title: "Intro", primaryAction: "continue" }],
+    slots: {
+      ids: { FOCUS: "focus" },
+      required: ["focus"],
+      sequence: ["focus"],
+      prompts: {
+        focus: {
+          stepId: "missing_step",
+          question: "What are you doing?",
+          answerKind: "focus",
+        },
+      },
+    },
+    graph: [{ id: "missing_step", expectedIntents: ["typed_answer"] }],
+    connectItems: [{ id: "models", action: "missing_action", title: "Models", description: "Models", label: "Set up" }],
+    actionMetadata: {},
+    activation: { id: "first_value", requiredSignals: ["focus_ready"] },
+  });
+  assert(broken.valid === false, scenarioId + ": invalid manifest passed validation.");
+  assert(
+    broken.errors.some((issue: any) => /missing step/i.test(issue.message)),
+    scenarioId + ": invalid manifest did not report the missing step reference.",
+  );
+  assert(
+    broken.errors.some((issue: any) => /action metadata/i.test(issue.message)),
+    scenarioId + ": invalid manifest did not report missing action metadata.",
+  );
+}
+
 async function runActivationProof(input: {
   id: string;
   voiceReady: boolean;
@@ -190,6 +231,8 @@ async function runActivationProof(input: {
   const context = createWindow({ voiceReady: input.voiceReady });
   const { runtime, conversation, profile, actions } = await loadRuntime(context);
   const sessionId = "release-proof-" + input.id;
+
+  assertManifestContract(runtime, input.id);
 
   assert(
     runtime.shouldOpenOnboarding({ onboardingComplete: false, firstValue: null }) === true,

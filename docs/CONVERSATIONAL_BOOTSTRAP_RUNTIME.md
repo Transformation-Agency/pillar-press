@@ -420,6 +420,11 @@ Deliverables:
 - Runtime validation for required manifest fields.
 - Tests proving the King's Press manifest produces the same current steps.
 
+Status: implemented for the King's Press pack. `public/onboarding-manifest.js` owns the
+app-specific graph, slots, actions, activation contract, and trust copy. The shared runtime exposes
+`validateManifest()` plus `manifestValidation`, and `npm run onboarding:verify` proves the shipped
+King's Press manifest is valid while a deliberately malformed app pack is rejected.
+
 ### Slice 2: Conversation Canvas
 
 Replace the current setup-stage framing with a continuous conversation surface while preserving

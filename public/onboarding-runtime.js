@@ -305,6 +305,141 @@
     actionMetadata,
   };
 
+  function addValidationIssue(list, message, path) {
+    list.push({
+      message: String(message || "Invalid onboarding manifest."),
+      path: String(path || "$"),
+    });
+  }
+
+  function isPlainObject(value) {
+    return !!value && typeof value === "object" && !Array.isArray(value);
+  }
+
+  function validateManifest(input) {
+    const source = input || {};
+    const errors = [];
+    const warnings = [];
+
+    if (!safeMetricString(source.id, 80)) addValidationIssue(errors, "Manifest must define an app id.", "id");
+    if (!safeMetricString(source.appName || source.brand, 120)) addValidationIssue(errors, "Manifest must define an app name.", "appName");
+    if (!safeMetricString(source.version, 120)) addValidationIssue(errors, "Manifest must define a version.", "version");
+
+    const manifestSteps = Array.isArray(source.steps) ? source.steps : [];
+    if (!manifestSteps.length) addValidationIssue(errors, "Manifest must define at least one step.", "steps");
+    const stepIds = new Set();
+    manifestSteps.forEach((step, index) => {
+      const path = "steps[" + index + "]";
+      if (!isPlainObject(step)) {
+        addValidationIssue(errors, "Step must be an object.", path);
+        return;
+      }
+      const id = safeMetricString(step.id, 80);
+      if (!id) addValidationIssue(errors, "Step must define an id.", path + ".id");
+      else if (stepIds.has(id)) addValidationIssue(errors, "Step ids must be unique.", path + ".id");
+      else stepIds.add(id);
+      ["label", "title", "primaryAction"].forEach((field) => {
+        if (!safeMetricString(step[field], 160)) addValidationIssue(errors, "Step must define " + field + ".", path + "." + field);
+      });
+      if (!Array.isArray(step.hostMessages)) addValidationIssue(warnings, "Step should define hostMessages for the conversation canvas.", path + ".hostMessages");
+      if (!Array.isArray(step.suggestions)) addValidationIssue(warnings, "Step should define suggestions for keyboard-friendly setup.", path + ".suggestions");
+    });
+
+    const slots = source.slots || {};
+    const slotIds = isPlainObject(slots.ids) ? slots.ids : {};
+    const prompts = isPlainObject(slots.prompts) ? slots.prompts : {};
+    const required = Array.isArray(slots.required) ? slots.required : [];
+    const sequence = Array.isArray(slots.sequence) ? slots.sequence : [];
+    if (!Object.keys(slotIds).length) addValidationIssue(errors, "Manifest must define slot ids.", "slots.ids");
+    if (!Object.keys(prompts).length) addValidationIssue(errors, "Manifest must define slot prompts.", "slots.prompts");
+    required.forEach((slotId, index) => {
+      if (!prompts[slotId]) addValidationIssue(errors, "Required slot has no prompt.", "slots.required[" + index + "]");
+    });
+    sequence.forEach((slotId, index) => {
+      if (!prompts[slotId]) addValidationIssue(errors, "Sequenced slot has no prompt.", "slots.sequence[" + index + "]");
+    });
+    Object.keys(prompts).forEach((slotId) => {
+      const prompt = prompts[slotId];
+      const path = "slots.prompts." + slotId;
+      if (!isPlainObject(prompt)) {
+        addValidationIssue(errors, "Slot prompt must be an object.", path);
+        return;
+      }
+      ["stepId", "question", "answerKind"].forEach((field) => {
+        if (!safeMetricString(prompt[field], 240)) addValidationIssue(errors, "Slot prompt must define " + field + ".", path + "." + field);
+      });
+      if (prompt.stepId && !stepIds.has(prompt.stepId)) {
+        addValidationIssue(errors, "Slot prompt references a missing step.", path + ".stepId");
+      }
+      if (prompt.expectedIntents && !Array.isArray(prompt.expectedIntents)) {
+        addValidationIssue(errors, "expectedIntents must be an array.", path + ".expectedIntents");
+      }
+    });
+
+    const graph = Array.isArray(source.graph) ? source.graph : [];
+    if (!graph.length) addValidationIssue(warnings, "Manifest should expose graph nodes for runtime portability.", "graph");
+    graph.forEach((node, index) => {
+      const path = "graph[" + index + "]";
+      if (!isPlainObject(node)) {
+        addValidationIssue(errors, "Graph node must be an object.", path);
+        return;
+      }
+      if (!stepIds.has(node.id)) addValidationIssue(errors, "Graph node id must match a step id.", path + ".id");
+      if (!Array.isArray(node.expectedIntents)) addValidationIssue(warnings, "Graph node should define expectedIntents.", path + ".expectedIntents");
+    });
+
+    const actions = isPlainObject(source.actionMetadata) ? source.actionMetadata : {};
+    const connect = Array.isArray(source.connectItems) ? source.connectItems : [];
+    connect.forEach((item, index) => {
+      const path = "connectItems[" + index + "]";
+      if (!isPlainObject(item)) {
+        addValidationIssue(errors, "Connect item must be an object.", path);
+        return;
+      }
+      if (!safeMetricString(item.id, 80)) addValidationIssue(errors, "Connect item must define an id.", path + ".id");
+      const action = safeMetricString(item.action, 120);
+      if (!action) addValidationIssue(errors, "Connect item must define an action.", path + ".action");
+      else if (!actions[action]) addValidationIssue(errors, "Connect item action must have action metadata.", path + ".action");
+      ["title", "description", "label"].forEach((field) => {
+        if (!safeMetricString(item[field], 240)) addValidationIssue(errors, "Connect item must define " + field + ".", path + "." + field);
+      });
+    });
+
+    const activation = source.activation || source.firstValueEvent || {};
+    if (!safeMetricString(activation.id, 120)) addValidationIssue(errors, "Manifest must define an activation id.", "activation.id");
+    if (!Array.isArray(activation.requiredSignals) || !activation.requiredSignals.length) {
+      addValidationIssue(errors, "Activation must define required signals.", "activation.requiredSignals");
+    }
+    if (!safeMetricString(activation.persistedAs, 120)) {
+      addValidationIssue(warnings, "Activation should name its persistence key.", "activation.persistedAs");
+    }
+
+    const capabilities = source.capabilities || {};
+    ["voiceInput", "voiceOutput", "llmProvider", "liveAssistantHandoff"].forEach((field) => {
+      if (!safeMetricString(capabilities[field], 80)) {
+        addValidationIssue(warnings, "Capabilities should define " + field + ".", "capabilities." + field);
+      }
+    });
+
+    const valid = errors.length === 0;
+    return {
+      valid,
+      errors,
+      warnings,
+      summary: {
+        appId: safeMetricString(source.id, 80),
+        version: safeMetricString(source.version, 120),
+        steps: manifestSteps.length,
+        prompts: Object.keys(prompts).length,
+        requiredSlots: required.length,
+        graphNodes: graph.length,
+        connectItems: connect.length,
+      },
+    };
+  }
+
+  const manifestValidation = validateManifest(manifest);
+
   function clampStepIndex(value) {
     const n = Number.isFinite(Number(value)) ? Number(value) : 0;
     return Math.max(0, Math.min(steps.length - 1, Math.trunc(n)));
@@ -585,6 +720,7 @@
     METRICS_VERSION,
     MAX_METRICS_EVENTS,
     manifest,
+    manifestValidation,
     flags,
     pack,
     steps,
@@ -604,6 +740,7 @@
     getConnectItems,
     deriveCompletionStatus,
     shouldOpenOnboarding,
+    validateManifest,
     buildFirstValueEvent,
     buildMetricsEvent,
     appendMetricsEvent,
