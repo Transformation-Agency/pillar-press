@@ -220,16 +220,36 @@ fn should_use_keychain_secret() -> bool {
 }
 
 #[cfg(target_os = "macos")]
-fn read_keychain_secret() -> Option<String> {
+fn user_keychain_path() -> Option<String> {
     let out = Command::new("security")
-        .args([
-            "find-generic-password",
-            "-w",
-            "-s",
-            KEYCHAIN_SERVICE,
-            "-a",
-            KEYCHAIN_ACCOUNT,
-        ])
+        .args(["default-keychain", "-d", "user"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .trim_matches('"')
+        .to_string();
+    if text.is_empty() || !PathBuf::from(&text).exists() {
+        None
+    } else {
+        Some(text)
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn read_keychain_secret() -> Option<String> {
+    let keychain = user_keychain_path()?;
+    let out = Command::new("security")
+        .arg("find-generic-password")
+        .arg("-w")
+        .arg("-s")
+        .arg(KEYCHAIN_SERVICE)
+        .arg("-a")
+        .arg(KEYCHAIN_ACCOUNT)
+        .arg(keychain)
         .output()
         .ok()?;
     if !out.status.success() {
@@ -250,17 +270,19 @@ fn read_keychain_secret() -> Option<String> {
 
 #[cfg(target_os = "macos")]
 fn write_keychain_secret(secret: &str) -> bool {
+    let Some(keychain) = user_keychain_path() else {
+        return false;
+    };
     Command::new("security")
-        .args([
-            "add-generic-password",
-            "-U",
-            "-s",
-            KEYCHAIN_SERVICE,
-            "-a",
-            KEYCHAIN_ACCOUNT,
-            "-w",
-            secret,
-        ])
+        .arg("add-generic-password")
+        .arg("-U")
+        .arg("-s")
+        .arg(KEYCHAIN_SERVICE)
+        .arg("-a")
+        .arg(KEYCHAIN_ACCOUNT)
+        .arg("-w")
+        .arg(secret)
+        .arg(keychain)
         .output()
         .map(|out| out.status.success())
         .unwrap_or(false)
