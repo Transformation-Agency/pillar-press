@@ -163,10 +163,10 @@ function SetupHostPanel({ conversation, mode, onModeChange, actionResults, setup
   );
 }
 
-function SetupShell({ children, conversation, mode, onModeChange, actionResults, setupError, centered, hostless }) {
+function SetupShell({ children, conversation, mode, onModeChange, actionResults, setupError, centered, showHost }) {
   return (
-    <main className={"kp-setup-shell" + (centered ? " kp-setup-shell-centered" : "") + (hostless ? " kp-setup-shell-hostless" : "")}>
-      {!hostless && (
+    <main className={"kp-setup-shell" + (centered ? " kp-setup-shell-centered" : "") + (!showHost ? " kp-setup-shell-hostless" : "")}>
+      {showHost && (
         <SetupHostPanel
           conversation={conversation}
           mode={mode}
@@ -363,8 +363,10 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
   const [profileAnswer, setProfileAnswer] = React.useState("");
   const [setupProfileDraft, setSetupProfileDraft] = React.useState(null);
   const [profileBusy, setProfileBusy] = React.useState(false);
+  const [focusActivation, setFocusActivation] = React.useState(null);
   const transcriptHandlerRef = React.useRef(null);
   const listenSessionRef = React.useRef(null);
+  const setupStartedAtRef = React.useRef(Date.now());
   const state = window.Store.getState();
   const campaigns = state.campaigns || [];
   const activeCampaign = window.Store.activeCampaign && window.Store.activeCampaign();
@@ -407,6 +409,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
 
   React.useEffect(() => {
     if (!open) return;
+    setupStartedAtRef.current = Date.now();
     const refs = window.Store.activeReferences ? window.Store.activeReferences() : {};
     const throughline = refs.strategy && refs.strategy.throughlines && refs.strategy.throughlines[0];
     const audience = refs.audiences && refs.audiences.list && refs.audiences.list[0];
@@ -720,7 +723,11 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
 
   async function ensureFocus(nameOverride) {
     const clean = String(nameOverride || campaignName || "").trim();
-    if (activeCampaign && (!clean || clean === activeCampaign.name)) return activeCampaign.id;
+    if (activeCampaign && (!clean || clean === activeCampaign.name)) {
+      const activation = { campaignId: activeCampaign.id, campaignName: activeCampaign.name || clean || "Current focus", reused: true };
+      setFocusActivation(activation);
+      return activeCampaign.id;
+    }
     const name = clean || "Untitled focus";
     setBusy(true);
     recordAction(ONBOARDING_ACTIONS.SAVE_FOCUS, ONBOARDING_ACTION_STATUSES.PENDING);
@@ -729,12 +736,21 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
         const result = await ONBOARDING_ACTION_REGISTRY.saveFocus(name, { activeCampaign });
         if (result.status === ONBOARDING_ACTION_STATUSES.FAILED) throw new Error(result.error);
         recordAction(ONBOARDING_ACTIONS.SAVE_FOCUS, ONBOARDING_ACTION_STATUSES.SUCCEEDED, result);
-        return result.data && result.data.campaignId;
+        const activation = {
+          campaignId: result.data && result.data.campaignId,
+          campaignName: name,
+          reused: !!(result.data && result.data.reused),
+        };
+        setFocusActivation(activation);
+        return activation.campaignId;
       }
       const tempId = window.Store.addCampaign(name);
-      if (window.Store.whenCampaignSaved) await window.Store.whenCampaignSaved(tempId);
-      recordAction(ONBOARDING_ACTIONS.SAVE_FOCUS, ONBOARDING_ACTION_STATUSES.SUCCEEDED, { data: { campaignId: tempId } });
-      return tempId;
+      const saved = window.Store.whenCampaignSaved ? await window.Store.whenCampaignSaved(tempId) : null;
+      const campaignId = (saved && saved.id) || tempId;
+      const activation = { campaignId, campaignName: (saved && saved.name) || name, reused: false };
+      setFocusActivation(activation);
+      recordAction(ONBOARDING_ACTIONS.SAVE_FOCUS, ONBOARDING_ACTION_STATUSES.SUCCEEDED, { data: activation });
+      return campaignId;
     } catch (e) {
       const message = (e && e.message) || "Could not save the first focus.";
       recordAction(ONBOARDING_ACTIONS.SAVE_FOCUS, ONBOARDING_ACTION_STATUSES.FAILED, { error: message });
@@ -819,20 +835,55 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     setSetupError("");
     setBusy(true);
     try {
-      if (!activeCampaign && campaignName.trim()) await ensureFocus();
+      let focusId = focusActivation && focusActivation.campaignId;
+      let focusName = focusActivation && focusActivation.campaignName;
+      if (!focusId) {
+        if (activeCampaign) {
+          focusId = activeCampaign.id;
+          focusName = activeCampaign.name || campaignName || "Current focus";
+          setFocusActivation({ campaignId: focusId, campaignName: focusName, reused: true });
+        } else {
+          focusId = await ensureFocus(campaignName.trim() || "Untitled focus");
+          focusName = campaignName.trim() || "Untitled focus";
+        }
+      }
+      let preferencesSaved = false;
       if (skipPreferences) {
         recordAction(ONBOARDING_ACTIONS.SAVE_PREFERENCES, ONBOARDING_ACTION_STATUSES.SKIPPED);
       } else {
         await savePreferences();
+        preferencesSaved = true;
       }
+      const setupDurationMs = Date.now() - setupStartedAtRef.current;
+      const firstValue = {
+        focusReadyOrSkipped: true,
+        preferencesSaved,
+        preferencesSkipped: skipPreferences,
+        campaignId: focusId,
+        campaignName: focusName || campaignName || "",
+        providerReady: providerConnected,
+        routeTarget: focusId ? "desk" : "library",
+        setupDurationMs,
+        completedFrom: skipPreferences ? "preferences_skipped" : "preferences_saved",
+      };
+      let completionPayload = {
+        routeTarget: firstValue.routeTarget,
+        campaignId: focusId,
+        campaignName: firstValue.campaignName,
+        firstValue,
+      };
       if (ONBOARDING_ACTION_REGISTRY && ONBOARDING_ACTION_REGISTRY.completeOnboarding) {
-        const result = await ONBOARDING_ACTION_REGISTRY.completeOnboarding({ firstValueComplete: true });
+        const result = await ONBOARDING_ACTION_REGISTRY.completeOnboarding({
+          firstValueComplete: true,
+          firstValue,
+        });
         if (result.status === ONBOARDING_ACTION_STATUSES.FAILED) throw new Error(result.error);
         recordAction(ONBOARDING_ACTIONS.COMPLETE_ONBOARDING, ONBOARDING_ACTION_STATUSES.SUCCEEDED, result);
+        completionPayload = Object.assign({}, completionPayload, (result && result.data) || {});
       } else {
         recordAction(ONBOARDING_ACTIONS.COMPLETE_ONBOARDING, ONBOARDING_ACTION_STATUSES.SUCCEEDED);
       }
-      if (onComplete) onComplete();
+      if (onComplete) onComplete(completionPayload);
     } catch (e) {
       const message = (e && e.message) || "Could not finish setup.";
       setSetupError(message);
@@ -965,6 +1016,9 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
           margin-top: 86px;
         }
         .kp-setup-shell-hostless .kp-setup-stage {
+          width: min(1040px, 100%);
+        }
+        .kp-setup-shell-centered.kp-setup-shell-hostless .kp-setup-stage {
           width: min(760px, 100%);
           text-align: center;
         }

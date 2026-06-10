@@ -936,6 +936,9 @@ function App() {
   const setupCompletePref = (window.KP_CONVERSATIONAL_ONBOARDING &&
     window.KP_CONVERSATIONAL_ONBOARDING.flags &&
     window.KP_CONVERSATIONAL_ONBOARDING.flags.onboardingCompletePref) || "setupHelperCompleteV1";
+  const firstValuePref = (window.KP_CONVERSATIONAL_ONBOARDING &&
+    window.KP_CONVERSATIONAL_ONBOARDING.flags &&
+    window.KP_CONVERSATIONAL_ONBOARDING.flags.firstValuePref) || "onboardingFirstValueEventV1";
 
   const openPiece = (id) => { window.Store.setActive(id); setView("workspace"); };
   const goLibrary = () => { setView("library"); window.Store.setActive(null); };
@@ -944,10 +947,20 @@ function App() {
     let cancelled = false;
     Promise.resolve(window.Store.ready).then(() => {
       if (cancelled) return;
-      if (!window.Store.getPref(setupCompletePref, false)) setSetupOpen(true);
+      const firstValue = window.Store.getPref(firstValuePref, null);
+      if (!window.Store.getPref(setupCompletePref, false) && !(firstValue && firstValue.complete)) setSetupOpen(true);
     });
     return () => { cancelled = true; };
   }, []);
+  const completeSetup = (payload) => {
+    const result = payload || {};
+    window.Store.setPref(setupCompletePref, true);
+    if (result.campaignId && window.Store.getCampaign && window.Store.getCampaign(result.campaignId)) {
+      window.Store.setActiveCampaign(result.campaignId);
+    }
+    setSetupOpen(false);
+    setView(result.routeTarget || (result.campaignId ? "desk" : "library"));
+  };
   const createCampaign = (name) => {
     const clean = String(name || "").trim();
     if (!clean) return;
@@ -1061,7 +1074,7 @@ function App() {
           open={setupOpen}
           onClose={() => setSetupOpen(false)}
           onOpenProviderSetup={openModelSetup}
-          onComplete={() => { window.Store.setPref(setupCompletePref, true); setSetupOpen(false); }}
+          onComplete={completeSetup}
         />
       )}
       <CampaignCreateDialog open={campaignCreateOpen} onClose={() => setCampaignCreateOpen(false)} onCreate={createCampaign} />

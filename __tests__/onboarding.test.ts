@@ -308,6 +308,58 @@ describe("browser onboarding runtime contract", () => {
       computeReady: false,
       canEnterWorkspace: true,
     });
+    expect(runtime.deriveCompletionStatus({
+      onboardingComplete: false,
+      computeReady: false,
+      firstValueComplete: true,
+    })).toMatchObject({
+      onboardingComplete: false,
+      computeReady: false,
+      firstValueComplete: true,
+      canEnterWorkspace: true,
+    });
+  });
+
+  it("builds first-value activation metadata with route and signals", () => {
+    const runtime = loadBrowserRuntime();
+    const event = runtime.buildFirstValueEvent({
+      campaignId: "camp_1",
+      campaignName: "Launch plan",
+      preferencesSaved: true,
+      providerReady: true,
+      setupDurationMs: 123456,
+      routeTarget: "desk",
+      completedAt: "2026-06-10T00:00:00.000Z",
+    });
+
+    expect(event).toMatchObject({
+      id: "first_usable_setup",
+      version: 1,
+      completedAt: "2026-06-10T00:00:00.000Z",
+      complete: true,
+      focusReadyOrSkipped: true,
+      preferencesSavedOrSkipped: true,
+      campaignId: "camp_1",
+      campaignName: "Launch plan",
+      providerReady: true,
+      routeTarget: "desk",
+      setupDurationMs: 123456,
+    });
+  });
+
+  it("does not mark first value complete without focus and preferences signals", () => {
+    const runtime = loadBrowserRuntime();
+    const event = runtime.buildFirstValueEvent({
+      preferencesSaved: true,
+      routeTarget: "desk",
+    });
+
+    expect(event).toMatchObject({
+      complete: false,
+      completedAt: null,
+      focusReadyOrSkipped: false,
+      preferencesSavedOrSkipped: true,
+    });
   });
 
   it("provides short conversation prompts and suggestions for every visible step", () => {
@@ -455,5 +507,66 @@ describe("browser onboarding action registry", () => {
       transcript: "I write for operators.",
     });
     expect(saved).toBe(false);
+  });
+
+  it("persists onboarding completion and rich first-value metadata", async () => {
+    const window = loadBrowserActions();
+    const prefs: Record<string, unknown> = {};
+    window.Store = {
+      setPref: (key: string, value: unknown) => {
+        prefs[key] = value;
+      },
+    };
+
+    const result = await window.KP_ONBOARDING_ACTIONS.completeOnboarding({
+      firstValueComplete: true,
+      firstValue: {
+        campaignId: "camp_1",
+        campaignName: "Launch plan",
+        preferencesSaved: true,
+        providerReady: true,
+        routeTarget: "desk",
+        setupDurationMs: 90000,
+        completedAt: "2026-06-10T00:00:00.000Z",
+      },
+    });
+
+    expect(result).toMatchObject({
+      intent: "complete_onboarding",
+      status: "succeeded",
+      data: {
+        onboardingComplete: true,
+        firstValueComplete: true,
+      },
+    });
+    expect(prefs.setupHelperCompleteV1).toBe(true);
+    expect(prefs.onboardingFirstValueEventV1).toMatchObject({
+      complete: true,
+      campaignId: "camp_1",
+      campaignName: "Launch plan",
+      preferencesSaved: true,
+      routeTarget: "desk",
+      setupDurationMs: 90000,
+    });
+  });
+
+  it("skipping onboarding does not falsely persist first-value completion", async () => {
+    const window = loadBrowserActions();
+    const prefs: Record<string, unknown> = {};
+    window.Store = {
+      setPref: (key: string, value: unknown) => {
+        prefs[key] = value;
+      },
+    };
+
+    const result = await window.KP_ONBOARDING_ACTIONS.skipOnboarding();
+
+    expect(result).toMatchObject({
+      intent: "skip_onboarding",
+      status: "skipped",
+      data: { onboardingComplete: true },
+    });
+    expect(prefs.setupHelperCompleteV1).toBe(true);
+    expect(prefs.onboardingFirstValueEventV1).toBeUndefined();
   });
 });

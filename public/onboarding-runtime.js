@@ -351,6 +351,30 @@
     };
   }
 
+  function buildFirstValueEvent(input) {
+    const current = input || {};
+    const focusReadyOrSkipped = !!(current.focusReadyOrSkipped || current.campaignId || current.focusSkipped);
+    const preferencesSavedOrSkipped = !!(current.preferencesSaved || current.preferencesSkipped);
+    const complete = focusReadyOrSkipped && preferencesSavedOrSkipped;
+    return {
+      id: firstValueEvent.id,
+      version: firstValueEvent.version,
+      completedAt: complete ? (current.completedAt || new Date().toISOString()) : null,
+      complete,
+      focusReadyOrSkipped,
+      preferencesSavedOrSkipped,
+      focusSkipped: !!current.focusSkipped,
+      preferencesSaved: !!current.preferencesSaved,
+      preferencesSkipped: !!current.preferencesSkipped,
+      campaignId: current.campaignId || null,
+      campaignName: current.campaignName || "",
+      providerReady: !!current.providerReady,
+      routeTarget: current.routeTarget || (current.campaignId || current.focusSkipped ? "desk" : "library"),
+      setupDurationMs: Math.max(0, Number(current.setupDurationMs || 0)),
+      completedFrom: current.completedFrom || "setup_helper",
+    };
+  }
+
   window.KP_CONVERSATIONAL_ONBOARDING = {
     RUNTIME_VERSION,
     PACK_VERSION,
@@ -375,5 +399,6 @@
     previousStepId,
     getConnectItems,
     deriveCompletionStatus,
+    buildFirstValueEvent,
   };
 })();

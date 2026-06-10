@@ -183,13 +183,23 @@
       const Store = window.Store;
       if (!Store || typeof Store.setPref !== "function") throw new Error("Local store is not ready.");
       Store.setPref(flags.onboardingCompletePref, true);
+      let firstValueEvent = null;
       if (options && options.firstValueComplete) {
-        Store.setPref(flags.firstValuePref || "onboardingFirstValueEventV1", {
-          completedAt: new Date().toISOString(),
-          version: 1,
-        });
+        firstValueEvent = runtime.buildFirstValueEvent
+          ? runtime.buildFirstValueEvent(options.firstValue || options)
+          : {
+            id: "first_usable_setup",
+            version: 1,
+            completedAt: new Date().toISOString(),
+            complete: true,
+          };
+        Store.setPref(flags.firstValuePref || "onboardingFirstValueEventV1", firstValueEvent);
       }
-      return succeeded(intent, { onboardingComplete: true });
+      return succeeded(intent, {
+        onboardingComplete: true,
+        firstValueComplete: !!(firstValueEvent && firstValueEvent.complete),
+        firstValueEvent,
+      });
     } catch (error) {
       return failed(intent, error, "Could not finish setup.");
     }
