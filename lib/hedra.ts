@@ -10,6 +10,8 @@
  *   https://api.hedra.com/web-app/public   with header  X-API-Key: <key>
  */
 
+import { desktopMediaProvider } from "@/lib/desktopSettings";
+
 const HEDRA_BASE = "https://api.hedra.com/web-app/public";
 
 export class HedraError extends Error {
@@ -24,8 +26,8 @@ export class HedraError extends Error {
   }
 }
 
-function apiKey(): string {
-  const k = process.env.HEDRA_API_KEY;
+function apiKey(override?: string): string {
+  const k = override || process.env.HEDRA_API_KEY || desktopMediaProvider("hedra")?.apiKey;
   if (!k) throw new HedraError(500, "config", "Missing HEDRA_API_KEY in server environment.");
   return k;
 }
@@ -81,14 +83,15 @@ export interface GenerateInput {
 }
 
 type FetchOpts = { method?: string; query?: Record<string, string | string[] | undefined>; body?: unknown; isForm?: boolean };
+type HedraAuthOpts = { apiKey?: string };
 
-async function hedra<T>(path: string, opts: FetchOpts = {}): Promise<T> {
+async function hedra<T>(path: string, opts: FetchOpts & HedraAuthOpts = {}): Promise<T> {
   const url = new URL(HEDRA_BASE + path);
   for (const [k, v] of Object.entries(opts.query ?? {})) {
     if (v == null) continue;
     (Array.isArray(v) ? v : [v]).forEach((x) => url.searchParams.append(k, x));
   }
-  const headers: Record<string, string> = { "X-API-Key": apiKey() };
+  const headers: Record<string, string> = { "X-API-Key": apiKey(opts.apiKey) };
   let body: BodyInit | undefined;
   if (opts.body !== undefined) {
     if (opts.isForm) body = opts.body as FormData; // browser/server FormData; do not set Content-Type
@@ -137,10 +140,10 @@ export function listModels(types?: GenerationType[]): Promise<HedraModel[]> {
   return hedra<HedraModel[]>("/models", { query: { type: types } });
 }
 
-export function getCredits(): Promise<HedraCredits> {
+export function getCredits(input?: { apiKey?: string }): Promise<HedraCredits> {
   // Hedra exposes the balance at /billing/credits ({ remaining, expiring, used,
   // workspace_credits }), not /credits.
-  return hedra<HedraCredits>("/billing/credits");
+  return hedra<HedraCredits>("/billing/credits", { apiKey: input?.apiKey });
 }
 
 export function listVoices(): Promise<HedraVoice[]> {

@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { createDecipheriv } from "node:crypto";
 import { LLMError } from "@/lib/llm/errors";
 import type { LLMCapabilities, LLMConfig, LLMProvider, LLMTask } from "@/lib/llm/types";
 
@@ -11,6 +12,7 @@ export const DEFAULT_MAX_TOKENS = 32000;
 export const DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434";
 
 const PROVIDERS = new Set<LLMProvider>(["anthropic", "openai", "openai-compatible", "xai", "ollama", "gemini"]);
+const DESKTOP_SECRET_PREFIX = "kpenc:v1:";
 
 export const LLM_TASKS: readonly LLMTask[] = [
   "gather",
@@ -80,6 +82,31 @@ function trimBaseUrl(value: string | undefined): string | undefined {
   return trim(value)?.replace(/\/+$/, "");
 }
 
+function decryptDesktopSecret(value: string | undefined, env: Env): string | undefined {
+  const raw = trim(value);
+  if (!raw) return undefined;
+  if (!raw.startsWith(DESKTOP_SECRET_PREFIX)) return raw;
+  const keyText = trim(env.KINGS_PRESS_DESKTOP_SETTINGS_KEY);
+  if (!keyText) return undefined;
+  try {
+    const payload = raw.slice(DESKTOP_SECRET_PREFIX.length);
+    const [nonceText, ciphertextText] = payload.split(":");
+    if (!nonceText || !ciphertextText) return undefined;
+    const key = Buffer.from(keyText, "base64");
+    const nonce = Buffer.from(nonceText, "base64");
+    const encrypted = Buffer.from(ciphertextText, "base64");
+    if (key.length !== 32 || nonce.length !== 12 || encrypted.length < 17) return undefined;
+    const tag = encrypted.subarray(encrypted.length - 16);
+    const ciphertext = encrypted.subarray(0, encrypted.length - 16);
+    const decipher = createDecipheriv("aes-256-gcm", key, nonce);
+    decipher.setAuthTag(tag);
+    const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
+    return trim(decrypted);
+  } catch {
+    return undefined;
+  }
+}
+
 function taskEnvKey(task: LLMTask): string {
   return task.replace(/[A-Z]/g, (c) => `_${c}`).toUpperCase();
 }
@@ -102,7 +129,7 @@ function readDesktopLLMSettings(env: Env): DesktopLLMSettings | null {
       : undefined;
     const model = typeof parsed.model === "string" ? trim(parsed.model) : undefined;
     const baseUrl = typeof parsed.baseUrl === "string" ? trimBaseUrl(parsed.baseUrl) : undefined;
-    const apiKey = typeof parsed.apiKey === "string" ? trim(parsed.apiKey) : undefined;
+    const apiKey = typeof parsed.apiKey === "string" ? decryptDesktopSecret(parsed.apiKey, env) : undefined;
     const profiles = Array.isArray(parsed.profiles)
       ? parsed.profiles
           .map((p): DesktopLLMProfile | null => {
@@ -120,7 +147,7 @@ function readDesktopLLMSettings(env: Env): DesktopLLMSettings | null {
               provider: profileProvider,
               model: profileModel,
               baseUrl: typeof raw.baseUrl === "string" ? trimBaseUrl(raw.baseUrl) : undefined,
-              apiKey: typeof raw.apiKey === "string" ? trim(raw.apiKey) : undefined,
+              apiKey: typeof raw.apiKey === "string" ? decryptDesktopSecret(raw.apiKey, env) : undefined,
             };
           })
           .filter((p): p is DesktopLLMProfile => !!p)

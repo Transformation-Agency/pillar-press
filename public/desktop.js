@@ -39,6 +39,7 @@
     pullOllamaModel: (model) => invoke("pull_ollama_model", { model }),
     saveModelChoice: (model) => invoke("save_model_choice", { model }),
     saveLLMSettings: (settings) => invoke("save_llm_settings", { settings }),
+    saveMediaProviderKey: (provider, apiKey, options) => invoke("save_media_provider_key", { args: { provider, apiKey, baseUrl: options && options.baseUrl } }),
     getModelChoice: () => invoke("get_model_choice"),
     initLocalDatabase: () => invoke("init_local_database"),
     createLocalBackup: () => invoke("create_local_backup"),

@@ -18,6 +18,20 @@ function loadBrowserRuntime() {
   return window.KP_CONVERSATIONAL_ONBOARDING as any;
 }
 
+function loadBrowserConversation() {
+  const runtimeSource = readFileSync(new URL("../public/onboarding-runtime.js", import.meta.url), "utf8");
+  const conversationSource = readFileSync(new URL("../public/onboarding-conversation.js", import.meta.url), "utf8");
+  const window = {
+    KP_ONBOARDING_COPY: {
+      FIRST_PLATFORM_QUESTION: "Where do you communicate most?",
+      AUDIO_INTRO_COPY_VERSION: "test-copy-v1",
+    },
+  } as Record<string, unknown>;
+  runInNewContext(runtimeSource, { window, Date });
+  runInNewContext(conversationSource, { window, Date });
+  return window.KP_ONBOARDING_CONVERSATION as any;
+}
+
 function createTestWindow() {
   const listeners: Record<string, Array<(event: any) => void>> = {};
   const window = {
@@ -473,6 +487,101 @@ describe("browser onboarding runtime contract", () => {
       expect(conversation.suggestions.length).toBeGreaterThan(0);
       expect(["idle", "speaking", "listening", "thinking"]).toContain(conversation.motionState);
     }
+  });
+});
+
+describe("browser onboarding conversation controller", () => {
+  it("initializes at one active voice setup question", () => {
+    const conversation = loadBrowserConversation();
+    const state = conversation.createState();
+
+    expect(state.currentSlot).toBe("voice_setup");
+    expect(conversation.promptForStep("connect", state)).toMatchObject({
+      slotId: "voice_setup",
+      question: "Can I help you set up voice?",
+      answered: false,
+    });
+  });
+
+  it("records a natural-language platform answer and advances deterministically", () => {
+    const conversation = loadBrowserConversation();
+    let state = conversation.createState();
+
+    state = conversation.captureAnswer(state, conversation.SLOT_IDS.VOICE_SETUP, "yes, use OpenAI", "typed");
+    state = conversation.captureAnswer(state, conversation.SLOT_IDS.INTRO_CONSENT, "skip", "button");
+    state = conversation.captureAnswer(state, conversation.SLOT_IDS.COMMUNICATION_PLATFORMS, "Mostly LinkedIn and Substack", "typed");
+
+    expect(state.slots.communication_platforms).toMatchObject({
+      status: "answered",
+      inputMethod: "typed",
+      answerLength: "Mostly LinkedIn and Substack".length,
+      answerPreview: "Mostly LinkedIn and Substack",
+    });
+    expect(state.currentSlot).toBe("voice_profile");
+    const metric = conversation.metricForAnswer(conversation.SLOT_IDS.COMMUNICATION_PLATFORMS, "typed");
+    expect(metric).toMatchObject({
+      stepId: "focus",
+      answerKind: "communication_platforms",
+      conversational: true,
+      answerAccepted: true,
+    });
+    expect(metric).not.toHaveProperty("answerPreview");
+  });
+
+  it("does not advance on blank input", () => {
+    const conversation = loadBrowserConversation();
+    const state = conversation.createState();
+    const next = conversation.captureAnswer(state, conversation.SLOT_IDS.VOICE_SETUP, "   ", "typed");
+
+    expect(next.currentSlot).toBe("voice_setup");
+    expect(next.slots.voice_setup.status).toBe("empty");
+  });
+
+  it("keeps typed and voice answers semantically equivalent", () => {
+    const conversation = loadBrowserConversation();
+    const typed = conversation.captureAnswer(
+      conversation.createState(),
+      conversation.SLOT_IDS.COMMUNICATION_PLATFORMS,
+      "LinkedIn",
+      "typed",
+    );
+    const voice = conversation.captureAnswer(
+      conversation.createState(),
+      conversation.SLOT_IDS.COMMUNICATION_PLATFORMS,
+      "LinkedIn",
+      "voice",
+    );
+
+    expect(typed.slots.communication_platforms.status).toBe(voice.slots.communication_platforms.status);
+    expect(typed.slots.communication_platforms.answerLength).toBe(voice.slots.communication_platforms.answerLength);
+    expect(typed.slots.communication_platforms.inputMethod).toBe("typed");
+    expect(voice.slots.communication_platforms.inputMethod).toBe("voice");
+  });
+
+  it("exposes one prompt for each conversational setup step", () => {
+    const conversation = loadBrowserConversation();
+    const state = conversation.createState();
+
+    expect(conversation.promptForStep("focus", state)).toMatchObject({
+      slotId: "communication_platforms",
+      question: "Where do you communicate most?",
+      progressText: "0 of 2 setup answers captured",
+    });
+    expect(conversation.promptForStep("preferences", state)).toMatchObject({
+      slotId: "voice_profile",
+      answerKind: "voice_profile",
+    });
+  });
+
+  it("never grants unsafe permissions", () => {
+    const conversation = loadBrowserConversation();
+
+    expect(conversation.safePermissions()).toEqual({
+      mayUseSavedMemory: false,
+      mayUseUploadedVoiceExamples: false,
+      mayUseWebResearch: false,
+      mayPublishOrSend: false,
+    });
   });
 });
 

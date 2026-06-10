@@ -21,6 +21,50 @@ const ONBOARDING_PROFILE = window.KP_ONBOARDING_PROFILE || {
   applyProfileToPreferences: (_profile, draft) => Object.assign({}, draft || {}),
   draftStyleForProfile: () => "Polished",
 };
+const ONBOARDING_CONVERSATION = window.KP_ONBOARDING_CONVERSATION || {
+  SLOT_IDS: {
+    VOICE_SETUP: "voice_setup",
+    INTRO_CONSENT: "intro_consent",
+    COMMUNICATION_PLATFORMS: "communication_platforms",
+    VOICE_PROFILE: "voice_profile",
+  },
+  createState: () => ({ slots: {}, currentSlot: "voice_setup" }),
+  promptForStep: (stepId) => stepId === "connect"
+    ? {
+      slotId: "voice_setup",
+      question: "Can I help you set up voice?",
+      helper: "Voice lets you speak setup answers, dictate drafts, and hear work read aloud.",
+      placeholder: "Type yes, no, or ask how to get a key.",
+      actionLabel: "Use answer",
+      progressText: "",
+    }
+    : stepId === "preferences"
+    ? {
+      slotId: "voice_profile",
+      question: "Tell me how this desk should sound for you.",
+      helper: "Say who you are, who you write for, and how much polish you want.",
+      placeholder: "e.g. Clear, useful, direct.",
+      actionLabel: "Use for defaults",
+      progressText: "",
+    }
+    : {
+      slotId: "communication_platforms",
+      question: ONBOARDING_COPY.FIRST_PLATFORM_QUESTION || "Where do you communicate most?",
+      helper: "Answer naturally. I will turn this into setup defaults.",
+      placeholder: "e.g. LinkedIn, Substack, scripts, and book chapters.",
+      actionLabel: "Capture answer",
+      progressText: "",
+    },
+  captureAnswer: (state) => state || {},
+  skipSlot: (state) => state || {},
+  metricForAnswer: (slotId, inputMethod) => ({
+    stepId: slotId === "voice_profile" ? "preferences" : "focus",
+    inputMethod: inputMethod || "typed",
+    answerKind: slotId || "setup_answer",
+    conversational: true,
+    answerAccepted: true,
+  }),
+};
 const ONBOARDING_STEPS = (ONBOARDING_RUNTIME && ONBOARDING_RUNTIME.steps) || [
   { id: "connect", label: "Connect" },
   { id: "welcome", label: "Welcome" },
@@ -198,6 +242,7 @@ function SetupShell({ children, conversation, mode, onModeChange, actionResults,
 
 function SetupAnswerComposer({
   question,
+  helper,
   value,
   onChange,
   onSubmit,
@@ -212,6 +257,7 @@ function SetupAnswerComposer({
     <div className="kp-answer-composer">
       <label>
         <span>{question}</span>
+        {helper && <p className="kp-answer-helper">{helper}</p>}
         <textarea
           className="kp-setup-input"
           value={value}
@@ -556,27 +602,126 @@ function InlineModelSetup({ status, onSaved }) {
   );
 }
 
-function InlineVoiceSetup({ status, audioState, onConnect }) {
+function InlineVoiceSetup({ status, audioState, onConnect, onLLMSaved }) {
+  const desktop = window.KINGS_DESKTOP;
+  const hasDesktop = !!(desktop && desktop.isDesktop && desktop.isDesktop());
+  const [provider, setProvider] = React.useState("openai");
   const [apiKey, setApiKey] = React.useState("");
   const [message, setMessage] = React.useState("");
   const [busy, setBusy] = React.useState(false);
+  const [helpOpen, setHelpOpen] = React.useState(false);
   const connected = audioState === "audio_ready";
+  const providerLabels = {
+    openai: "OpenAI",
+    elevenlabs: "ElevenLabs",
+    hedra: "Hedra",
+  };
+  const helpCopy = {
+    openai: {
+      title: "OpenAI is the simplest first key.",
+      body: "Create a key in the OpenAI platform dashboard. Use it here for speech features, and King's Press can also use it as the starter LLM for the rest of onboarding.",
+      url: "https://platform.openai.com/api-keys",
+    },
+    elevenlabs: {
+      title: "ElevenLabs is for polished text-to-speech.",
+      body: "Create an API key in ElevenLabs when you want higher-quality read-aloud voices for drafts, revisions, and outputs.",
+      url: "https://elevenlabs.io/app/settings/api-keys",
+    },
+    hedra: {
+      title: "Hedra is for avatar and video generation.",
+      body: "Use Hedra when you want image, video, or talking-avatar production. It is helpful later in Studio, but it is not required for speech-to-text setup.",
+      url: "https://www.hedra.com/",
+    },
+  };
+
+  const profileIdFor = (profile) =>
+    String([profile.provider, profile.baseUrl || "", profile.model].join("-"))
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 80) || "llm-profile";
+
+  async function saveOpenAIAsStarterLLM() {
+    if (!hasDesktop || !desktop.saveLLMSettings) {
+      setMessage("OpenAI key works. Open the desktop app to save it as your starter model.");
+      return;
+    }
+    const profile = {
+      id: "openai-starter-gpt-4o-mini",
+      label: "OpenAI / ChatGPT gpt-4o-mini",
+      provider: "openai",
+      model: "gpt-4o-mini",
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: apiKey.trim(),
+    };
+    profile.id = profileIdFor(profile);
+    const taskDefaults = Object.fromEntries(["gather", "weave", "draft", "review", "revision", "outputs", "utility", "mediaPrompt", "file"].map((task) => [task, profile.id]));
+    await desktop.saveLLMSettings({
+      provider: profile.provider,
+      model: profile.model,
+      baseUrl: profile.baseUrl,
+      apiKey: profile.apiKey,
+      profiles: [profile],
+      defaultProfileId: profile.id,
+      taskDefaults,
+    });
+    if (onLLMSaved) onLLMSaved(profile);
+    if (window.KP_ONBOARDING_ACTIONS && window.KP_ONBOARDING_ACTIONS.notifyProviderSetupSaved) {
+      window.KP_ONBOARDING_ACTIONS.notifyProviderSetupSaved({ profile });
+    }
+  }
+
+  async function saveVoiceProviderKey() {
+    if (!hasDesktop || !desktop.saveMediaProviderKey) return false;
+    const desktopProvider = provider === "elevenlabs" ? "elevenlabs" : provider === "hedra" ? "hedra" : "openai";
+    await desktop.saveMediaProviderKey(desktopProvider, apiKey.trim(), {
+      baseUrl: provider === "openai" ? "https://api.openai.com/v1" : undefined,
+    });
+    return true;
+  }
 
   async function testVoiceKey() {
     setBusy(true);
-    setMessage("Checking ElevenLabs.");
+    setMessage("Checking " + providerLabels[provider] + ".");
     try {
-      const response = await fetch("/api/eleven/voices", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ apiKey: apiKey.trim() }),
-      });
+      let response;
+      if (provider === "openai") {
+        response = await fetch("/api/llm/test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ provider: "openai", model: "gpt-4o-mini", apiKey: apiKey.trim() }),
+        });
+      } else if (provider === "hedra") {
+        response = await fetch("/api/hedra/credits", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ apiKey: apiKey.trim() }),
+        });
+      } else {
+        response = await fetch("/api/eleven/voices", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ apiKey: apiKey.trim() }),
+        });
+      }
       const body = await response.json().catch(() => null);
-      if (!response.ok) throw new Error((body && body.error) || "Could not reach ElevenLabs.");
-      const count = body && Array.isArray(body.voices) ? body.voices.length : 0;
-      setMessage(count ? "Voice key works. " + count + " voices available." : "Voice key works, but no voices were returned.");
+      if (!response.ok) throw new Error((body && body.error) || "Could not reach " + providerLabels[provider] + ".");
+      if (provider === "openai") {
+        await saveOpenAIAsStarterLLM();
+        await saveVoiceProviderKey();
+        setMessage("OpenAI key works. I saved it encrypted for voice, setup, and drafting.");
+      } else if (provider === "hedra") {
+        const saved = await saveVoiceProviderKey();
+        setMessage(saved ? "Hedra key works and was saved encrypted for Studio." : "Hedra key works. Open the desktop app to save it for Studio.");
+      } else {
+        const count = body && Array.isArray(body.voices) ? body.voices.length : 0;
+        const saved = await saveVoiceProviderKey();
+        setMessage(saved
+          ? "ElevenLabs key works and was saved encrypted. " + count + " voices available."
+          : count ? "ElevenLabs key works. " + count + " voices available." : "ElevenLabs key works, but no voices were returned.");
+      }
     } catch (error) {
-      setMessage((error && error.message) || "Could not test the voice key.");
+      setMessage((error && error.message) || "Could not test this key.");
     } finally {
       setBusy(false);
     }
@@ -587,23 +732,47 @@ function InlineVoiceSetup({ status, audioState, onConnect }) {
       <div className="kp-inline-voice-head">
         <span aria-hidden="true" className="kp-inline-model-icon"><Icon name="mic" size={25} /></span>
         <div>
-          <h3>Voice</h3>
-          <p>Connect a microphone for voice input, and add ElevenLabs if you want spoken drafts.</p>
+          <p className="kp-inline-step-label">First question</p>
+          <h3>Can I help you set up voice?</h3>
+          <p>Voice lets you speak setup answers, dictate drafts, and hear work read aloud. OpenAI is the easiest first key because it can also power the rest of setup.</p>
         </div>
         <SetupStatusChip label={connected ? "Connected" : "Optional"} />
       </div>
       <div className="kp-inline-voice-controls">
         <label>
-          <span>ElevenLabs API key</span>
-          <input className="kp-setup-input" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Paste your voice API key" />
+          <span>Voice provider</span>
+          <select className="kp-setup-input" value={provider} onChange={(event) => {
+            setProvider(event.target.value);
+            setMessage("");
+          }}>
+            <option value="openai">OpenAI voice + setup LLM</option>
+            <option value="elevenlabs">ElevenLabs TTS</option>
+            <option value="hedra">Hedra video/avatar</option>
+          </select>
+        </label>
+        <label>
+          <span>{providerLabels[provider]} API key</span>
+          <input className="kp-setup-input" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Paste your API key" />
         </label>
         <div className="kp-inline-voice-actions">
-          <button className="kp-setup-outline" type="button" disabled={busy || !apiKey.trim()} onClick={testVoiceKey}>Test voice</button>
+          <button className="kp-setup-outline" type="button" onClick={() => setHelpOpen((value) => !value)}>
+            {helpOpen ? "Hide help" : "Get a key"}
+          </button>
+          <button className="kp-setup-outline" type="button" disabled={busy || !apiKey.trim()} onClick={testVoiceKey}>
+            {busy ? "Testing" : provider === "openai" ? "Test + use" : "Test key"}
+          </button>
           <button className="kp-setup-outline" type="button" disabled={audioState === "requesting_microphone"} onClick={onConnect}>
             {audioState === "requesting_microphone" ? "Connecting" : "Connect mic"}
           </button>
         </div>
       </div>
+      {helpOpen && (
+        <div className="kp-inline-provider-help">
+          <strong>{helpCopy[provider].title}</strong>
+          <p>{helpCopy[provider].body}</p>
+          <a href={helpCopy[provider].url} target="_blank" rel="noreferrer">Open provider instructions</a>
+        </div>
+      )}
       {message && <p className="kp-inline-model-message" role="status">{message}</p>}
     </div>
   );
@@ -698,6 +867,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
   const [setupProfileDraft, setSetupProfileDraft] = React.useState(null);
   const [profileBusy, setProfileBusy] = React.useState(false);
   const [focusActivation, setFocusActivation] = React.useState(null);
+  const [conversationState, setConversationState] = React.useState(() => ONBOARDING_CONVERSATION.createState());
   const transcriptHandlerRef = React.useRef(null);
   const listenSessionRef = React.useRef(null);
   const setupStartedAtRef = React.useRef(Date.now());
@@ -748,6 +918,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     setupStartedAtRef.current = Date.now();
     metricsSessionIdRef.current = createSetupSessionId();
     lastStepMetricRef.current = null;
+    setConversationState(ONBOARDING_CONVERSATION.createState());
     recordMetric(ONBOARDING_METRIC_EVENTS.STARTED, { stepId: "connect" });
     const refs = window.Store.activeReferences ? window.Store.activeReferences() : {};
     const throughline = refs.strategy && refs.strategy.throughlines && refs.strategy.throughlines[0];
@@ -805,6 +976,8 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
   const conversation = ONBOARDING_RUNTIME && ONBOARDING_RUNTIME.getStepConversation
     ? ONBOARDING_RUNTIME.getStepConversation(currentStep.id)
     : { id: currentStep.id, label: currentStep.label, messages: [], suggestions: [], motionState: "idle" };
+  const focusPrompt = ONBOARDING_CONVERSATION.promptForStep("focus", conversationState);
+  const preferencesPrompt = ONBOARDING_CONVERSATION.promptForStep("preferences", conversationState);
   const providerConnected = !!(providerStatus && providerStatus.provider && providerStatus.model);
   const voiceConnected = audioState === "audio_ready";
   const connectRows = ONBOARDING_RUNTIME
@@ -849,6 +1022,12 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     setSetupAnswer(clean);
     setSetupTranscript(clean);
     setPlatformAnswerCaptured(true);
+    setConversationState((current) => ONBOARDING_CONVERSATION.captureAnswer(
+      current,
+      ONBOARDING_CONVERSATION.SLOT_IDS.COMMUNICATION_PLATFORMS,
+      clean,
+      inputMethod || "typed",
+    ));
     const profile = ONBOARDING_PROFILE.buildProfileDraft({
       transcript: clean,
       currentDraft: setupProfileDraft,
@@ -872,13 +1051,10 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     } else if (!campaignName.trim()) {
       setCampaignName(focusName || "First focus");
     }
-    recordMetric(ONBOARDING_METRIC_EVENTS.ANSWER_CAPTURED, {
-      stepId: "focus",
-      inputMethod: inputMethod || "typed",
-      answerKind: "communication_platforms",
-      conversational: true,
-      answerAccepted: true,
-    });
+    recordMetric(
+      ONBOARDING_METRIC_EVENTS.ANSWER_CAPTURED,
+      ONBOARDING_CONVERSATION.metricForAnswer(ONBOARDING_CONVERSATION.SLOT_IDS.COMMUNICATION_PLATFORMS, inputMethod || "typed"),
+    );
     return { focusName };
   }
 
@@ -929,19 +1105,32 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
         recordAction(ONBOARDING_ACTIONS.EXTRACT_SETUP_PROFILE, ONBOARDING_ACTION_STATUSES.SUCCEEDED, { data: { fallback: "local" } });
       }
       mergeProfileIntoPreferences(profile);
-      recordMetric(ONBOARDING_METRIC_EVENTS.ANSWER_CAPTURED, {
-        stepId: "preferences",
-        inputMethod: inputMethod || "typed",
-        answerKind: "voice_profile",
-        conversational: true,
-        answerAccepted: true,
-      });
+      setConversationState((current) => ONBOARDING_CONVERSATION.captureAnswer(
+        current,
+        ONBOARDING_CONVERSATION.SLOT_IDS.VOICE_PROFILE,
+        clean,
+        inputMethod || "typed",
+      ));
+      recordMetric(
+        ONBOARDING_METRIC_EVENTS.ANSWER_CAPTURED,
+        ONBOARDING_CONVERSATION.metricForAnswer(ONBOARDING_CONVERSATION.SLOT_IDS.VOICE_PROFILE, inputMethod || "typed"),
+      );
     } catch (e) {
       const profile = ONBOARDING_PROFILE.buildProfileDraft({
         transcript: clean,
         currentDraft: setupProfileDraft,
       });
       mergeProfileIntoPreferences(profile);
+      setConversationState((current) => ONBOARDING_CONVERSATION.captureAnswer(
+        current,
+        ONBOARDING_CONVERSATION.SLOT_IDS.VOICE_PROFILE,
+        clean,
+        inputMethod || "typed",
+      ));
+      recordMetric(
+        ONBOARDING_METRIC_EVENTS.ANSWER_CAPTURED,
+        ONBOARDING_CONVERSATION.metricForAnswer(ONBOARDING_CONVERSATION.SLOT_IDS.VOICE_PROFILE, inputMethod || "typed"),
+      );
       recordAction(ONBOARDING_ACTIONS.EXTRACT_SETUP_PROFILE, ONBOARDING_ACTION_STATUSES.FAILED, {
         error: (e && e.message) || "Could not interpret setup answer. I kept your text for manual editing.",
       });
@@ -950,11 +1139,17 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     }
   }
 
-  function handleIntroConsentAnswer(text) {
+  function handleIntroConsentAnswer(text, inputMethod) {
     const clean = String(text || "").trim();
     if (!clean) return;
     setIntroAnswer(clean);
     setSetupTranscript(clean);
+    setConversationState((current) => ONBOARDING_CONVERSATION.captureAnswer(
+      current,
+      ONBOARDING_CONVERSATION.SLOT_IDS.INTRO_CONSENT,
+      clean,
+      inputMethod || "typed",
+    ));
     const consent = ONBOARDING_AUDIO.classifyIntroConsent
       ? ONBOARDING_AUDIO.classifyIntroConsent(clean)
       : "unclear";
@@ -974,7 +1169,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     const clean = String(text || "").trim();
     if (!clean) return;
     if (step === 1 && !introVisible) {
-      handleIntroConsentAnswer(clean);
+      handleIntroConsentAnswer(clean, "voice");
       return;
     }
     if (step === 2) {
@@ -1082,6 +1277,12 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
   }
 
   async function introduce() {
+    setConversationState((current) => ONBOARDING_CONVERSATION.captureAnswer(
+      current,
+      ONBOARDING_CONVERSATION.SLOT_IDS.INTRO_CONSENT,
+      "yes",
+      "button",
+    ));
     setIntroVisible(true);
     recordAction(ONBOARDING_ACTIONS.PLAY_INTRO, ONBOARDING_ACTION_STATUSES.PENDING);
     if (voiceConnected) {
@@ -1735,6 +1936,12 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
         .kp-answer-composer label > span {
           font: 20px var(--font-serif);
         }
+        .kp-answer-helper {
+          margin: -4px 0 2px;
+          color: #766A63;
+          font-size: 14.5px;
+          line-height: 1.4;
+        }
         .kp-answer-actions {
           display: flex;
           flex-wrap: wrap;
@@ -1850,22 +2057,27 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
               Let's set up your desk
             </h1>
             <p style={{ margin: "22px 0 42px", color: "#766A63", fontSize: 21, lineHeight: 1.5 }}>
-              Choose what to connect now. You can skip anything and change it later.
+              First, decide whether you want to speak your answers. Then choose the model King's Press can use to help finish setup.
             </p>
             <section style={{
               border: "1px solid #D8CEC3", borderRadius: 10, background: "rgba(255, 252, 246, 0.68)",
               overflow: "hidden",
             }}>
+              <InlineVoiceSetup
+                status={providerStatus}
+                audioState={audioState}
+                onConnect={connectAudio}
+                onLLMSaved={(profile) => setProviderStatus((current) => Object.assign({}, current || {}, {
+                  provider: profile && profile.provider,
+                  model: profile && profile.model,
+                }))}
+              />
               <InlineModelSetup
                 status={providerStatus}
                 onSaved={(profile) => setProviderStatus((current) => Object.assign({}, current || {}, {
                   provider: profile && profile.provider,
                   model: profile && profile.model,
                 }))}
-              />
-              <InlineVoiceSetup
-                audioState={audioState}
-                onConnect={connectAudio}
               />
               {connectRows.filter((item) => item.id !== "models" && item.id !== "voice").map((item) => (
                 <SetupPanelRow
@@ -1929,6 +2141,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
                       Yes, introduce yourself
                     </button>
                     <button className="kp-setup-link" onClick={() => {
+                      setConversationState((current) => ONBOARDING_CONVERSATION.skipSlot(current, ONBOARDING_CONVERSATION.SLOT_IDS.INTRO_CONSENT));
                       recordAction(ONBOARDING_ACTIONS.SKIP_INTRO, ONBOARDING_ACTION_STATUSES.SKIPPED);
                       goToStep(2);
                     }}>Skip for now</button>
@@ -1943,6 +2156,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
                   <div style={{ marginTop: 42, display: "grid", justifyItems: "center", gap: 18 }}>
                     <button className="kp-setup-primary" onClick={() => goToStep(2)}>Continue <Icon name="arrowR" size={22} /></button>
                     <button className="kp-setup-link" onClick={() => {
+                      setConversationState((current) => ONBOARDING_CONVERSATION.skipSlot(current, ONBOARDING_CONVERSATION.SLOT_IDS.INTRO_CONSENT));
                       recordAction(ONBOARDING_ACTIONS.SKIP_INTRO, ONBOARDING_ACTION_STATUSES.SKIPPED);
                       goToStep(2);
                     }}>Skip for now</button>
@@ -1962,15 +2176,16 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
               Your first focus helps organize drafts, sources, Gather runs, and notes in one place.
             </p>
             <SetupAnswerComposer
-              question={ONBOARDING_COPY.FIRST_PLATFORM_QUESTION || "Where do you communicate most?"}
+              question={focusPrompt && focusPrompt.question}
+              helper={focusPrompt && focusPrompt.helper}
               value={setupAnswer}
               onChange={setSetupAnswer}
               onSubmit={() => applyPlatformAnswer(setupAnswer, "typed")}
               onListen={listenForAnswer}
               listening={listening}
               transcript={platformAnswerCaptured ? setupTranscript : ""}
-              placeholder="e.g. LinkedIn, Substack, scripts, and book chapters."
-              actionLabel="Capture answer"
+              placeholder={focusPrompt && focusPrompt.placeholder}
+              actionLabel={focusPrompt && focusPrompt.actionLabel}
             />
             {platformAnswerCaptured && (
               <p style={{ margin: "14px 0 0", color: "#5E7A46", fontSize: 15 }}>
@@ -2008,6 +2223,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
             <SetupActions
               secondary="Skip for now"
               onSecondary={() => {
+                setConversationState((current) => ONBOARDING_CONVERSATION.skipSlot(current, ONBOARDING_CONVERSATION.SLOT_IDS.COMMUNICATION_PLATFORMS));
                 recordAction(ONBOARDING_ACTIONS.SKIP_FOCUS, ONBOARDING_ACTION_STATUSES.SKIPPED);
                 goToStep(3);
               }}
@@ -2036,14 +2252,15 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
               Start with the basics. You can refine everything later.
             </p>
             <SetupAnswerComposer
-              question="Tell me how this desk should sound for you."
+              question={preferencesPrompt && preferencesPrompt.question}
+              helper={preferencesPrompt && preferencesPrompt.helper}
               value={profileAnswer}
               onChange={setProfileAnswer}
               onListen={listenForAnswer}
               listening={listening}
               disabled={profileBusy}
               transcript={step === 3 ? setupTranscript : ""}
-              placeholder="e.g. Clear, useful, direct. I write for independent operators and want drafts that preserve my point of view."
+              placeholder={preferencesPrompt && preferencesPrompt.placeholder}
               actionLabel={profileBusy ? "Interpreting" : "Use for defaults"}
               onSubmit={() => interpretProfileAnswer(profileAnswer, "typed")}
             />
@@ -2157,7 +2374,10 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
             </section>
             <SetupActions
               secondary="Do this later"
-              onSecondary={() => finish({ skipPreferences: true })}
+              onSecondary={() => {
+                setConversationState((current) => ONBOARDING_CONVERSATION.skipSlot(current, ONBOARDING_CONVERSATION.SLOT_IDS.VOICE_PROFILE));
+                finish({ skipPreferences: true });
+              }}
               primary="Finish setup"
               onPrimary={() => finish()}
               busy={busy}

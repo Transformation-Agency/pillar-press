@@ -9,6 +9,7 @@ commands.allow = [
   "pull_ollama_model",
   "save_model_choice",
   "save_llm_settings",
+  "save_media_provider_key",
   "get_model_choice",
   "init_local_database",
   "create_local_backup",

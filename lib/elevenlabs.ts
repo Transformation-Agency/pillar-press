@@ -9,6 +9,8 @@
  * audio_asset_id into hedra.generateAsset for an avatar/lip-synced video.
  */
 
+import { desktopMediaProvider } from "@/lib/desktopSettings";
+
 const ELEVEN_BASE = "https://api.elevenlabs.io/v1";
 
 export class ElevenError extends Error {
@@ -19,7 +21,7 @@ export class ElevenError extends Error {
 }
 
 function apiKey(override?: string): string {
-  const k = override || process.env.ELEVENLABS_API_KEY;
+  const k = override || process.env.ELEVENLABS_API_KEY || desktopMediaProvider("elevenlabs")?.apiKey;
   if (!k) throw new ElevenError(500, "config", "Missing ELEVENLABS_API_KEY in server environment.");
   return k;
 }

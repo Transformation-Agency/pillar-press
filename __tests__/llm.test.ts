@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createCipheriv } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -8,6 +9,17 @@ import { geminiProvider } from "@/lib/llm/providers/gemini";
 import { openAICompatibleProvider } from "@/lib/llm/providers/openaiCompatible";
 import { ollamaProvider } from "@/lib/llm/providers/ollama";
 import { toErrorResponse } from "@/lib/errors";
+
+function encryptDesktopSecret(value: string, keyText = Buffer.alloc(32, 7).toString("base64")) {
+  const key = Buffer.from(keyText, "base64");
+  const nonce = Buffer.alloc(12, 3);
+  const cipher = createCipheriv("aes-256-gcm", key, nonce);
+  const ciphertext = Buffer.concat([cipher.update(value, "utf8"), cipher.final(), cipher.getAuthTag()]);
+  return {
+    keyText,
+    encrypted: `kpenc:v1:${nonce.toString("base64")}:${ciphertext.toString("base64")}`,
+  };
+}
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -171,6 +183,43 @@ describe("LLM config", () => {
         apiKey: "xai-secret",
         baseUrl: "https://api.x.ai/v1",
       });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("decrypts encrypted desktop provider keys with the runtime desktop key", () => {
+    const dir = mkdtempSync(join(tmpdir(), "kings-press-llm-"));
+    const settingsPath = join(dir, "desktop-settings.json");
+    const secret = encryptDesktopSecret("sk-encrypted-openai");
+    writeFileSync(settingsPath, JSON.stringify({
+      profiles: [{
+        id: "draft-cloud",
+        label: "Draft ChatGPT",
+        provider: "openai",
+        model: "gpt-4o-mini",
+        apiKey: secret.encrypted,
+      }],
+      defaultProfileId: "draft-cloud",
+    }));
+    try {
+      const cfg = resolveMainLLMConfig({
+        KINGS_PRESS_LOCAL_FIRST: "true",
+        KINGS_PRESS_LLM_SETTINGS_PATH: settingsPath,
+        KINGS_PRESS_DESKTOP_SETTINGS_KEY: secret.keyText,
+      });
+      expect(cfg).toMatchObject({
+        provider: "openai",
+        model: "gpt-4o-mini",
+        apiKey: "sk-encrypted-openai",
+      });
+      const status = publicLLMStatus({
+        KINGS_PRESS_LOCAL_FIRST: "true",
+        KINGS_PRESS_LLM_SETTINGS_PATH: settingsPath,
+        KINGS_PRESS_DESKTOP_SETTINGS_KEY: secret.keyText,
+      });
+      expect(JSON.stringify(status)).not.toContain("sk-encrypted-openai");
+      expect(JSON.stringify(status)).not.toContain(secret.encrypted);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

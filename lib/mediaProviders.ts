@@ -1,3 +1,5 @@
+import { desktopMediaProvider } from "@/lib/desktopSettings";
+
 export type MediaProviderStatus = {
   hedra: MediaProviderInfo;
   elevenlabs: MediaProviderInfo;
@@ -83,6 +85,11 @@ function audioModels(provider: string, models: string[]): MediaModelInfo[] {
 }
 
 export function getMediaProviderStatus(env: NodeJS.ProcessEnv = process.env): MediaProviderStatus {
+  const savedHedra = desktopMediaProvider("hedra", env);
+  const savedEleven = desktopMediaProvider("elevenlabs", env);
+  const savedOpenAI = desktopMediaProvider("openai", env);
+  const savedXai = desktopMediaProvider("xai", env);
+  const savedCustomImage = desktopMediaProvider("custom-image", env);
   const openaiModels = imageModels("openai", splitModels(env.MEDIA_OPENAI_IMAGE_MODELS, ["gpt-image-1"]));
   const openaiAudioModels = audioModels("openai", splitModels(env.MEDIA_OPENAI_AUDIO_MODELS, ["gpt-4o-mini-tts", "tts-1"]));
   const xaiModels = imageModels("xai", splitModels(env.MEDIA_XAI_IMAGE_MODELS, ["grok-2-image"]));
@@ -91,7 +98,7 @@ export function getMediaProviderStatus(env: NodeJS.ProcessEnv = process.env): Me
   const hedra: MediaProviderInfo = {
     id: "hedra",
     label: "Hedra",
-    configured: hasValue(env.HEDRA_API_KEY),
+    configured: hasValue(env.HEDRA_API_KEY) || hasValue(savedHedra?.apiKey),
     capabilities: ["image", "video", "avatar"],
     envVars: ["HEDRA_API_KEY"],
     models: [],
@@ -99,7 +106,7 @@ export function getMediaProviderStatus(env: NodeJS.ProcessEnv = process.env): Me
   const elevenlabs: MediaProviderInfo = {
     id: "elevenlabs",
     label: "ElevenLabs",
-    configured: hasValue(env.ELEVENLABS_API_KEY),
+    configured: hasValue(env.ELEVENLABS_API_KEY) || hasValue(savedEleven?.apiKey),
     capabilities: ["audio"],
     envVars: ["ELEVENLABS_API_KEY"],
     models: [{
@@ -117,7 +124,7 @@ export function getMediaProviderStatus(env: NodeJS.ProcessEnv = process.env): Me
   const openai: MediaProviderInfo = {
     id: "openai",
     label: "OpenAI",
-    configured: hasValue(env.MEDIA_OPENAI_API_KEY) || hasValue(env.OPENAI_API_KEY),
+    configured: hasValue(env.MEDIA_OPENAI_API_KEY) || hasValue(env.OPENAI_API_KEY) || hasValue(savedOpenAI?.apiKey),
     capabilities: ["image", "audio"],
     envVars: ["MEDIA_OPENAI_API_KEY", "OPENAI_API_KEY"],
     models: [...openaiModels, ...openaiAudioModels],
@@ -125,7 +132,7 @@ export function getMediaProviderStatus(env: NodeJS.ProcessEnv = process.env): Me
   const xai: MediaProviderInfo = {
     id: "xai",
     label: "xAI / Grok",
-    configured: hasValue(env.MEDIA_XAI_API_KEY) || hasValue(env.XAI_API_KEY),
+    configured: hasValue(env.MEDIA_XAI_API_KEY) || hasValue(env.XAI_API_KEY) || hasValue(savedXai?.apiKey),
     capabilities: ["image"],
     envVars: ["MEDIA_XAI_API_KEY", "XAI_API_KEY"],
     models: xaiModels,
@@ -133,7 +140,7 @@ export function getMediaProviderStatus(env: NodeJS.ProcessEnv = process.env): Me
   const customImage: MediaProviderInfo = {
     id: "custom-image",
     label: "Custom image endpoint",
-    configured: hasValue(env.MEDIA_IMAGE_BASE_URL) && hasValue(env.MEDIA_IMAGE_API_KEY),
+    configured: (hasValue(env.MEDIA_IMAGE_BASE_URL) && hasValue(env.MEDIA_IMAGE_API_KEY)) || (hasValue(savedCustomImage?.baseUrl) && hasValue(savedCustomImage?.apiKey)),
     capabilities: ["image"],
     envVars: ["MEDIA_IMAGE_BASE_URL", "MEDIA_IMAGE_API_KEY", "MEDIA_IMAGE_MODELS"],
     models: customModels,
@@ -151,18 +158,21 @@ export function getMediaProviderStatus(env: NodeJS.ProcessEnv = process.env): Me
 
 export function getImageProviderConfig(provider: string | undefined, env: NodeJS.ProcessEnv = process.env): ImageProviderConfig | null {
   if (provider === "openai") {
-    const apiKey = (env.MEDIA_OPENAI_API_KEY || env.OPENAI_API_KEY || "").trim();
+    const saved = desktopMediaProvider("openai", env);
+    const apiKey = (env.MEDIA_OPENAI_API_KEY || env.OPENAI_API_KEY || saved?.apiKey || "").trim();
     if (!apiKey) return null;
-    return { provider: "openai", apiKey, baseUrl: (env.MEDIA_OPENAI_BASE_URL || "https://api.openai.com/v1").replace(/\/$/, "") };
+    return { provider: "openai", apiKey, baseUrl: (env.MEDIA_OPENAI_BASE_URL || saved?.baseUrl || "https://api.openai.com/v1").replace(/\/$/, "") };
   }
   if (provider === "xai") {
-    const apiKey = (env.MEDIA_XAI_API_KEY || env.XAI_API_KEY || "").trim();
+    const saved = desktopMediaProvider("xai", env);
+    const apiKey = (env.MEDIA_XAI_API_KEY || env.XAI_API_KEY || saved?.apiKey || "").trim();
     if (!apiKey) return null;
-    return { provider: "xai", apiKey, baseUrl: (env.MEDIA_XAI_BASE_URL || "https://api.x.ai/v1").replace(/\/$/, "") };
+    return { provider: "xai", apiKey, baseUrl: (env.MEDIA_XAI_BASE_URL || saved?.baseUrl || "https://api.x.ai/v1").replace(/\/$/, "") };
   }
   if (provider === "custom-image") {
-    const apiKey = (env.MEDIA_IMAGE_API_KEY || "").trim();
-    const baseUrl = (env.MEDIA_IMAGE_BASE_URL || "").trim().replace(/\/$/, "");
+    const saved = desktopMediaProvider("custom-image", env);
+    const apiKey = (env.MEDIA_IMAGE_API_KEY || saved?.apiKey || "").trim();
+    const baseUrl = (env.MEDIA_IMAGE_BASE_URL || saved?.baseUrl || "").trim().replace(/\/$/, "");
     if (!apiKey || !baseUrl) return null;
     return { provider: "custom-image", apiKey, baseUrl };
   }
@@ -171,9 +181,10 @@ export function getImageProviderConfig(provider: string | undefined, env: NodeJS
 
 export function getAudioProviderConfig(provider: string | undefined, env: NodeJS.ProcessEnv = process.env): AudioProviderConfig | null {
   if (provider === "openai") {
-    const apiKey = (env.MEDIA_OPENAI_API_KEY || env.OPENAI_API_KEY || "").trim();
+    const saved = desktopMediaProvider("openai", env);
+    const apiKey = (env.MEDIA_OPENAI_API_KEY || env.OPENAI_API_KEY || saved?.apiKey || "").trim();
     if (!apiKey) return null;
-    return { provider: "openai", apiKey, baseUrl: (env.MEDIA_OPENAI_BASE_URL || "https://api.openai.com/v1").replace(/\/$/, "") };
+    return { provider: "openai", apiKey, baseUrl: (env.MEDIA_OPENAI_BASE_URL || saved?.baseUrl || "https://api.openai.com/v1").replace(/\/$/, "") };
   }
   return null;
 }

@@ -1,3 +1,9 @@
+use aes_gcm::{
+    aead::{Aead, KeyInit},
+    Aes256Gcm, Nonce,
+};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use rand::RngCore;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -28,6 +34,9 @@ const MENU_OPEN_BACKUPS: &str = "open-backups-folder";
 const MENU_START_OLLAMA: &str = "start-ollama";
 const MENU_OPEN_OLLAMA_DOWNLOAD: &str = "open-ollama-download";
 const MENU_RELOAD: &str = "reload-window";
+const SECRET_PREFIX: &str = "kpenc:v1:";
+const KEYCHAIN_SERVICE: &str = "Kings Press Desktop Settings";
+const KEYCHAIN_ACCOUNT: &str = "llm-settings";
 
 #[derive(Serialize)]
 struct OllamaStatus {
@@ -50,6 +59,14 @@ struct DesktopLLMProfile {
     api_key: Option<String>,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+struct DesktopMediaProviderSettings {
+    #[serde(default, rename = "apiKey")]
+    api_key: Option<String>,
+    #[serde(default, rename = "baseUrl")]
+    base_url: Option<String>,
+}
+
 #[derive(Serialize, Deserialize)]
 struct DesktopSettings {
     #[serde(default)]
@@ -66,6 +83,17 @@ struct DesktopSettings {
     default_profile_id: Option<String>,
     #[serde(default, rename = "taskDefaults")]
     task_defaults: Option<HashMap<String, String>>,
+    #[serde(default, rename = "mediaProviders")]
+    media_providers: Option<HashMap<String, DesktopMediaProviderSettings>>,
+}
+
+#[derive(Deserialize)]
+struct SaveMediaProviderKeyArgs {
+    provider: String,
+    #[serde(default, rename = "apiKey")]
+    api_key: Option<String>,
+    #[serde(default, rename = "baseUrl")]
+    base_url: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -156,6 +184,140 @@ fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
 
 fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app_data_dir(app)?.join("desktop-settings.json"))
+}
+
+fn read_desktop_settings(app: &AppHandle) -> Result<DesktopSettings, String> {
+    let path = settings_path(app)?;
+    if !path.exists() {
+        return Ok(DesktopSettings {
+            provider: None,
+            model: None,
+            base_url: None,
+            api_key: None,
+            profiles: None,
+            default_profile_id: None,
+            task_defaults: None,
+            media_providers: None,
+        });
+    }
+    let text = fs::read_to_string(path).map_err(|e| e.to_string())?;
+    serde_json::from_str(&text).map_err(|e| e.to_string())
+}
+
+fn local_secret_key_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app_data_dir(app)?.join("desktop-secrets.key"))
+}
+
+fn random_secret_key() -> String {
+    let mut bytes = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    BASE64.encode(bytes)
+}
+
+#[cfg(target_os = "macos")]
+fn read_keychain_secret() -> Option<String> {
+    let out = Command::new("security")
+        .args([
+            "find-generic-password",
+            "-w",
+            "-s",
+            KEYCHAIN_SERVICE,
+            "-a",
+            KEYCHAIN_ACCOUNT,
+        ])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn read_keychain_secret() -> Option<String> {
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn write_keychain_secret(secret: &str) -> bool {
+    Command::new("security")
+        .args([
+            "add-generic-password",
+            "-U",
+            "-s",
+            KEYCHAIN_SERVICE,
+            "-a",
+            KEYCHAIN_ACCOUNT,
+            "-w",
+            secret,
+        ])
+        .output()
+        .map(|out| out.status.success())
+        .unwrap_or(false)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn write_keychain_secret(_secret: &str) -> bool {
+    false
+}
+
+fn desktop_secret_key(app: &AppHandle) -> Result<String, String> {
+    if let Some(secret) = read_keychain_secret() {
+        if BASE64.decode(secret.as_bytes()).map(|bytes| bytes.len() == 32).unwrap_or(false) {
+            return Ok(secret);
+        }
+    }
+
+    let local_path = local_secret_key_path(app)?;
+    if let Ok(secret) = fs::read_to_string(&local_path) {
+        let clean = secret.trim().to_string();
+        if BASE64.decode(clean.as_bytes()).map(|bytes| bytes.len() == 32).unwrap_or(false) {
+            return Ok(clean);
+        }
+    }
+
+    let secret = random_secret_key();
+    if !write_keychain_secret(&secret) {
+        fs::write(&local_path, &secret).map_err(|e| e.to_string())?;
+    }
+    Ok(secret)
+}
+
+fn encrypt_setting_secret(app: &AppHandle, value: Option<String>) -> Result<Option<String>, String> {
+    let Some(raw) = value else {
+        return Ok(None);
+    };
+    let clean = raw.trim();
+    if clean.is_empty() {
+        return Ok(None);
+    }
+    if clean.starts_with(SECRET_PREFIX) {
+        return Ok(Some(clean.to_string()));
+    }
+    let key = BASE64
+        .decode(desktop_secret_key(app)?.as_bytes())
+        .map_err(|_| "Could not decode desktop encryption key.".to_string())?;
+    if key.len() != 32 {
+        return Err("Desktop encryption key has the wrong length.".into());
+    }
+    let cipher = Aes256Gcm::new_from_slice(&key)
+        .map_err(|_| "Could not initialize desktop encryption.".to_string())?;
+    let mut nonce = [0u8; 12];
+    rand::thread_rng().fill_bytes(&mut nonce);
+    let encrypted = cipher
+        .encrypt(Nonce::from_slice(&nonce), clean.as_bytes())
+        .map_err(|_| "Could not encrypt desktop setting.".to_string())?;
+    Ok(Some(format!(
+        "{}{}:{}",
+        SECRET_PREFIX,
+        BASE64.encode(nonce),
+        BASE64.encode(encrypted)
+    )))
 }
 
 fn database_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -696,6 +858,7 @@ fn start_packaged_server(app: &AppHandle) -> Result<Option<String>, String> {
         let db_path = database_path(app)?;
         let storage_path = storage_dir(app)?;
         let settings = settings_path(app)?;
+        let desktop_settings_key = desktop_secret_key(app)?;
         init_database_at(&db_path)?;
         append_startup_log(&data_dir, "local database initialized");
 
@@ -745,6 +908,7 @@ fn start_packaged_server(app: &AppHandle) -> Result<Option<String>, String> {
             .env("KINGS_PRESS_DB_PATH", &db_path)
             .env("KINGS_PRESS_STORAGE_DIR", &storage_path)
             .env("KINGS_PRESS_LLM_SETTINGS_PATH", &settings)
+            .env("KINGS_PRESS_DESKTOP_SETTINGS_KEY", desktop_settings_key)
             .stdout(Stdio::null())
             .stderr(Stdio::null());
 
@@ -905,6 +1069,7 @@ fn save_model_choice(app: AppHandle, model: String) -> Result<(), String> {
         }]),
         default_profile_id: Some("ollama-local".into()),
         task_defaults: None,
+        media_providers: read_desktop_settings(&app).ok().and_then(|s| s.media_providers),
     };
     let json = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
     fs::write(settings_path(&app)?, json).map_err(|e| e.to_string())
@@ -914,42 +1079,40 @@ fn save_model_choice(app: AppHandle, model: String) -> Result<(), String> {
 fn save_llm_settings(app: AppHandle, settings: DesktopSettings) -> Result<(), String> {
     let provider = settings.provider.as_deref().unwrap_or("ollama").trim();
     let model = settings.model.as_deref().unwrap_or("").trim();
-    let profiles = settings
-        .profiles
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|p| {
-            let id = p.id.trim().to_string();
-            let provider = p.provider.trim().to_string();
-            let model = p.model.trim().to_string();
-            if id.is_empty() || provider.is_empty() || model.is_empty() {
-                return None;
-            }
-            Some(DesktopLLMProfile {
-                id,
-                label: p
-                    .label
+    let mut profiles = Vec::new();
+    for p in settings.profiles.unwrap_or_default() {
+        let id = p.id.trim().to_string();
+        let provider = p.provider.trim().to_string();
+        let model = p.model.trim().to_string();
+        if id.is_empty() || provider.is_empty() || model.is_empty() {
+            continue;
+        }
+        profiles.push(DesktopLLMProfile {
+            id,
+            label: p
+                .label
+                .as_deref()
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .map(str::to_string),
+            provider,
+            model,
+            base_url: p
+                .base_url
+                .as_deref()
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .map(str::to_string),
+            api_key: encrypt_setting_secret(
+                &app,
+                p.api_key
                     .as_deref()
                     .map(str::trim)
                     .filter(|v| !v.is_empty())
                     .map(str::to_string),
-                provider,
-                model,
-                base_url: p
-                    .base_url
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|v| !v.is_empty())
-                    .map(str::to_string),
-                api_key: p
-                    .api_key
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|v| !v.is_empty())
-                    .map(str::to_string),
-            })
-        })
-        .collect::<Vec<_>>();
+            )?,
+        });
+    }
     if model.is_empty() {
         if profiles.is_empty() {
             return Err("Choose a model first.".into());
@@ -975,12 +1138,12 @@ fn save_llm_settings(app: AppHandle, settings: DesktopSettings) -> Result<(), St
             .map(str::trim)
             .filter(|v| !v.is_empty())
             .map(str::to_string),
-        api_key: settings
+        api_key: encrypt_setting_secret(&app, settings
             .api_key
             .as_deref()
             .map(str::trim)
             .filter(|v| !v.is_empty())
-            .map(str::to_string),
+            .map(str::to_string))?,
         profiles: if profiles.is_empty() {
             None
         } else {
@@ -1001,8 +1164,43 @@ fn save_llm_settings(app: AppHandle, settings: DesktopSettings) -> Result<(), St
                 })
                 .collect()
         }),
+        media_providers: read_desktop_settings(&app).ok().and_then(|s| s.media_providers),
     };
     let json = serde_json::to_string_pretty(&cleaned).map_err(|e| e.to_string())?;
+    fs::write(settings_path(&app)?, json).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn save_media_provider_key(app: AppHandle, args: SaveMediaProviderKeyArgs) -> Result<(), String> {
+    let provider = args.provider.trim().to_lowercase();
+    if !["openai", "elevenlabs", "hedra", "xai", "custom-image"].contains(&provider.as_str()) {
+        return Err("Unsupported media provider.".into());
+    }
+    let api_key = args
+        .api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_string);
+    if api_key.is_none() {
+        return Err("Paste an API key first.".into());
+    }
+    let mut settings = read_desktop_settings(&app)?;
+    let mut media = settings.media_providers.unwrap_or_default();
+    media.insert(
+        provider,
+        DesktopMediaProviderSettings {
+            api_key: encrypt_setting_secret(&app, api_key)?,
+            base_url: args
+                .base_url
+                .as_deref()
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .map(str::to_string),
+        },
+    );
+    settings.media_providers = Some(media);
+    let json = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
     fs::write(settings_path(&app)?, json).map_err(|e| e.to_string())
 }
 
@@ -1012,10 +1210,7 @@ fn get_model_choice(app: AppHandle) -> Result<Option<DesktopSettings>, String> {
     if !path.exists() {
         return Ok(None);
     }
-    let text = fs::read_to_string(path).map_err(|e| e.to_string())?;
-    serde_json::from_str(&text)
-        .map(Some)
-        .map_err(|e| e.to_string())
+    read_desktop_settings(&app).map(Some)
 }
 
 #[tauri::command]
@@ -1142,6 +1337,7 @@ fn main() {
             pull_ollama_model,
             save_model_choice,
             save_llm_settings,
+            save_media_provider_key,
             get_model_choice,
             init_local_database,
             create_local_backup,
