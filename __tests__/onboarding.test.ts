@@ -261,6 +261,21 @@ describe("browser onboarding profile helpers", () => {
 });
 
 describe("browser onboarding runtime contract", () => {
+  it("decides first-run setup visibility from completion and first-value state", () => {
+    const runtime = loadBrowserRuntime();
+
+    expect(runtime.shouldOpenOnboarding({ onboardingComplete: false, firstValue: null })).toBe(true);
+    expect(runtime.shouldOpenOnboarding({ onboardingComplete: true, firstValue: null })).toBe(false);
+    expect(runtime.shouldOpenOnboarding({
+      onboardingComplete: false,
+      firstValue: { complete: true },
+    })).toBe(false);
+    expect(runtime.shouldOpenOnboarding({
+      onboardingComplete: false,
+      firstValue: { complete: false },
+    })).toBe(true);
+  });
+
   it("exposes a versioned King’s Press app pack", () => {
     const runtime = loadBrowserRuntime();
 

@@ -423,6 +423,12 @@
     };
   }
 
+  function shouldOpenOnboarding(input) {
+    const current = input || {};
+    const firstValue = current.firstValue || current.firstValueEvent || null;
+    return !current.onboardingComplete && !(firstValue && firstValue.complete);
+  }
+
   function buildFirstValueEvent(input) {
     const current = input || {};
     const focusReady = !!(current.focusReady || current.campaignId);
@@ -597,6 +603,7 @@
     previousStepId,
     getConnectItems,
     deriveCompletionStatus,
+    shouldOpenOnboarding,
     buildFirstValueEvent,
     buildMetricsEvent,
     appendMetricsEvent,

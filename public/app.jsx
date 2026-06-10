@@ -957,7 +957,11 @@ function App() {
     Promise.resolve(window.Store.ready).then(() => {
       if (cancelled) return;
       const firstValue = window.Store.getPref(firstValuePref, null);
-      if (!window.Store.getPref(setupCompletePref, false) && !(firstValue && firstValue.complete)) setSetupOpen(true);
+      const onboardingComplete = window.Store.getPref(setupCompletePref, false);
+      const shouldOpen = window.KP_CONVERSATIONAL_ONBOARDING && window.KP_CONVERSATIONAL_ONBOARDING.shouldOpenOnboarding
+        ? window.KP_CONVERSATIONAL_ONBOARDING.shouldOpenOnboarding({ onboardingComplete, firstValue })
+        : (!onboardingComplete && !(firstValue && firstValue.complete));
+      if (shouldOpen) setSetupOpen(true);
     });
     return () => { cancelled = true; };
   }, []);

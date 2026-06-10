@@ -191,6 +191,19 @@ async function runActivationProof(input: {
   const { runtime, conversation, profile, actions } = await loadRuntime(context);
   const sessionId = "release-proof-" + input.id;
 
+  assert(
+    runtime.shouldOpenOnboarding({ onboardingComplete: false, firstValue: null }) === true,
+    input.id + ": clean first run did not request setup.",
+  );
+  assert(
+    runtime.shouldOpenOnboarding({ onboardingComplete: true, firstValue: null }) === false,
+    input.id + ": completed setup still requested setup.",
+  );
+  assert(
+    runtime.shouldOpenOnboarding({ onboardingComplete: false, firstValue: { complete: true } }) === false,
+    input.id + ": completed first-value activation still requested setup.",
+  );
+
   let state = conversation.createState();
   actions.recordMetric(runtime.METRIC_EVENTS.STARTED, {
     sessionId,
