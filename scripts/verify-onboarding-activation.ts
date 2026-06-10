@@ -224,6 +224,7 @@ function assertManifestContract(runtime: any, scenarioId: string) {
 async function runActivationProof(input: {
   id: string;
   voiceReady: boolean;
+  providerReady?: boolean;
   requiredInputMethod: "typed" | "voice";
   focusAnswer: string;
   profileAnswer: string;
@@ -375,7 +376,7 @@ async function runActivationProof(input: {
       campaignName: "Release proof " + input.id + " focus",
       focusReady: true,
       preferencesSaved: true,
-      providerReady: false,
+      providerReady: !!input.providerReady,
       routeTarget: "desk",
       setupDurationMs: input.voiceReady ? 90000 : 120000,
       completedFrom: "release_proof_" + input.id,
@@ -390,6 +391,24 @@ async function runActivationProof(input: {
   assert(context.prefs.onboardingAssistantHandoffV1?.deskThreadId, input.id + ": Desk handoff was not persisted.");
   assert(context.deskState.activeId === context.prefs.onboardingAssistantHandoffV1.deskThreadId, input.id + ": Desk handoff thread is not active.");
   assert(context.deskState.threads[0]?.source === "kings_press_setup", input.id + ": Desk handoff thread has the wrong source.");
+  if (input.providerReady) {
+    assert(context.prefs.onboardingAssistantHandoffV1.providerReady === true, input.id + ": provider-ready flag was not persisted.");
+    assert(
+      context.prefs.onboardingAssistantHandoffV1.nextAssistantMode === "live_assistant_ready",
+      input.id + ": provider-ready handoff did not enter live assistant mode.",
+    );
+    assert(
+      context.deskState.threads[0]?.messages?.some((message: any) =>
+        message.role === "assistant" && /Setup is ready/.test(String(message.content || "")),
+      ),
+      input.id + ": provider-ready Desk thread did not include the live assistant ready message.",
+    );
+  } else {
+    assert(
+      context.prefs.onboardingAssistantHandoffV1.nextAssistantMode === "scripted_assistant_until_provider_ready",
+      input.id + ": deferred-provider handoff did not preserve scripted assistant mode.",
+    );
+  }
 
   const savedRefs = context.referencesByCampaign.get(campaignId);
   assert(savedRefs?.setupProfile?.profile, input.id + ": approved setup profile was not saved to references.");
@@ -425,5 +444,14 @@ const voice = await runActivationProof({
   profileAnswer: "I want the desk to sound plainspoken, precise, and useful for founders.",
 });
 
+const providerReady = await runActivationProof({
+  id: "provider-ready",
+  voiceReady: false,
+  providerReady: true,
+  requiredInputMethod: "typed",
+  focusAnswer: "Substack essays and internal notes",
+  profileAnswer: "Keep the handoff direct, strategic, and ready for a live assistant.",
+});
+
 console.log("ok onboarding activation proof");
-console.log(JSON.stringify({ scenarios: [typed, voice] }, null, 2));
+console.log(JSON.stringify({ scenarios: [typed, voice, providerReady] }, null, 2));

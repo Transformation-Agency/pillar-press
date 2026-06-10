@@ -283,7 +283,9 @@ async function runBrowserShellProof() {
     {
       id: "typed",
       state: createApiState(),
-      options: {},
+      options: {
+        expectProviderReady: true,
+      },
     },
     {
       id: "voice",
@@ -294,6 +296,7 @@ async function runBrowserShellProof() {
         expectedCampaignName: "Substack focus",
         voiceAnswer: "I write for operators. Keep it spoken, direct, and useful.",
         sentimentRating: 4,
+        expectProviderReady: true,
       },
     },
   ];
@@ -322,6 +325,7 @@ async function runBrowserShellProof() {
           campaignName: result.firstValue?.campaignName,
           transcriptTurns: result.transcript?.turns?.length || 0,
           deskThreadId: result.handoff?.deskThreadId,
+          nextAssistantMode: result.handoff?.nextAssistantMode,
           sentimentRating: result.sentiment?.rating,
         });
       } finally {

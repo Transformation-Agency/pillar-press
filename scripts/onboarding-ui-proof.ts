@@ -19,6 +19,8 @@ export type OnboardingUiProofResult = {
   };
   handoff: null | {
     deskThreadId?: string;
+    providerReady?: boolean;
+    nextAssistantMode?: string;
   };
   sentiment: null | {
     rating?: number;
@@ -31,7 +33,13 @@ export type OnboardingUiProofResult = {
   };
   desk: null | {
     activeId?: string | null;
-    threads?: Array<{ source?: string }>;
+    threads?: Array<{
+      source?: string;
+      messages?: Array<{
+        role?: string;
+        content?: string;
+      }>;
+    }>;
   };
 };
 
@@ -41,6 +49,7 @@ export type OnboardingUiProofOptions = {
   expectedCampaignName?: string;
   voiceAnswer?: string;
   answerInputMethod?: "typed" | "voice";
+  expectProviderReady?: boolean;
   requireNoStepper?: boolean;
   sentimentRating?: number;
 };
@@ -127,6 +136,7 @@ export async function driveOnboardingUiProof(page: Page, options?: OnboardingUiP
   const focusAnswer = options?.focusAnswer || focusName;
   const voiceAnswer = options?.voiceAnswer || DEFAULT_ONBOARDING_UI_PROOF.voiceAnswer;
   const answerInputMethod = options?.answerInputMethod || "typed";
+  const expectProviderReady = options?.expectProviderReady === true;
   const expectedCampaignName = options?.expectedCampaignName || focusName;
   const sentimentRating = Math.max(1, Math.min(5, Math.round(Number(options?.sentimentRating || 5))));
 
@@ -238,6 +248,19 @@ export async function driveOnboardingUiProof(page: Page, options?: OnboardingUiP
   assert(result.handoff?.deskThreadId, "Assistant handoff did not persist a Desk thread id.");
   assert(result.desk?.activeId === result.handoff.deskThreadId, "Handoff Desk thread is not active.");
   assert(result.desk?.threads?.[0]?.source === "kings_press_setup", "Handoff thread source is not King's Press setup.");
+  if (expectProviderReady) {
+    assert(result.handoff.providerReady === true, "Provider-ready handoff was not persisted.");
+    assert(result.handoff.nextAssistantMode === "live_assistant_ready", "Provider-ready setup did not hand off to live assistant mode.");
+    assert(
+      result.desk?.threads?.[0] &&
+        Array.isArray(result.desk.threads[0].messages) &&
+        result.desk.threads[0].messages.some((message) =>
+          message.role === "assistant" &&
+          /Setup is ready/.test(String(message.content || "")),
+        ),
+      "Provider-ready handoff thread did not include the live assistant ready message.",
+    );
+  }
   assert(result.sentiment?.rating === sentimentRating, "Setup sentiment rating was not persisted.");
   assert((result.metricsSummary?.sentimentResponses || 0) >= 1, "Setup sentiment metric was not counted.");
   assert(result.metricsSummary?.averageSentiment === sentimentRating, "Setup sentiment average was not updated.");

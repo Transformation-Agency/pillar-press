@@ -469,7 +469,10 @@ Deliverables:
 Status: implemented for the Desk surface. The transcript seeds a durable Desk thread, the handoff
 metric is recorded, and `/api/desk/chat` injects the active campaign's approved references/profile
 into the live assistant context. Future app manifests can repeat this pattern for their own
-post-setup assistant surfaces.
+post-setup assistant surfaces. `npm run onboarding:verify` now proves both deferred-provider mode
+(`scripted_assistant_until_provider_ready`) and provider-ready mode (`live_assistant_ready`).
+`npm run onboarding:verify:browser` proves the actual React/Babel setup UI can reach
+`live_assistant_ready` after the model status endpoint reports a usable provider.
 
 ### Slice 5: Voice Runtime Upgrade
 
@@ -519,7 +522,8 @@ methods, bridge a desktop STT final transcript, and seed the Desk assistant hand
 `npm run onboarding:verify:browser` as the browser-shell proof that the actual static React/Babel
 front end opens setup on a clean install, completes both typed and mocked speech-recognition paths
 through the real Store cache, captures focus and preference answers with the correct input method
-in the transcript, saves first value, records sentiment, closes setup, and lands on the active Desk
-handoff thread. Use `npm run desktop:verify-installed` as the packaged-app proof that the copied
-DMG payload can boot from a clean app-data directory and complete that same conversational setup
-path against the installed app server before running notarized desktop release checks.
+in the transcript, saves first value, records sentiment, closes setup, and lands on the active
+Desk handoff thread in `live_assistant_ready` mode when a provider is available. Use
+`npm run desktop:verify-installed` as the packaged-app proof that the copied DMG payload can boot
+from a clean app-data directory and complete that same conversational setup path against the
+installed app server before running notarized desktop release checks.
