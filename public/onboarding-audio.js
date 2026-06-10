@@ -61,9 +61,55 @@
     });
   }
 
+  function listenOnce(options) {
+    const handlers = options || {};
+    const Recognition = getSpeechRecognitionCtor();
+    if (!Recognition) {
+      if (handlers.onError) handlers.onError(new Error("Speech recognition is not available here."));
+      return {
+        supported: false,
+        stop: function () {},
+      };
+    }
+
+    let recognition;
+    try {
+      recognition = new Recognition();
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.lang = handlers.lang || "en-US";
+      recognition.onresult = function (event) {
+        const results = event && event.results;
+        const first = results && results[0] && results[0][0];
+        const transcript = first && first.transcript ? String(first.transcript) : "";
+        if (transcript.trim() && handlers.onFinal) handlers.onFinal(transcript.trim());
+      };
+      recognition.onerror = function (event) {
+        if (handlers.onError) handlers.onError(new Error((event && event.error) || "Speech recognition failed."));
+      };
+      recognition.onend = function () {
+        if (handlers.onEnd) handlers.onEnd();
+      };
+      recognition.start();
+      return {
+        supported: true,
+        stop: function () {
+          try { recognition.stop(); } catch (_err) {}
+        },
+      };
+    } catch (err) {
+      if (handlers.onError) handlers.onError(err);
+      return {
+        supported: false,
+        stop: function () {},
+      };
+    }
+  }
+
   window.KP_ONBOARDING_AUDIO = {
     classifyIntroConsent,
     getSpeechRecognitionCtor,
     speakText,
+    listenOnce,
   };
 })();

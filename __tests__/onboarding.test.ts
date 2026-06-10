@@ -60,6 +60,13 @@ function loadBrowserActions() {
   return window;
 }
 
+function loadBrowserAudio(extraWindow?: Record<string, unknown>) {
+  const source = readFileSync(new URL("../public/onboarding-audio.js", import.meta.url), "utf8");
+  const window = Object.assign({}, extraWindow || {}) as Record<string, any>;
+  runInNewContext(source, { window, Error });
+  return window.KP_ONBOARDING_AUDIO as any;
+}
+
 describe("audio intro consent classifier", () => {
   it("classifies common affirmative and skip phrases locally", () => {
     expect(classifyIntroConsent("yes, introduce yourself")).toBe("yes");
@@ -72,6 +79,44 @@ describe("audio intro consent classifier", () => {
 
   it("gives skip language precedence over affirmative language", () => {
     expect(classifyIntroConsent("no, yes, later")).toBe("no");
+  });
+});
+
+describe("browser onboarding audio helpers", () => {
+  it("reports unsupported speech recognition without throwing", () => {
+    const audio = loadBrowserAudio();
+    let message = "";
+
+    const session = audio.listenOnce({
+      onError: (error: Error) => {
+        message = error.message;
+      },
+    });
+
+    expect(session.supported).toBe(false);
+    expect(typeof session.stop).toBe("function");
+    expect(message).toContain("Speech recognition is not available");
+  });
+
+  it("emits a final transcript from browser SpeechRecognition", () => {
+    let instance: any = null;
+    function Recognition(this: any) {
+      instance = this;
+      this.start = () => {};
+      this.stop = () => {};
+    }
+    const audio = loadBrowserAudio({ SpeechRecognition: Recognition });
+    let final = "";
+
+    const session = audio.listenOnce({
+      onFinal: (transcript: string) => {
+        final = transcript;
+      },
+    });
+
+    expect(session.supported).toBe(true);
+    instance.onresult({ results: [[{ transcript: " LinkedIn and Substack " }]] });
+    expect(final).toBe("LinkedIn and Substack");
   });
 });
 
@@ -266,5 +311,30 @@ describe("browser onboarding action registry", () => {
       status: "failed",
       error: "Model setup is available in the desktop app.",
     });
+  });
+
+  it("subscribes to desktop STT finals and returns an unlisten function", async () => {
+    const window = loadBrowserActions();
+    const registry = window.KP_ONBOARDING_ACTIONS;
+    let desktopHandler: ((event: any) => void) | null = null;
+    let cleaned = false;
+    const received: any[] = [];
+
+    window.KINGS_DESKTOP.onSttFinal = (handler: (event: any) => void) => {
+      desktopHandler = handler;
+      return Promise.resolve(() => {
+        cleaned = true;
+      });
+    };
+
+    const unlisten = await registry.onSttFinal((event: any) => received.push(event));
+    expect(desktopHandler).toBeTruthy();
+    const emitStt = desktopHandler as unknown as (event: any) => void;
+    emitStt({ payload: { transcript: " LinkedIn and Substack " } });
+    emitStt({ payload: { transcript: "   " } });
+    unlisten();
+
+    expect(received).toEqual([{ transcript: "LinkedIn and Substack", source: "desktop" }]);
+    expect(cleaned).toBe(true);
   });
 });

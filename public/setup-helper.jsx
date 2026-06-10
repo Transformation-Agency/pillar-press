@@ -168,6 +168,46 @@ function SetupShell({ children, conversation, mode, onModeChange, actionResults,
   );
 }
 
+function SetupAnswerComposer({
+  question,
+  value,
+  onChange,
+  onSubmit,
+  onListen,
+  listening,
+  disabled,
+  placeholder,
+  transcript,
+  actionLabel,
+}) {
+  return (
+    <div className="kp-answer-composer">
+      <label>
+        <span>{question}</span>
+        <textarea
+          className="kp-setup-input"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          rows={3}
+          placeholder={placeholder || "Type your answer here."}
+          disabled={disabled}
+        />
+      </label>
+      {transcript && (
+        <p className="kp-transcript-preview" aria-live="polite">I heard: <strong>{transcript}</strong></p>
+      )}
+      <div className="kp-answer-actions">
+        <button className="kp-setup-outline" type="button" onClick={onListen} disabled={disabled || listening} aria-pressed={listening ? "true" : "false"}>
+          <Icon name="mic" size={16} /> {listening ? "Listening" : "Speak answer"}
+        </button>
+        <button className="kp-setup-primary" type="button" onClick={onSubmit} disabled={disabled || !String(value || "").trim()}>
+          {actionLabel || "Use answer"} <Icon name="arrowR" size={20} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function SetupStatusChip({ label }) {
   return (
     <span style={{
@@ -262,6 +302,13 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
   const [audioError, setAudioError] = React.useState("");
   const [introVisible, setIntroVisible] = React.useState(false);
   const [integrationsTouched, setIntegrationsTouched] = React.useState(false);
+  const [introAnswer, setIntroAnswer] = React.useState("");
+  const [setupAnswer, setSetupAnswer] = React.useState("");
+  const [setupTranscript, setSetupTranscript] = React.useState("");
+  const [listening, setListening] = React.useState(false);
+  const [platformAnswerCaptured, setPlatformAnswerCaptured] = React.useState(false);
+  const transcriptHandlerRef = React.useRef(null);
+  const listenSessionRef = React.useRef(null);
   const state = window.Store.getState();
   const campaigns = state.campaigns || [];
   const activeCampaign = window.Store.activeCampaign && window.Store.activeCampaign();
@@ -324,6 +371,28 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     });
   }, [open, activeCampaign && activeCampaign.id]);
 
+  React.useEffect(() => {
+    if (!open) {
+      stopListeningSession(false);
+      return undefined;
+    }
+    if (!ONBOARDING_ACTION_REGISTRY || !ONBOARDING_ACTION_REGISTRY.onSttFinal) return undefined;
+    let active = true;
+    let cleanup = null;
+    ONBOARDING_ACTION_REGISTRY.onSttFinal((event) => {
+      if (!active) return;
+      if (transcriptHandlerRef.current) transcriptHandlerRef.current(event.transcript || "");
+    }).then((unlisten) => {
+      cleanup = unlisten;
+      if (!active && typeof cleanup === "function") cleanup();
+    });
+    return () => {
+      active = false;
+      if (typeof cleanup === "function") cleanup();
+      stopListeningSession(false);
+    };
+  }, [open]);
+
   if (!open) return null;
 
   const currentStep = ONBOARDING_STEPS[step] || ONBOARDING_STEPS[0];
@@ -355,7 +424,104 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
 
   function goToStep(next) {
     setSetupError("");
+    stopListeningSession();
     setStep(ONBOARDING_RUNTIME ? ONBOARDING_RUNTIME.clampStepIndex(next) : Math.max(0, Math.min(3, next)));
+  }
+
+  function applyPlatformAnswer(text) {
+    const clean = String(text || "").trim();
+    if (!clean) return null;
+    setSetupAnswer(clean);
+    setSetupTranscript(clean);
+    setPlatformAnswerCaptured(true);
+    const platformNames = clean
+      .split(/,|\band\b|\n/i)
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .slice(0, 3);
+    const focusName = ((platformNames[0] || clean) + " focus").trim();
+    if (prefDraft) {
+      const firstPlatform = platformNames[0] || clean;
+      setPrefDraft(Object.assign({}, prefDraft, {
+        audienceNote: prefDraft.audienceNote || ("Communicates most on: " + clean),
+        strategy: prefDraft.strategy || ("Primary communication places: " + clean),
+        throughlineNote: prefDraft.throughlineNote || ("First setup answer: " + clean),
+      }));
+      if (!campaignName.trim() && firstPlatform) setCampaignName(focusName);
+    } else if (!campaignName.trim()) {
+      setCampaignName(focusName || "First focus");
+    }
+    return { focusName };
+  }
+
+  function handleIntroConsentAnswer(text) {
+    const clean = String(text || "").trim();
+    if (!clean) return;
+    setIntroAnswer(clean);
+    setSetupTranscript(clean);
+    const consent = ONBOARDING_AUDIO.classifyIntroConsent
+      ? ONBOARDING_AUDIO.classifyIntroConsent(clean)
+      : "unclear";
+    if (consent === "yes") {
+      introduce();
+      return;
+    }
+    if (consent === "no") {
+      recordAction(ONBOARDING_ACTIONS.SKIP_INTRO, ONBOARDING_ACTION_STATUSES.SKIPPED);
+      goToStep(2);
+      return;
+    }
+    setSetupError("I am not sure if that was a yes or a skip. Use one of the buttons, or type yes or skip.");
+  }
+
+  function handleTranscript(text) {
+    const clean = String(text || "").trim();
+    if (!clean) return;
+    if (step === 1 && !introVisible) {
+      handleIntroConsentAnswer(clean);
+      return;
+    }
+    if (step === 2) {
+      applyPlatformAnswer(clean);
+    }
+  }
+
+  transcriptHandlerRef.current = handleTranscript;
+
+  function listenForAnswer() {
+    setSetupError("");
+    stopListeningSession();
+    setListening(true);
+    const session = ONBOARDING_AUDIO.listenOnce && ONBOARDING_AUDIO.listenOnce({
+      onFinal: (transcript) => {
+        setSetupTranscript(transcript);
+        handleTranscript(transcript);
+      },
+      onError: (error) => {
+        setSetupError((error && error.message) || "Speech recognition is not available here. You can type instead.");
+        listenSessionRef.current = null;
+        setListening(false);
+      },
+      onEnd: () => {
+        listenSessionRef.current = null;
+        setListening(false);
+      },
+    });
+    if (!session || !session.supported) {
+      listenSessionRef.current = null;
+      setListening(false);
+      setSetupError("Speech recognition is not available here. You can type instead.");
+      return;
+    }
+    listenSessionRef.current = session;
+  }
+
+  function stopListeningSession(updateState = true) {
+    if (listenSessionRef.current && listenSessionRef.current.stop) {
+      try { listenSessionRef.current.stop(); } catch (_err) {}
+    }
+    listenSessionRef.current = null;
+    if (updateState) setListening(false);
   }
 
   function runConnectAction(item) {
@@ -424,8 +590,8 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     recordAction(ONBOARDING_ACTIONS.PLAY_INTRO, ONBOARDING_ACTION_STATUSES.SUCCEEDED);
   }
 
-  async function ensureFocus() {
-    const clean = campaignName.trim();
+  async function ensureFocus(nameOverride) {
+    const clean = String(nameOverride || campaignName || "").trim();
     if (activeCampaign && (!clean || clean === activeCampaign.name)) return activeCampaign.id;
     const name = clean || "Untitled focus";
     setBusy(true);
@@ -777,6 +943,38 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
         .kp-setup-stage {
           min-width: 0;
         }
+        .kp-answer-composer {
+          margin: 34px auto 0;
+          max-width: 680px;
+          display: grid;
+          gap: 14px;
+          text-align: left;
+        }
+        .kp-answer-composer label {
+          display: grid;
+          gap: 10px;
+          color: #2A211E;
+        }
+        .kp-answer-composer label > span {
+          font: 20px var(--font-serif);
+        }
+        .kp-answer-actions {
+          display: flex;
+          flex-wrap: wrap;
+          justify-content: space-between;
+          gap: 12px;
+        }
+        .kp-answer-actions .kp-setup-primary {
+          min-width: 180px;
+          min-height: 50px;
+          font-size: 18px;
+        }
+        .kp-transcript-preview {
+          margin: 0;
+          color: #766A63;
+          font-size: 14.5px;
+          line-height: 1.45;
+        }
         @keyframes kpHostPulse {
           0% { transform: scale(0.92); box-shadow: 0 0 0 0 rgba(167, 71, 50, 0.24); }
           70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(167, 71, 50, 0); }
@@ -873,6 +1071,17 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
                       Voice is not connected yet, so I'll keep my introduction on screen. You can still type your setup answers.
                     </p>
                   )}
+                  <SetupAnswerComposer
+                    question="You can also answer by typing or voice."
+                    value={introAnswer}
+                    onChange={setIntroAnswer}
+                    onSubmit={() => handleIntroConsentAnswer(introAnswer)}
+                    onListen={listenForAnswer}
+                    listening={listening}
+                    transcript={setupTranscript}
+                    placeholder="Type yes, introduce yourself, or skip for now."
+                    actionLabel="Use answer"
+                  />
                   <div style={{ marginTop: 44, display: "grid", justifyItems: "center", gap: 22 }}>
                     <button className="kp-setup-primary" onClick={introduce} style={{ minWidth: 330 }}>
                       Yes, introduce yourself
@@ -910,6 +1119,23 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
             <p style={{ margin: "24px 0 54px", maxWidth: 680, color: "#766A63", fontFamily: "var(--font-serif)", fontSize: 27, lineHeight: 1.38 }}>
               Your first focus helps organize drafts, sources, Gather runs, and notes in one place.
             </p>
+            <SetupAnswerComposer
+              question={ONBOARDING_COPY.FIRST_PLATFORM_QUESTION || "Where do you communicate most?"}
+              value={setupAnswer}
+              onChange={setSetupAnswer}
+              onSubmit={() => applyPlatformAnswer(setupAnswer)}
+              onListen={listenForAnswer}
+              listening={listening}
+              transcript={platformAnswerCaptured ? setupTranscript : ""}
+              placeholder="e.g. LinkedIn, Substack, scripts, and book chapters."
+              actionLabel="Capture answer"
+            />
+            {platformAnswerCaptured && (
+              <p style={{ margin: "14px 0 0", color: "#5E7A46", fontSize: 15 }}>
+                Got it. I used that to shape your first focus and setup notes.
+              </p>
+            )}
+            <div style={{ height: 34 }} />
             <SetupField label="First project or campaign name" helper="You can rename this anytime.">
               <input
                 className="kp-setup-input"
@@ -945,7 +1171,12 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
               }}
               primary="Continue"
               busy={busy}
-              onPrimary={() => ensureFocus().then(() => goToStep(3)).catch(() => null)}
+              onPrimary={() => {
+                const applied = setupAnswer.trim() && !platformAnswerCaptured
+                  ? applyPlatformAnswer(setupAnswer)
+                  : null;
+                ensureFocus(applied && applied.focusName).then(() => goToStep(3)).catch(() => null);
+              }}
             />
             {setupError && (
               <p role="alert" style={{ margin: "16px 0 0", color: "#A74732", fontSize: 15.5 }}>{setupError}</p>

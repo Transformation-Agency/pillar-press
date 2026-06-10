@@ -189,6 +189,20 @@
     return () => window.removeEventListener(EVENTS.PROVIDER_SETUP_SAVED, listener);
   }
 
+  function onSttFinal(handler) {
+    const desktop = window.KINGS_DESKTOP;
+    if (!desktop || !desktop.isDesktop || !desktop.isDesktop() || !desktop.onSttFinal) {
+      return Promise.resolve(function () {});
+    }
+    return desktop.onSttFinal((event) => {
+      const payload = event && event.payload ? event.payload : event;
+      const transcript = payload && payload.transcript ? String(payload.transcript) : "";
+      if (transcript.trim()) handler({ transcript: transcript.trim(), source: "desktop" });
+    }).catch(function () {
+      return function () {};
+    });
+  }
+
   function notifyProviderSetupSaved(settings) {
     emit(EVENTS.PROVIDER_SETUP_SAVED, providerSafeDetail(settings));
   }
@@ -210,6 +224,7 @@
     completeOnboarding,
     skipOnboarding,
     onProviderSetupSaved,
+    onSttFinal,
     notifyProviderSetupSaved,
     notifyProviderSetupClosed,
   };
