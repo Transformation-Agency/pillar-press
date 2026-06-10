@@ -2500,12 +2500,6 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
 
         {step === 1 && (
           <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError} conversationState={conversationState}>
-            <h1 style={{ margin: 0, fontFamily: "var(--font-serif)", fontSize: "clamp(46px, 5.3vw, 66px)", fontWeight: 500, lineHeight: 1.08 }}>
-              Set up voice
-            </h1>
-            <p style={{ margin: "22px 0 42px", maxWidth: 760, color: "#766A63", fontSize: 21, lineHeight: 1.5 }}>
-              Before I introduce myself aloud, add a voice key if you want audio. You can skip this and continue with typing.
-            </p>
             <section style={{
               border: "1px solid #D8CEC3", borderRadius: 10, background: "rgba(255, 252, 246, 0.68)",
               overflow: "hidden",
@@ -2542,12 +2536,6 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
 
         {step === 2 && (
           <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError} conversationState={conversationState}>
-            <h1 style={{ margin: 0, fontFamily: "var(--font-serif)", fontSize: "clamp(46px, 5.3vw, 66px)", fontWeight: 500, lineHeight: 1.08 }}>
-              Connect models and tools
-            </h1>
-            <p style={{ margin: "22px 0 42px", maxWidth: 760, color: "#766A63", fontSize: 21, lineHeight: 1.5 }}>
-              Choose the model King's Press can use and connect optional integrations. You can skip anything and change it later.
-            </p>
             <section style={{
               border: "1px solid #D8CEC3", borderRadius: 10, background: "rgba(255, 252, 246, 0.68)",
               overflow: "hidden",
@@ -2587,12 +2575,6 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
 
         {step === 3 && (
           <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError} conversationState={conversationState}>
-            <h1 style={{ margin: 0, fontFamily: "var(--font-serif)", fontSize: "clamp(46px, 5.3vw, 66px)", fontWeight: 500, lineHeight: 1.08 }}>
-              What are you working on first?
-            </h1>
-            <p style={{ margin: "24px 0 54px", maxWidth: 680, color: "#766A63", fontFamily: "var(--font-serif)", fontSize: 27, lineHeight: 1.38 }}>
-              Your first focus helps organize drafts, sources, Gather runs, and notes in one place.
-            </p>
             <SetupAnswerComposer
               question={focusPrompt && focusPrompt.question}
               helper={focusPrompt && focusPrompt.helper}
@@ -2663,12 +2645,6 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
 
         {step === 4 && prefDraft && (
           <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError} conversationState={conversationState}>
-            <h1 style={{ margin: 0, fontFamily: "var(--font-serif)", fontSize: "clamp(52px, 5.8vw, 76px)", fontWeight: 500, lineHeight: 1.04 }}>
-              Set your defaults
-            </h1>
-            <p style={{ margin: "22px 0 34px", color: "#766A63", fontSize: 21, lineHeight: 1.5 }}>
-              Start with the basics. You can refine everything later.
-            </p>
             <SetupAnswerComposer
               question={preferencesPrompt && preferencesPrompt.question}
               helper={preferencesPrompt && preferencesPrompt.helper}
