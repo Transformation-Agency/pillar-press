@@ -571,6 +571,36 @@ describe("browser onboarding conversation controller", () => {
     expect(next.slots.intro_consent.status).toBe("empty");
   });
 
+  it("normalizes deterministic intents and repairs unclear answers without an LLM", () => {
+    const conversation = loadBrowserConversation();
+
+    expect(conversation.normalizeIntent(conversation.SLOT_IDS.INTRO_CONSENT, "yes, guide me")).toMatchObject({
+      intent: "affirm",
+      accepted: true,
+    });
+    expect(conversation.normalizeIntent(conversation.SLOT_IDS.INTRO_CONSENT, "skip this")).toMatchObject({
+      intent: "skip",
+      accepted: true,
+    });
+    expect(conversation.normalizeIntent(conversation.SLOT_IDS.VOICE_SETUP, "help me get a key")).toMatchObject({
+      intent: "help",
+      accepted: true,
+    });
+
+    const repair = conversation.repairForAnswer(conversation.SLOT_IDS.INTRO_CONSENT, "maybe maybe");
+
+    expect(repair).toMatchObject({
+      needsRepair: true,
+      accepted: false,
+    });
+    expect(repair.message).toContain("not sure");
+    expect(repair.suggestions.map((item: any) => item.label)).toEqual([
+      "Guide me",
+      "Voice-guided intro",
+      "Skip setup",
+    ]);
+  });
+
   it("keeps typed and voice answers semantically equivalent", () => {
     const conversation = loadBrowserConversation();
     const typed = conversation.captureAnswer(

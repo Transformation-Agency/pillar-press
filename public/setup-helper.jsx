@@ -359,6 +359,30 @@ function SetupAnswerComposer({
   );
 }
 
+function SetupRepairChoices({ repair, onChoose }) {
+  if (!repair || !repair.needsRepair) return null;
+  const suggestions = Array.isArray(repair.suggestions) ? repair.suggestions : [];
+  return (
+    <div className="kp-repair-box" role="status" aria-live="polite">
+      <p>{repair.message || "I am not sure what you meant. Choose one of these, or type a clearer answer."}</p>
+      {!!suggestions.length && (
+        <div className="kp-repair-actions">
+          {suggestions.map((suggestion) => (
+            <button
+              key={suggestion.label}
+              className="kp-setup-outline"
+              type="button"
+              onClick={() => onChoose(suggestion)}
+            >
+              {suggestion.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SetupProfileReview({ profile }) {
   if (!profile) return null;
   const platforms = (profile.communicationPlatforms || []).map((item) => item.platform).filter(Boolean);
@@ -679,7 +703,7 @@ function InlineModelSetup({ status, onSaved }) {
   );
 }
 
-function IntroConsentSetup({ answered, onAccept, onSkip, value, onChange, onSubmit, onListen, listening, transcript }) {
+function IntroConsentSetup({ answered, onAccept, onSkip, value, onChange, onSubmit, onListen, listening, transcript, repair, onRepairChoose }) {
   if (answered) return null;
   return (
     <div className="kp-inline-intro-consent">
@@ -704,6 +728,7 @@ function IntroConsentSetup({ answered, onAccept, onSkip, value, onChange, onSubm
         <button className="kp-setup-outline" type="button" onClick={onSubmit} disabled={!String(value || "").trim()}>Use answer</button>
         <button className="kp-setup-outline" type="button" onClick={onSkip}>Skip setup</button>
       </div>
+      <SetupRepairChoices repair={repair} onChoose={onRepairChoose} />
     </div>
   );
 }
@@ -971,6 +996,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
   const [setupAnswer, setSetupAnswer] = React.useState("");
   const [setupTranscript, setSetupTranscript] = React.useState("");
   const [listening, setListening] = React.useState(false);
+  const [repairState, setRepairState] = React.useState(null);
   const [platformAnswerCaptured, setPlatformAnswerCaptured] = React.useState(false);
   const [profileAnswer, setProfileAnswer] = React.useState("");
   const [setupProfileDraft, setSetupProfileDraft] = React.useState(null);
@@ -1120,6 +1146,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
   function goToStep(next) {
     setSetupError("");
     setSetupTranscript("");
+    setRepairState(null);
     stopListeningSession();
     setStep(ONBOARDING_RUNTIME ? ONBOARDING_RUNTIME.clampStepIndex(next) : Math.max(0, Math.min(4, next)));
   }
@@ -1333,17 +1360,43 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
   function handleIntroConsentAnswer(text, inputMethod) {
     const clean = String(text || "").trim();
     if (!clean) return;
+    const slotId = ONBOARDING_CONVERSATION.SLOT_IDS.INTRO_CONSENT;
+    const repair = ONBOARDING_CONVERSATION.repairForAnswer
+      ? ONBOARDING_CONVERSATION.repairForAnswer(slotId, clean)
+      : null;
+    if (repair && (repair.needsRepair || repair.intent === "help" || repair.intent === "repeat")) {
+      const prompt = ONBOARDING_CONVERSATION.promptForStep("intro", conversationState);
+      setIntroAnswer(clean);
+      setSetupTranscript(clean);
+      setRepairState(Object.assign({}, repair, {
+        needsRepair: true,
+        message: repair.intent === "repeat" && prompt
+          ? prompt.question
+          : repair.intent === "help" && prompt
+            ? prompt.helper
+            : repair.message,
+      }));
+      setSetupError("");
+      return;
+    }
     setIntroAnswer(clean);
     setSetupTranscript(clean);
+    setRepairState(null);
+    setSetupError("");
     setConversationState((current) => ONBOARDING_CONVERSATION.captureAnswer(
       current,
-      ONBOARDING_CONVERSATION.SLOT_IDS.INTRO_CONSENT,
+      slotId,
       clean,
       inputMethod || "typed",
     ));
-    const consent = ONBOARDING_AUDIO.classifyIntroConsent
-      ? ONBOARDING_AUDIO.classifyIntroConsent(clean)
-      : "unclear";
+    const intent = repair && repair.intent;
+    const consent = intent === "affirm" || intent === "voice"
+      ? "yes"
+      : intent === "skip" || intent === "deny"
+        ? "no"
+        : ONBOARDING_AUDIO.classifyIntroConsent
+          ? ONBOARDING_AUDIO.classifyIntroConsent(clean)
+          : "unclear";
     if (consent === "yes") {
       acceptIntroFromConnect();
       goToStep(1);
@@ -1354,7 +1407,11 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
       goToStep(2);
       return;
     }
-    setSetupError("I am not sure if that was a yes or a skip. Use one of the buttons, or type yes or skip.");
+    const fallbackRepair = ONBOARDING_CONVERSATION.repairForAnswer
+      ? ONBOARDING_CONVERSATION.repairForAnswer(slotId, clean)
+      : null;
+    setRepairState(fallbackRepair);
+    setSetupError((fallbackRepair && fallbackRepair.message) || "I am not sure if that was a yes or a skip. Use one of the buttons, or type yes or skip.");
   }
 
   function handleTranscript(text) {
@@ -2355,6 +2412,30 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
           min-height: 50px;
           font-size: 18px;
         }
+        .kp-repair-box {
+          border: 1px solid rgba(167, 71, 50, 0.24);
+          border-radius: 12px;
+          background: rgba(167, 71, 50, 0.045);
+          padding: 13px 14px;
+          display: grid;
+          gap: 10px;
+        }
+        .kp-repair-box p {
+          margin: 0;
+          color: #766A63;
+          font-size: 14.5px;
+          line-height: 1.4;
+        }
+        .kp-repair-actions {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+        }
+        .kp-repair-actions .kp-setup-outline {
+          min-height: 36px;
+          font-size: 14.5px;
+          padding: 0 13px;
+        }
         .kp-transcript-preview {
           margin: 0;
           color: #766A63;
@@ -2476,11 +2557,21 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
               <IntroConsentSetup
                 answered={false}
                 value={introAnswer}
-                onChange={setIntroAnswer}
+                onChange={(value) => {
+                  setIntroAnswer(value);
+                  if (repairState) setRepairState(null);
+                  if (setupError) setSetupError("");
+                }}
                 onSubmit={() => handleIntroConsentAnswer(introAnswer, "typed")}
                 onListen={listenForAnswer}
                 listening={listening}
                 transcript={step === 0 ? setupTranscript : ""}
+                repair={repairState && repairState.slotId === ONBOARDING_CONVERSATION.SLOT_IDS.INTRO_CONSENT ? repairState : null}
+                onRepairChoose={(suggestion) => {
+                  const next = suggestion && suggestion.value ? suggestion.value : "";
+                  setIntroAnswer(next);
+                  handleIntroConsentAnswer(next, "button");
+                }}
                 onAccept={() => {
                   acceptIntroFromConnect();
                   goToStep(1);

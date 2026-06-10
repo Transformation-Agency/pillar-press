@@ -89,6 +89,101 @@
       .replace(/password[=:]?\s*[^&\s]+/gi, "password=[redacted]");
   }
 
+  const INTENT_PATTERNS = {
+    affirm: [/\byes\b/i, /\byeah\b/i, /\byep\b/i, /\bsure\b/i, /\bok(?:ay)?\b/i, /\bgo ahead\b/i, /\bguide me\b/i],
+    deny: [/\bno\b/i, /\bnope\b/i, /\bdon't\b/i, /\bdo not\b/i],
+    skip: [/\bskip\b/i, /\bnot now\b/i, /\blater\b/i, /\bdo this later\b/i],
+    help: [/\bhelp\b/i, /\bhow\b/i, /\bexplain\b/i, /\bwhat does\b/i, /\bget a key\b/i],
+    repeat: [/\brepeat\b/i, /\bsay that again\b/i, /\bagain\b/i],
+    voice: [/\bvoice\b/i, /\baudio\b/i, /\bspeak\b/i, /\bmic(?:rophone)?\b/i, /\bread aloud\b/i],
+    provider_key: [/\bopenai\b/i, /\belevenlabs\b/i, /\bhedra\b/i, /\banthropic\b/i, /\bgemini\b/i, /\bxai\b/i, /\bgrok\b/i, /\bollama\b/i, /\bdocker\b/i, /\bapi[_ -]?key\b/i, /\bsk-[A-Za-z0-9._-]{8,}/i],
+  };
+
+  const defaultRepairSuggestions = {
+    [SLOT_IDS.INTRO_CONSENT]: [
+      { label: "Guide me", value: "yes, guide me", intent: "affirm" },
+      { label: "Voice-guided intro", value: "yes, voice-guided intro", intent: "voice" },
+      { label: "Skip setup", value: "skip setup", intent: "skip" },
+    ],
+    [SLOT_IDS.VOICE_SETUP]: [
+      { label: "Set up voice", value: "yes, set up voice", intent: "affirm" },
+      { label: "Skip voice", value: "skip voice", intent: "skip" },
+      { label: "Help me get a key", value: "help me get a key", intent: "help" },
+    ],
+    [SLOT_IDS.COMMUNICATION_PLATFORMS]: [
+      { label: "LinkedIn and Substack", value: "LinkedIn and Substack", intent: "typed_answer" },
+      { label: "Book chapters", value: "book chapters", intent: "typed_answer" },
+      { label: "Skip for now", value: "skip for now", intent: "skip" },
+    ],
+    [SLOT_IDS.VOICE_PROFILE]: [
+      { label: "Polished and direct", value: "polished, direct, and useful", intent: "typed_answer" },
+      { label: "Plainspoken", value: "plainspoken and clear", intent: "typed_answer" },
+      { label: "Skip for now", value: "skip for now", intent: "skip" },
+    ],
+  };
+
+  function firstMatchingIntent(text) {
+    const clean = cleanText(text, 5000);
+    if (!clean) return { intent: "empty", confidence: 1 };
+    const order = ["skip", "deny", "help", "repeat", "voice", "provider_key", "affirm"];
+    for (const intent of order) {
+      if ((INTENT_PATTERNS[intent] || []).some((pattern) => pattern.test(clean))) {
+        return { intent, confidence: 0.9 };
+      }
+    }
+    if (clean.length >= 3) return { intent: "typed_answer", confidence: 0.65 };
+    return { intent: "unclear", confidence: 0.2 };
+  }
+
+  function normalizeIntent(slotId, answer) {
+    const prompt = slotPrompts[slotId];
+    const clean = cleanText(answer, 5000);
+    const match = firstMatchingIntent(clean);
+    const expected = (prompt && prompt.expectedIntents) || [];
+    const allowed = expected.length ? expected : ["affirm", "deny", "skip", "help", "repeat", "typed_answer", "spoken_answer"];
+    const intent = match.intent === "typed_answer" && allowed.includes("spoken_answer") ? "typed_answer" : match.intent;
+    const accepted =
+      intent !== "empty" &&
+      intent !== "unclear" &&
+      (allowed.includes(intent) ||
+        (intent === "typed_answer" && (allowed.includes("typed_answer") || allowed.includes("spoken_answer"))) ||
+        (intent === "voice" && (allowed.includes("voice") || allowed.includes("affirm"))));
+    return {
+      slotId,
+      intent,
+      accepted,
+      confidence: accepted ? match.confidence : Math.min(match.confidence, 0.35),
+      text: cleanText(redactSensitiveText(clean), 5000),
+      expectedIntents: allowed,
+    };
+  }
+
+  function repairForAnswer(slotId, answer) {
+    const normalized = normalizeIntent(slotId, answer);
+    if (normalized.accepted) {
+      return Object.assign({}, normalized, {
+        needsRepair: false,
+        message: "",
+        suggestions: [],
+      });
+    }
+    const prompt = slotPrompts[slotId] || {};
+    const suggestions = clonePlain(defaultRepairSuggestions[slotId] || [
+      { label: "Try again", value: "", intent: "typed_answer" },
+      { label: "Skip for now", value: "skip for now", intent: "skip" },
+    ]);
+    const message = normalized.intent === "empty"
+      ? "I need a little more before I can use that answer."
+      : prompt.question
+        ? "I am not sure which path you meant. Choose one of these, or type a clearer answer."
+        : "I am not sure what to do with that yet.";
+    return Object.assign({}, normalized, {
+      needsRepair: true,
+      message,
+      suggestions,
+    });
+  }
+
   function defaultSlot(id) {
     return {
       id,
@@ -260,6 +355,8 @@
     nextOpenQuestion,
     progressForState,
     promptForStep,
+    normalizeIntent,
+    repairForAnswer,
     captureAnswer,
     skipSlot,
     metricForAnswer,

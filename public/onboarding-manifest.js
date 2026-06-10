@@ -110,7 +110,7 @@
       placeholder: "Type yes, guide me, or skip setup.",
       actionLabel: "Use answer",
       answerKind: "intro_consent",
-      expectedIntents: ["affirm", "skip", "voice", "typed_answer", "spoken_answer", "unclear"],
+      expectedIntents: ["affirm", "skip", "voice", "help", "repeat"],
       required: false,
     },
     [SLOT_IDS.VOICE_SETUP]: {
@@ -120,7 +120,7 @@
       placeholder: "Type yes, no, OpenAI, ElevenLabs, or ask how to get a key.",
       actionLabel: "Use answer",
       answerKind: "voice_setup",
-      expectedIntents: ["affirm", "deny", "later", "help", "provider_key", "typed_answer", "spoken_answer", "unclear"],
+      expectedIntents: ["affirm", "deny", "skip", "later", "help", "provider_key", "voice", "repeat"],
       required: false,
     },
     [SLOT_IDS.COMMUNICATION_PLATFORMS]: {
