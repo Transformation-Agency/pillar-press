@@ -18,8 +18,8 @@ export class ElevenError extends Error {
   }
 }
 
-function apiKey(): string {
-  const k = process.env.ELEVENLABS_API_KEY;
+function apiKey(override?: string): string {
+  const k = override || process.env.ELEVENLABS_API_KEY;
   if (!k) throw new ElevenError(500, "config", "Missing ELEVENLABS_API_KEY in server environment.");
   return k;
 }
@@ -32,9 +32,9 @@ export interface ElevenVoice {
   preview_url?: string;
 }
 
-export async function listVoices(): Promise<ElevenVoice[]> {
+export async function listVoices(input?: { apiKey?: string }): Promise<ElevenVoice[]> {
   const res = await fetch(`${ELEVEN_BASE}/voices`, {
-    headers: { "xi-api-key": apiKey() },
+    headers: { "xi-api-key": apiKey(input?.apiKey) },
     signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) throw mapError(res.status, await res.text().catch(() => ""));

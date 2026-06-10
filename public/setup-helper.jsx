@@ -544,16 +544,65 @@ function InlineModelSetup({ status, onSaved }) {
           <input className="kp-setup-input" value={model} onChange={(event) => setModel(event.target.value)} list="kp-inline-model-options" placeholder="model name" />
           <datalist id="kp-inline-model-options">{options.map((item) => <option key={item} value={item} />)}</datalist>
         </label>
-        <label>
-          <span>Profile name</span>
-          <input className="kp-setup-input" value={profileName} onChange={(event) => setProfileName(event.target.value)} placeholder={providerLabel(provider) + " " + (model || "model")} />
-        </label>
       </div>
       <div className="kp-inline-model-actions">
         {mode === "ollama" && <button className="kp-setup-outline" type="button" disabled={busy || !model.trim()} onClick={pullModel}>Pull</button>}
         {canList && <button className="kp-setup-outline" type="button" disabled={busy} onClick={listModels}>List models</button>}
         <button className="kp-setup-outline" type="button" disabled={busy || !model.trim()} onClick={testModel}>Test</button>
         <button className="kp-setup-primary" type="button" disabled={busy || !model.trim()} onClick={saveModel}>{busy ? "Working..." : "Use model"}</button>
+      </div>
+      {message && <p className="kp-inline-model-message" role="status">{message}</p>}
+    </div>
+  );
+}
+
+function InlineVoiceSetup({ status, audioState, onConnect }) {
+  const [apiKey, setApiKey] = React.useState("");
+  const [message, setMessage] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const connected = audioState === "audio_ready";
+
+  async function testVoiceKey() {
+    setBusy(true);
+    setMessage("Checking ElevenLabs.");
+    try {
+      const response = await fetch("/api/eleven/voices", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ apiKey: apiKey.trim() }),
+      });
+      const body = await response.json().catch(() => null);
+      if (!response.ok) throw new Error((body && body.error) || "Could not reach ElevenLabs.");
+      const count = body && Array.isArray(body.voices) ? body.voices.length : 0;
+      setMessage(count ? "Voice key works. " + count + " voices available." : "Voice key works, but no voices were returned.");
+    } catch (error) {
+      setMessage((error && error.message) || "Could not test the voice key.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="kp-inline-voice-setup">
+      <div className="kp-inline-voice-head">
+        <span aria-hidden="true" className="kp-inline-model-icon"><Icon name="mic" size={25} /></span>
+        <div>
+          <h3>Voice</h3>
+          <p>Connect a microphone for voice input, and add ElevenLabs if you want spoken drafts.</p>
+        </div>
+        <SetupStatusChip label={connected ? "Connected" : "Optional"} />
+      </div>
+      <div className="kp-inline-voice-controls">
+        <label>
+          <span>ElevenLabs API key</span>
+          <input className="kp-setup-input" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Paste your voice API key" />
+        </label>
+        <div className="kp-inline-voice-actions">
+          <button className="kp-setup-outline" type="button" disabled={busy || !apiKey.trim()} onClick={testVoiceKey}>Test voice</button>
+          <button className="kp-setup-outline" type="button" disabled={audioState === "requesting_microphone"} onClick={onConnect}>
+            {audioState === "requesting_microphone" ? "Connecting" : "Connect mic"}
+          </button>
+        </div>
       </div>
       {message && <p className="kp-inline-model-message" role="status">{message}</p>}
     </div>
@@ -1484,19 +1533,19 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
           font-size: 12.5px;
         }
         .kp-inline-model-setup {
-          padding: 42px 46px;
+          padding: 24px 34px 26px;
           display: grid;
-          gap: 22px;
+          gap: 13px;
         }
         .kp-inline-model-head {
           display: grid;
-          grid-template-columns: 88px minmax(0, 1fr) auto;
+          grid-template-columns: 62px minmax(0, 1fr) auto;
           align-items: center;
-          gap: 24px;
+          gap: 17px;
         }
         .kp-inline-model-icon {
-          width: 72px;
-          height: 72px;
+          width: 52px;
+          height: 52px;
           border-radius: 999px;
           display: grid;
           place-items: center;
@@ -1506,31 +1555,31 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
         .kp-inline-model-head h3 {
           margin: 0;
           font-family: var(--font-serif);
-          font-size: 26px;
+          font-size: 24px;
           font-weight: 500;
           color: #2A211E;
         }
         .kp-inline-model-head p {
-          margin: 11px 0 0;
-          max-width: 520px;
+          margin: 5px 0 0;
+          max-width: 620px;
           color: #766A63;
-          font-size: 18px;
-          line-height: 1.5;
+          font-size: 15.5px;
+          line-height: 1.35;
         }
         .kp-inline-model-tabs {
           display: flex;
           flex-wrap: wrap;
-          gap: 8px;
-          padding-left: 112px;
+          gap: 6px;
+          padding-left: 79px;
         }
         .kp-inline-model-tabs button {
-          min-height: 42px;
+          min-height: 34px;
           border: 1px solid #D8CEC3;
           border-radius: 999px;
           background: rgba(255, 252, 246, 0.72);
           color: #766A63;
-          padding: 0 16px;
-          font: 15.5px var(--font-serif);
+          padding: 0 13px;
+          font: 14.5px var(--font-serif);
           cursor: pointer;
         }
         .kp-inline-model-tabs button.active {
@@ -1544,19 +1593,26 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
         }
         .kp-inline-model-fields {
           display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 14px;
-          padding-left: 112px;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 9px;
+          padding-left: 79px;
         }
         .kp-inline-model-fields label {
           display: grid;
-          gap: 7px;
+          gap: 5px;
         }
         .kp-inline-model-fields label > span {
           color: #766A63;
-          font-size: 12px;
-          letter-spacing: 0.18em;
+          font-size: 10.5px;
+          letter-spacing: 0.14em;
           text-transform: uppercase;
+        }
+        .kp-inline-model-setup .kp-setup-input,
+        .kp-inline-voice-setup .kp-setup-input {
+          min-height: 43px;
+          border-radius: 8px;
+          padding: 9px 13px;
+          font-size: 16px;
         }
         .kp-inline-model-wide {
           grid-column: 1 / -1;
@@ -1580,25 +1636,80 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
           line-height: 1.4;
         }
         .kp-inline-model-actions {
-          padding-left: 112px;
+          padding-left: 79px;
           display: flex;
           flex-wrap: wrap;
           justify-content: flex-end;
-          gap: 9px;
+          gap: 7px;
         }
         .kp-inline-model-actions .kp-setup-primary,
         .kp-inline-model-actions .kp-setup-outline {
-          min-height: 48px;
+          min-height: 40px;
+          font-size: 15.5px;
+          padding: 0 16px;
         }
         .kp-inline-model-actions .kp-setup-primary {
-          min-width: 150px;
-          font-size: 18px;
+          min-width: 124px;
         }
         .kp-inline-model-message {
-          margin: -4px 0 0 112px;
+          margin: -2px 0 0 79px;
           color: #A74732;
           font-size: 14.5px;
           line-height: 1.45;
+        }
+        .kp-inline-voice-setup {
+          border-top: 1px solid #D8CEC3;
+          padding: 24px 34px 26px;
+          display: grid;
+          gap: 13px;
+        }
+        .kp-inline-voice-head {
+          display: grid;
+          grid-template-columns: 62px minmax(0, 1fr) auto;
+          align-items: center;
+          gap: 17px;
+        }
+        .kp-inline-voice-head h3 {
+          margin: 0;
+          font-family: var(--font-serif);
+          font-size: 24px;
+          font-weight: 500;
+          color: #2A211E;
+        }
+        .kp-inline-voice-head p {
+          margin: 5px 0 0;
+          max-width: 620px;
+          color: #766A63;
+          font-size: 15.5px;
+          line-height: 1.35;
+        }
+        .kp-inline-voice-controls {
+          padding-left: 79px;
+          display: grid;
+          grid-template-columns: minmax(260px, 1fr) auto;
+          align-items: end;
+          gap: 9px;
+        }
+        .kp-inline-voice-controls label {
+          display: grid;
+          gap: 5px;
+        }
+        .kp-inline-voice-controls label > span {
+          color: #766A63;
+          font-size: 10.5px;
+          letter-spacing: 0.14em;
+          text-transform: uppercase;
+        }
+        .kp-inline-voice-actions {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 7px;
+          justify-content: flex-end;
+        }
+        .kp-inline-voice-actions .kp-setup-outline {
+          min-height: 40px;
+          font-size: 15.5px;
+          padding: 0 16px;
         }
         .kp-host-error {
           margin: 18px 0 0;
@@ -1716,13 +1827,17 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
           }
           .kp-setup-row { grid-template-columns: 1fr !important; }
           .kp-inline-model-setup { padding: 30px 24px; }
-          .kp-inline-model-head { grid-template-columns: 1fr; }
+          .kp-inline-model-head,
+          .kp-inline-voice-head { grid-template-columns: 1fr; }
           .kp-inline-model-tabs,
           .kp-inline-model-fields,
           .kp-inline-model-actions,
-          .kp-inline-model-message { padding-left: 0; margin-left: 0; }
-          .kp-inline-model-fields { grid-template-columns: 1fr; }
-          .kp-inline-model-actions { justify-content: flex-start; }
+          .kp-inline-model-message,
+          .kp-inline-voice-controls { padding-left: 0; margin-left: 0; }
+          .kp-inline-model-fields,
+          .kp-inline-voice-controls { grid-template-columns: 1fr; }
+          .kp-inline-model-actions,
+          .kp-inline-voice-actions { justify-content: flex-start; }
         }
       `}</style>
       <div style={{ width: "min(1120px, calc(100% - 72px))", margin: "0 auto", padding: "44px 0 34px" }}>
@@ -1748,7 +1863,11 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
                   model: profile && profile.model,
                 }))}
               />
-              {connectRows.filter((item) => item.id !== "models").map((item) => (
+              <InlineVoiceSetup
+                audioState={audioState}
+                onConnect={connectAudio}
+              />
+              {connectRows.filter((item) => item.id !== "models" && item.id !== "voice").map((item) => (
                 <SetupPanelRow
                   key={item.id}
                   icon={item.icon}
