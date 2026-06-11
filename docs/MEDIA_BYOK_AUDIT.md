@@ -63,29 +63,15 @@ flowchart TD
   media provider status.
 - Media usage reservations now mark BYOK media generation with
   `providerSource: "byok"` and profile metadata where applicable.
+- First-run setup and the full-screen model setup save an OpenAI key as both a
+  hosted LLM profile and hosted media/voice profile, so users do not have to
+  paste the same OpenAI key twice.
+- Studio's provider dialog can add or replace hosted media keys through
+  `/api/media/provider-settings`.
 
 ## Gaps
 
-### 1. Setup still prefers the desktop bridge
-
-The setup helper calls `desktop.saveMediaProviderKey()` in desktop mode. Hosted
-web mode now has a matching encrypted settings route, but the setup/onboarding
-UI still needs to consistently use it for media provider keys.
-
-Impact: hosted onboarding can test some user-supplied keys and has a route to
-persist them, but does not yet reliably feed them into media generation.
-
-### 2. Studio UI does not yet expose media profile management cleanly
-
-`GET /api/media/providers` now returns user-aware status, but the hosted Studio
-and setup UI still need a clear media provider settings surface that writes to
-`/api/media/provider-settings`.
-
-Impact: the backend can use hosted BYOK media profiles, but the user journey for
-adding, testing, selecting, and rotating those media keys is not production
-quality yet.
-
-### 3. Live provider smoke coverage is still needed
+### 1. Live provider smoke coverage is still needed
 
 Automated tests prove resolver behavior, secret-free responses, and BYOK usage
 reservation shape. They do not prove live provider behavior against Hedra,
@@ -94,6 +80,15 @@ ElevenLabs, OpenAI image/audio, xAI image, and custom image endpoints.
 Impact: before launch, run a hosted staging smoke with real BYOK keys for each
 supported provider and confirm generated assets persist beyond signed provider
 URL expiry.
+
+### 2. Hosted media provider management is functional, not polished
+
+First-run setup and Studio now write hosted media keys through the encrypted
+settings route, but a production SaaS should still add profile editing,
+deletion, provider-specific help, and clearer model/capability defaults.
+
+Impact: hosted BYOK media can be configured without env vars, but the management
+experience is still an MVP surface.
 
 ## Required Implementation Order
 
@@ -131,7 +126,7 @@ URL expiry.
    - All usage reservations include `providerSource`, `provider`, `model`, and
      `profileId`.
 
-6. Update provider status and setup UI. **Partially implemented.**
+6. Update provider status and setup UI. **Implemented as MVP.**
    - `GET /api/media/providers` should merge managed availability with
      user-saved hosted media BYOK status.
    - Onboarding/setup should save media keys through the hosted media settings

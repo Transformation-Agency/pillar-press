@@ -2,28 +2,164 @@
 
 function MediaProvidersDialog({ status, onClose }) {
   const providers = (status && status.providers) || [];
+  const [settings, setSettings] = React.useState({ profiles: [], defaultProfileId: null });
+  const [provider, setProvider] = React.useState("openai");
+  const [apiKey, setApiKey] = React.useState("");
+  const [model, setModel] = React.useState("gpt-4o-mini-tts");
+  const [baseUrl, setBaseUrl] = React.useState("https://api.openai.com/v1");
+  const [label, setLabel] = React.useState("");
+  const [message, setMessage] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const providerLabels = {
+    hedra: "Hedra",
+    elevenlabs: "ElevenLabs",
+    openai: "OpenAI",
+    xai: "xAI / Grok",
+    "custom-image": "Custom image endpoint",
+  };
+  const defaultBaseUrl = {
+    openai: "https://api.openai.com/v1",
+    xai: "https://api.x.ai/v1",
+    "custom-image": "",
+  };
+  const defaultModels = {
+    openai: "gpt-4o-mini-tts",
+    elevenlabs: "eleven-tts-multilingual-v2",
+    xai: "grok-2-image",
+    "custom-image": "custom-image-model",
+    hedra: "",
+  };
+  const profileIdFor = (profile) =>
+    String(["media", profile.provider, profile.baseUrl || "", profile.model || ""].join("-"))
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 100) || "media-profile";
+
+  React.useEffect(() => {
+    let alive = true;
+    fetch("/api/media/provider-settings", { headers: { Accept: "application/json" } })
+      .then((response) => response.ok ? response.json() : null)
+      .then((body) => {
+        if (alive && body && body.settings) setSettings(body.settings);
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
+  function applyProvider(next) {
+    setProvider(next);
+    setApiKey("");
+    setMessage("");
+    setModel(defaultModels[next] || "");
+    setBaseUrl(defaultBaseUrl[next] || "");
+    setLabel(providerLabels[next] || next);
+  }
+
+  async function saveProvider() {
+    const key = apiKey.trim();
+    if (!key) {
+      setMessage("Paste an API key first.");
+      return;
+    }
+    if (provider === "custom-image" && !baseUrl.trim()) {
+      setMessage("Add the custom endpoint base URL.");
+      return;
+    }
+    setBusy(true);
+    setMessage("Saving provider.");
+    try {
+      const profile = {
+        id: profileIdFor({ provider, baseUrl, model }),
+        label: label.trim() || providerLabels[provider] || provider,
+        provider,
+        model: model.trim() || undefined,
+        baseUrl: baseUrl.trim() || undefined,
+        apiKey: key,
+      };
+      const existing = Array.isArray(settings.profiles) ? settings.profiles : [];
+      const profiles = existing.filter((item) => item.id !== profile.id).concat(profile);
+      const response = await fetch("/api/media/provider-settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ settings: { profiles, defaultProfileId: profile.id } }),
+      });
+      const body = await response.json().catch(() => null);
+      if (!response.ok) throw new Error((body && body.error) || "Could not save media provider.");
+      setSettings(body.settings || { profiles, defaultProfileId: profile.id });
+      setApiKey("");
+      setMessage("Provider saved encrypted. Studio can use it now.");
+    } catch (error) {
+      setMessage((error && error.message) || "Could not save media provider.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "oklch(0 0 0 / 0.4)", display: "grid", placeItems: "center", zIndex: 80 }}>
-      <div className="card" onClick={(e) => e.stopPropagation()} style={{ width: 560, maxWidth: "92vw", padding: "26px 28px" }}>
+      <div className="card" onClick={(e) => e.stopPropagation()} style={{ width: 720, maxWidth: "92vw", padding: "26px 28px", maxHeight: "86vh", overflowY: "auto" }}>
         <div className="eyebrow" style={{ marginBottom: 6 }}>Media providers</div>
         <h2 style={{ fontSize: 24, marginBottom: 10 }}>Optional cloud media</h2>
         <p className="muted" style={{ fontSize: 13.5, marginBottom: 18 }}>
-          Studio can use any configured server-side media provider. Keys stay in the packaged server environment or native app settings, never in browser storage.
+          Studio can use hosted BYOK media profiles or managed server providers. Keys are saved encrypted server-side and never returned to the browser after save.
         </p>
         <div style={{ display: "grid", gap: 8, marginBottom: 18 }}>
           {providers.map((p) => (
             <div key={p.id} className="card" style={{ padding: "10px 12px", borderRadius: "var(--radius)", display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
               <div>
                 <div style={{ fontSize: 15 }}>{p.label}</div>
-                <div className="muted" style={{ fontSize: 12.5 }}>{(p.capabilities || []).join(", ") || "No capabilities"}</div>
+                <div className="muted" style={{ fontSize: 12.5 }}>
+                  {(p.capabilities || []).join(", ") || "No capabilities"}
+                  {Array.isArray(p.sources) && p.sources.length ? " · " + p.sources.join(" + ") : ""}
+                </div>
               </div>
               <StatusChipMini ok={!!p.configured} label={p.configured ? "Configured" : "Not configured"} />
             </div>
           ))}
         </div>
+        <div className="card" style={{ padding: 14, marginBottom: 16, background: "var(--paper-sunk)" }}>
+          <div className="eyebrow" style={{ marginBottom: 8 }}>Add or replace a hosted media key</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <label>
+              <span className="eyebrow">Provider</span>
+              <select className="field" value={provider} onChange={(e) => applyProvider(e.target.value)}>
+                <option value="openai">OpenAI image + voice</option>
+                <option value="elevenlabs">ElevenLabs voice</option>
+                <option value="hedra">Hedra image/video/avatar</option>
+                <option value="xai">xAI / Grok image</option>
+                <option value="custom-image">Custom image endpoint</option>
+              </select>
+            </label>
+            <label>
+              <span className="eyebrow">Label</span>
+              <input className="field" value={label} onChange={(e) => setLabel(e.target.value)} placeholder={providerLabels[provider] || provider} />
+            </label>
+            <label>
+              <span className="eyebrow">API key</span>
+              <input className="field" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="Paste API key" />
+            </label>
+            <label>
+              <span className="eyebrow">Model or default</span>
+              <input className="field" value={model} onChange={(e) => setModel(e.target.value)} placeholder={defaultModels[provider] || "Optional"} />
+            </label>
+            {(provider === "openai" || provider === "xai" || provider === "custom-image") && (
+              <label style={{ gridColumn: "1 / -1" }}>
+                <span className="eyebrow">Base URL</span>
+                <input className="field" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder={provider === "custom-image" ? "https://provider.example/v1" : defaultBaseUrl[provider]} />
+              </label>
+            )}
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginTop: 12 }}>
+            <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>
+              Saved profiles: {(settings.profiles || []).length || 0}. Existing saved keys stay encrypted; leave this blank unless you are adding or replacing a key.
+            </p>
+            <button className="btn primary" onClick={saveProvider} disabled={busy || !apiKey.trim()}>{busy ? <><Spinner size={14} /> Saving…</> : "Save key"}</button>
+          </div>
+          {message && <p className="muted" role="status" style={{ fontSize: 12.5, margin: "10px 0 0" }}>{message}</p>}
+        </div>
         <p className="muted" style={{ fontSize: 12.5, lineHeight: 1.5, marginBottom: 18 }}>
-          Configure <span className="mono">HEDRA_API_KEY</span>, <span className="mono">ELEVENLABS_API_KEY</span>,
-          <span className="mono"> OPENAI_API_KEY</span>, <span className="mono">XAI_API_KEY</span>, or custom <span className="mono">MEDIA_IMAGE_*</span> variables for the providers you want to use.
+          Desktop/local-first can still use native encrypted settings or server env vars. Hosted web users should use this encrypted profile path.
         </p>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
           <button className="btn primary" onClick={onClose}>Done</button>

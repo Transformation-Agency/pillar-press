@@ -442,6 +442,69 @@ function SetupStatusChip({ label }) {
   );
 }
 
+async function kpSetupJson(method, path, body) {
+  const response = await fetch(path, {
+    method,
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: body == null ? undefined : JSON.stringify(body),
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok) throw new Error((data && data.error) || (method + " " + path + " failed."));
+  return data || {};
+}
+
+function kpMediaProviderBaseUrl(provider) {
+  if (provider === "openai") return "https://api.openai.com/v1";
+  if (provider === "xai") return "https://api.x.ai/v1";
+  return undefined;
+}
+
+function kpMediaProviderModel(provider, fallback) {
+  if (fallback) return fallback;
+  if (provider === "openai") return "gpt-4o-mini-tts";
+  if (provider === "xai") return "grok-2-image";
+  if (provider === "elevenlabs") return "eleven-tts-multilingual-v2";
+  return undefined;
+}
+
+function kpMediaProfileId(profile) {
+  return String(["media", profile.provider, profile.baseUrl || "", profile.model || ""].join("-"))
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 100) || "media-profile";
+}
+
+async function saveHostedMediaProviderProfile(profile) {
+  const provider = profile.provider;
+  const apiKey = (profile.apiKey || "").trim();
+  if (!provider || !apiKey) return null;
+  const normalized = {
+    id: profile.id || kpMediaProfileId(profile),
+    label: profile.label || provider,
+    provider,
+    model: kpMediaProviderModel(provider, profile.model),
+    baseUrl: profile.baseUrl || kpMediaProviderBaseUrl(provider),
+    apiKey,
+  };
+  const current = await kpSetupJson("GET", "/api/media/provider-settings").catch(() => ({ settings: { profiles: [], defaultProfileId: null } }));
+  const settings = current.settings || { profiles: [], defaultProfileId: null };
+  const existing = Array.isArray(settings.profiles) ? settings.profiles : [];
+  const profiles = existing.filter((item) => item.id !== normalized.id).concat(normalized);
+  const saved = await kpSetupJson("PUT", "/api/media/provider-settings", {
+    settings: {
+      profiles,
+      defaultProfileId: normalized.id,
+    },
+  });
+  return saved.settings || null;
+}
+
+async function saveHostedLLMSettings(settings) {
+  const saved = await kpSetupJson("PUT", "/api/provider-settings", { settings });
+  return saved.settings || settings;
+}
+
 function InlineModelSetup({ status, onSaved }) {
   const desktop = window.KINGS_DESKTOP;
   const hasDesktop = !!(desktop && desktop.isDesktop && desktop.isDesktop());
@@ -602,10 +665,6 @@ function InlineModelSetup({ status, onSaved }) {
       setMessage("Add a base URL first.");
       return;
     }
-    if (!hasDesktop || !desktop.saveLLMSettings) {
-      setMessage("Model settings can be saved from the desktop app. You can still test this provider here.");
-      return;
-    }
     setBusy(true);
     setMessage("Saving model settings.");
     try {
@@ -622,9 +681,22 @@ function InlineModelSetup({ status, onSaved }) {
         defaultProfileId: profile.id,
         taskDefaults,
       };
-      await desktop.saveLLMSettings(settings);
-      if (profile.provider === "openai" && profile.apiKey && desktop.saveMediaProviderKey) {
-        await desktop.saveMediaProviderKey("openai", profile.apiKey, { baseUrl: profile.baseUrl });
+      if (hasDesktop && desktop.saveLLMSettings) {
+        await desktop.saveLLMSettings(settings);
+        if (profile.provider === "openai" && profile.apiKey && desktop.saveMediaProviderKey) {
+          await desktop.saveMediaProviderKey("openai", profile.apiKey, { baseUrl: profile.baseUrl });
+        }
+      } else {
+        await saveHostedLLMSettings(settings);
+        if (profile.provider === "openai" && profile.apiKey) {
+          await saveHostedMediaProviderProfile({
+            provider: "openai",
+            label: "OpenAI media and voice",
+            apiKey: profile.apiKey,
+            baseUrl: profile.baseUrl || "https://api.openai.com/v1",
+            model: "gpt-4o-mini-tts",
+          });
+        }
       }
       setMessage("Model saved.");
       if (onSaved) onSaved(profile);
@@ -783,10 +855,6 @@ function InlineVoiceSetup({ status, audioState, onConnect, onLLMSaved, onVoiceCo
       .slice(0, 80) || "llm-profile";
 
   async function saveOpenAIAsStarterLLM() {
-    if (!hasDesktop || !desktop.saveLLMSettings) {
-      setMessage("OpenAI key works. Open the desktop app to save it as your starter model.");
-      return;
-    }
     const profile = {
       id: "openai-starter-gpt-4o-mini",
       label: "OpenAI / ChatGPT gpt-4o-mini",
@@ -797,7 +865,7 @@ function InlineVoiceSetup({ status, audioState, onConnect, onLLMSaved, onVoiceCo
     };
     profile.id = profileIdFor(profile);
     const taskDefaults = Object.fromEntries(KINGSPRESS_LLM_TASKS.map((task) => [task, profile.id]));
-    await desktop.saveLLMSettings({
+    const settings = {
       provider: profile.provider,
       model: profile.model,
       baseUrl: profile.baseUrl,
@@ -805,7 +873,9 @@ function InlineVoiceSetup({ status, audioState, onConnect, onLLMSaved, onVoiceCo
       profiles: [profile],
       defaultProfileId: profile.id,
       taskDefaults,
-    });
+    };
+    if (hasDesktop && desktop.saveLLMSettings) await desktop.saveLLMSettings(settings);
+    else await saveHostedLLMSettings(settings);
     if (onLLMSaved) onLLMSaved(profile);
     if (window.KP_ONBOARDING_ACTIONS && window.KP_ONBOARDING_ACTIONS.notifyProviderSetupSaved) {
       window.KP_ONBOARDING_ACTIONS.notifyProviderSetupSaved({ profile });
@@ -813,11 +883,21 @@ function InlineVoiceSetup({ status, audioState, onConnect, onLLMSaved, onVoiceCo
   }
 
   async function saveVoiceProviderKey() {
-    if (!hasDesktop || !desktop.saveMediaProviderKey) return false;
     const desktopProvider = provider === "elevenlabs" ? "elevenlabs" : provider === "hedra" ? "hedra" : "openai";
-    await desktop.saveMediaProviderKey(desktopProvider, apiKey.trim(), {
+    const profile = {
+      provider: desktopProvider,
+      label: providerLabels[provider] + " media",
+      apiKey: apiKey.trim(),
       baseUrl: provider === "openai" ? "https://api.openai.com/v1" : undefined,
-    });
+      model: provider === "openai" ? "gpt-4o-mini-tts" : provider === "elevenlabs" ? "eleven-tts-multilingual-v2" : undefined,
+    };
+    if (hasDesktop && desktop.saveMediaProviderKey) {
+      await desktop.saveMediaProviderKey(desktopProvider, apiKey.trim(), {
+        baseUrl: profile.baseUrl,
+      });
+      return true;
+    }
+    await saveHostedMediaProviderProfile(profile);
     return true;
   }
 

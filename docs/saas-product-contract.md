@@ -346,7 +346,9 @@ Rules:
   image endpoints through `GET/PUT /api/media/provider-settings`; Studio media
   generation, provider status, Hedra model/status/asset calls, OpenAI-compatible
   media calls, and ElevenLabs TTS now resolve those hosted BYOK profiles
-  server-side before falling back to managed keys.
+  server-side before falling back to managed keys. First-run setup, full-screen
+  model setup, and Studio provider settings now write hosted media keys through
+  the encrypted media provider settings route instead of requiring env vars.
 - Trial workspaces can use managed keys only within tight usage caps.
 
 ## Stage 1 Success Gate
@@ -429,8 +431,9 @@ Stage 3 is complete only when:
 - Hosted media BYOK generation works end to end. **Not complete:** see
   `docs/MEDIA_BYOK_AUDIT.md` for the current credential-flow audit and required
   implementation order. Server-side generation/status consumption is
-  implemented; the remaining work is hosted setup/UI media profile management
-  and live provider smoke coverage.
+  implemented; hosted setup/UI media profile management is available as an MVP;
+  the remaining work is live provider smoke coverage and production-grade profile
+  editing/rotation UX.
 - Usage rollups reflect the ledger.
 - Provider failure records failed usage without double-charging. **Started:**
   the first gated routes mark reserved usage as failed when downstream work

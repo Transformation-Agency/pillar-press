@@ -157,6 +157,27 @@ describe("browser onboarding audio helpers", () => {
   });
 });
 
+describe("hosted media provider setup browser wiring", () => {
+  it("setup helper saves hosted media provider keys through the encrypted server route", () => {
+    const source = readFileSync(new URL("../public/setup-helper.jsx", import.meta.url), "utf8");
+
+    expect(source).toContain("function saveHostedMediaProviderProfile");
+    expect(source).toContain("\"/api/media/provider-settings\"");
+    expect(source).toContain("await saveHostedLLMSettings(settings)");
+    expect(source).toContain("await saveHostedMediaProviderProfile({");
+    expect(source).toContain("OpenAI key works. I saved it encrypted for voice, setup, and drafting.");
+  });
+
+  it("Studio exposes hosted media provider profile management instead of env-only instructions", () => {
+    const source = readFileSync(new URL("../public/screen-studio.jsx", import.meta.url), "utf8");
+
+    expect(source).toContain("\"/api/media/provider-settings\"");
+    expect(source).toContain("Add or replace a hosted media key");
+    expect(source).toContain("Provider saved encrypted. Studio can use it now.");
+    expect(source).toContain("Hosted web users should use this encrypted profile path.");
+  });
+});
+
 describe("setup profile extraction schema", () => {
   it("parses King’s Press setup essentials for review", () => {
     const parsed = setupProfileSchema.parse({

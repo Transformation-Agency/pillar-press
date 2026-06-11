@@ -747,6 +747,38 @@ function DesktopOnboarding() {
     return value === undefined ? undefined : value;
   };
 
+  const mediaProfileIdFor = (profile) =>
+    String(["media", profile.provider, profile.baseUrl || "", profile.model || ""].join("-"))
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 100) || "media-profile";
+
+  const saveHostedOpenAIMediaProfile = async (key) => {
+    if (!key) return;
+    const profile = {
+      id: mediaProfileIdFor({ provider: "openai", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini-tts" }),
+      label: "OpenAI media and voice",
+      provider: "openai",
+      model: "gpt-4o-mini-tts",
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: key,
+    };
+    const current = await fetch("/api/media/provider-settings", { headers: { Accept: "application/json" } })
+      .then((res) => res.ok ? res.json() : null)
+      .catch(() => null);
+    const currentSettings = current && current.settings ? current.settings : { profiles: [], defaultProfileId: null };
+    const existing = Array.isArray(currentSettings.profiles) ? currentSettings.profiles : [];
+    const profiles = existing.filter((item) => item.id !== profile.id).concat(profile);
+    const res = await fetch("/api/media/provider-settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ settings: { profiles, defaultProfileId: profile.id } }),
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok) throw new Error((json && json.error) || "Could not save hosted media provider settings.");
+  };
+
   const pullModel = async () => {
     if (!model.trim()) return;
     setBusy(true); setMessage("Downloading " + model + ". This can take a while.");
@@ -911,8 +943,12 @@ function DesktopOnboarding() {
       } else {
         await desktop.saveLLMSettings(cleanedSettings);
       }
-      if (!isHostedSetup && nextProfile.provider === "openai" && nextProfile.apiKey && desktop.saveMediaProviderKey) {
-        await desktop.saveMediaProviderKey("openai", nextProfile.apiKey, { baseUrl: "https://api.openai.com/v1" });
+      if (nextProfile.provider === "openai" && nextProfile.apiKey) {
+        if (isHostedSetup) {
+          await saveHostedOpenAIMediaProfile(nextProfile.apiKey);
+        } else if (desktop.saveMediaProviderKey) {
+          await desktop.saveMediaProviderKey("openai", nextProfile.apiKey, { baseUrl: "https://api.openai.com/v1" });
+        }
       }
       setSavedSettings(savedResponse);
       setTaskDefaults(nextTaskDefaults);
