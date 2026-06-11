@@ -71,6 +71,11 @@ function limitForDimension(
   return entitlement.monthlyLlmCredits;
 }
 
+export function entitlementAllowsManagedProvider(entitlement: Pick<Entitlement, "allowedProviders" | "canUseManagedKeys">) {
+  const allowed = Array.isArray(entitlement.allowedProviders) ? entitlement.allowedProviders : [];
+  return entitlement.canUseManagedKeys && allowed.includes("managed");
+}
+
 function tasksForDimension(dimension: UsageDimension): UsageEventTask[] {
   if (dimension === "media") return ["media_generation"];
   if (dimension === "gather") return ["gather"];
@@ -223,6 +228,13 @@ export async function reserveUsage(input: UsageReservationInput): Promise<UsageR
   const entitlement = await entitlementForPlan(subscription.planId);
   if (!entitlement) {
     throw new BillingError(403, "entitlement_missing", "Plan entitlement is missing.");
+  }
+  if (!entitlementAllowsManagedProvider(entitlement)) {
+    throw new BillingError(
+      402,
+      "managed_provider_not_enabled",
+      "Managed AI provider usage is not included in your current plan. Upgrade or connect your own provider to continue.",
+    );
   }
 
   const dimension = usageDimensionForTask(input.task);

@@ -18,7 +18,8 @@ Do this as a staged migration, not a rewrite.
 4. Stage 3: entitlement checks, usage reservations, and quota enforcement.
    **Started:** hosted-only usage reservation helpers now enforce active/trial
    subscription status, expired trial dates, usage limits, and campaign-count
-   limits, plus Drive feature access, while desktop/local-first bypasses them.
+   limits, plus managed-provider and Drive feature access, while
+   desktop/local-first bypasses them.
 5. Stage 4: trial onboarding and upgrade UI. **Started:** hosted users now
    have a Billing panel showing trial/subscription status, period usage, paid
    plan upgrades, the Stripe customer portal, and an automatic upgrade prompt
@@ -387,6 +388,9 @@ Stage 3 is complete only when:
 - Feature gates block plan-restricted integrations. **Started:** hosted Google
   Drive OAuth and upload routes require `drive_enabled` before linking or
   exporting to Drive; desktop/local-first continues to use local exports.
+- Managed provider access honors plan entitlements. **Started:** hosted usage
+  reservations require `can_use_managed_keys` and `"managed"` in
+  `allowed_providers` before server-managed AI/media/research work begins.
 - Usage rollups reflect the ledger.
 - Provider failure records failed usage without double-charging. **Started:**
   the first gated routes mark reserved usage as failed when downstream work

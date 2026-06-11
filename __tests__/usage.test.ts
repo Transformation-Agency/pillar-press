@@ -11,6 +11,7 @@ describe("hosted usage reservations", () => {
 
     const {
       billingAccessForSubscription,
+      entitlementAllowsManagedProvider,
       periodForSubscription,
       quotaErrorMessage,
       subscriptionAllowsUsage,
@@ -25,6 +26,9 @@ describe("hosted usage reservations", () => {
     expect(subscriptionAllowsUsage("active")).toBe(true);
     expect(subscriptionAllowsUsage("past_due")).toBe(false);
     expect(subscriptionAllowsUsage("canceled")).toBe(false);
+    expect(entitlementAllowsManagedProvider({ allowedProviders: ["managed", "byok"], canUseManagedKeys: true } as any)).toBe(true);
+    expect(entitlementAllowsManagedProvider({ allowedProviders: ["byok"], canUseManagedKeys: true } as any)).toBe(false);
+    expect(entitlementAllowsManagedProvider({ allowedProviders: ["managed"], canUseManagedKeys: false } as any)).toBe(false);
     expect(billingAccessForSubscription(null)).toMatchObject({ allowed: false, code: "subscription_required" });
     expect(billingAccessForSubscription({
       status: "trialing",
@@ -79,6 +83,8 @@ describe("hosted usage reservations", () => {
     const insert = vi.fn();
     const entitlement = {
       planId: "trial",
+      allowedProviders: ["managed", "byok"],
+      canUseManagedKeys: true,
       monthlyLlmCredits: 10,
       monthlyMediaGenerations: 1,
       monthlyGatherRuns: 1,
@@ -221,6 +227,65 @@ describe("hosted usage reservations", () => {
     expect(select).not.toHaveBeenCalled();
     expect(insert).not.toHaveBeenCalled();
   });
+
+  it("blocks hosted managed provider work before inserting when plan disallows managed keys", async () => {
+    class MockBillingError extends Error {
+      status: number;
+      code: string;
+      constructor(status: number, code: string, message: string) {
+        super(message);
+        this.status = status;
+        this.code = code;
+      }
+    }
+    const insert = vi.fn();
+    const entitlement = {
+      planId: "trial",
+      allowedProviders: ["byok"],
+      canUseManagedKeys: false,
+      monthlyLlmCredits: 250,
+      monthlyMediaGenerations: 5,
+      monthlyGatherRuns: 10,
+    };
+    const subscription = {
+      workspaceId: "workspace_1",
+      planId: "trial",
+      status: "trialing",
+      trialStart: new Date("2026-06-01T00:00:00.000Z"),
+      trialEnd: new Date("2099-06-08T00:00:00.000Z"),
+      currentPeriodStart: null,
+      currentPeriodEnd: null,
+    };
+    const select = vi.fn().mockReturnValue({
+      from: () => ({
+        where: () => ({
+          limit: vi.fn(async () => [entitlement]),
+        }),
+      }),
+    });
+
+    vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => false }));
+    vi.doMock("@/lib/auth", () => ({ getOrCreateWorkspace: vi.fn() }));
+    vi.doMock("@/lib/billing/stripe", () => ({
+      BillingError: MockBillingError,
+      getLatestSubscription: vi.fn(async () => subscription),
+      getOrCreateTrialSubscription: vi.fn(),
+    }));
+    vi.doMock("@/lib/db", async () => {
+      const actual = await vi.importActual<any>("@/lib/db");
+      return { ...actual, db: { select, insert } };
+    });
+
+    const { reserveUsage } = await import("@/lib/billing/usage");
+
+    await expect(reserveUsage({
+      user: { id: "user_1", workspaceId: "workspace_1", role: "author" },
+      task: "utility",
+      feature: "llm.util.utility",
+      estimatedCredits: 1,
+    })).rejects.toMatchObject({ status: 402, code: "managed_provider_not_enabled" });
+    expect(insert).not.toHaveBeenCalled();
+  });
 });
 
 describe("billing error responses", () => {
@@ -271,6 +336,24 @@ describe("billing error responses", () => {
     expect(body).toEqual({
       error: "Your free trial has ended. Choose a plan to continue.",
       code: "trial_expired",
+    });
+  });
+
+  it("returns managed provider entitlement errors as client-visible 402 responses", async () => {
+    const { BillingError } = await import("@/lib/billing/stripe");
+    const { toErrorResponse } = await import("@/lib/errors");
+
+    const res = toErrorResponse(new BillingError(
+      402,
+      "managed_provider_not_enabled",
+      "Managed AI provider usage is not included in your current plan. Upgrade or connect your own provider to continue.",
+    ));
+    const body = await res.json();
+
+    expect(res.status).toBe(402);
+    expect(body).toEqual({
+      error: "Managed AI provider usage is not included in your current plan. Upgrade or connect your own provider to continue.",
+      code: "managed_provider_not_enabled",
     });
   });
 });
