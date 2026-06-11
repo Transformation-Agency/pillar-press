@@ -15,6 +15,8 @@ Do this as a staged migration, not a rewrite.
 3. Stage 2: Stripe billing foundation. **Implemented:** trial status,
    Checkout, Customer Portal, and signed webhook sync routes are in place.
 4. Stage 3: entitlement checks, usage reservations, and quota enforcement.
+   **Started:** hosted-only usage reservation helpers now enforce plan limits
+   for the first expensive surfaces while desktop/local-first bypasses them.
 5. Stage 4: trial onboarding and upgrade UI.
 6. Stage 5: workers/jobs for long-running Gather, Weave, media, and batch work.
 7. Stage 6: production ops, admin, support, observability, and launch gates.
@@ -367,11 +369,19 @@ Stage 2 is complete only when:
 ## Stage 3 Success Gate
 
 Stage 3 is complete only when:
-- Every expensive route reserves and records usage.
-- Quotas block over-limit work before provider calls.
+- Every expensive route reserves and records usage. **Started:** utility LLM
+  calls, manual Gather runs, and Studio media generation now reserve usage
+  before provider work and mark usage succeeded/failed afterward.
+- Quotas block over-limit work before provider calls. **Started:** the shared
+  reservation helper checks the current subscription period against plan
+  entitlements before inserting the reservation.
 - Usage rollups reflect the ledger.
-- Provider failure records failed usage without double-charging.
-- Idempotency keys prevent duplicate reservations.
+- Provider failure records failed usage without double-charging. **Started:**
+  the first gated routes mark reserved usage as failed when downstream work
+  throws.
+- Idempotency keys prevent duplicate reservations. **Started:** reservations
+  use the workspace/idempotency unique key and reuse existing reservations when
+  a request key is repeated.
 
 ## Development Order
 

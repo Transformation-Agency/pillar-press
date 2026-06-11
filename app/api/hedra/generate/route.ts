@@ -25,6 +25,7 @@ import { getAudioProviderConfig, getImageProviderConfig } from "@/lib/mediaProvi
 import { generateOpenAICompatibleImage } from "@/lib/mediaImage";
 import { generateOpenAICompatibleSpeech } from "@/lib/mediaAudio";
 import { campaignInWorkspace, tenantNotFound } from "@/lib/tenant";
+import { completeUsageReservation, failUsageReservation, reserveUsage, type UsageReservation } from "@/lib/billing/usage";
 import type { SessionUser } from "@/lib/auth";
 import type { Piece } from "@/lib/db";
 
@@ -74,6 +75,7 @@ async function resolveStartAsset(ref: string | undefined): Promise<string | unde
 // - video / avatar_video: Hedra video; avatar/video with a script first renders
 //   TTS on ElevenLabs and uploads it to Hedra as the audio track.
 export async function POST(req: Request) {
+  let reservation: UsageReservation = null;
   try {
     const user = await requireUser();
     const body = generateBodySchema.parse(await req.json());
@@ -87,6 +89,15 @@ export async function POST(req: Request) {
       if (!script) return NextResponse.json({ error: "Provide a script to voice.", code: "validation" }, { status: 422 });
 
       const audioProvider = getAudioProviderConfig(body.provider);
+      reservation = await reserveUsage({
+        user,
+        task: "media_generation",
+        feature: "media.audio",
+        campaignId: body.campaignId,
+        pieceId: body.pieceId,
+        provider: audioProvider?.provider ?? "elevenlabs",
+        model: body.modelId,
+      });
       let audioUrl: string;
       let audioVoice = body.voiceId;
       const meta: Record<string, unknown> = {};
@@ -140,6 +151,7 @@ export async function POST(req: Request) {
           modelId: body.modelId,
           completedAt: jobValues.completedAt.toISOString(),
         });
+        await completeUsageReservation(reservation);
         return NextResponse.json({ job }, { status: 201 });
       }
 
@@ -147,6 +159,7 @@ export async function POST(req: Request) {
         .insert(mediaJobs)
         .values(jobValues)
         .returning();
+      await completeUsageReservation(reservation);
       return NextResponse.json({ job }, { status: 201 });
     }
 
@@ -156,6 +169,15 @@ export async function POST(req: Request) {
       const prompt = sanitizeText(body.prompt, 2000);
       if (!prompt) return NextResponse.json({ error: "Provide an image prompt.", code: "validation" }, { status: 422 });
 
+      reservation = await reserveUsage({
+        user,
+        task: "media_generation",
+        feature: "media.image",
+        campaignId: body.campaignId,
+        pieceId: body.pieceId,
+        provider: imageProvider.provider,
+        model: body.modelId,
+      });
       const result = await generateOpenAICompatibleImage({
         config: imageProvider,
         model: body.modelId,
@@ -194,6 +216,9 @@ export async function POST(req: Request) {
           modelId: body.modelId,
           completedAt: jobValues.completedAt.toISOString(),
         });
+        await completeUsageReservation(reservation, {
+          metadata: { providerResponseId: result.providerResponseId ?? null },
+        });
         return NextResponse.json({ job }, { status: 201 });
       }
 
@@ -201,6 +226,9 @@ export async function POST(req: Request) {
         .insert(mediaJobs)
         .values(jobValues)
         .returning();
+      await completeUsageReservation(reservation, {
+        metadata: { providerResponseId: result.providerResponseId ?? null },
+      });
       return NextResponse.json({ job }, { status: 201 });
     }
 
@@ -212,6 +240,16 @@ export async function POST(req: Request) {
 
     const reqErr = validateAgainstModel(body, model);
     if (reqErr) return NextResponse.json({ error: reqErr, code: "validation" }, { status: 422 });
+
+    reservation = await reserveUsage({
+      user,
+      task: "media_generation",
+      feature: `media.${body.type}`,
+      campaignId: body.campaignId,
+      pieceId: body.pieceId,
+      provider: "hedra",
+      model: body.modelId,
+    });
 
     let audioAssetId = body.audioAssetId;
 
@@ -325,6 +363,10 @@ export async function POST(req: Request) {
         progress: pct(gen.progress),
         creditsEstimate: model.credits ?? null,
       });
+      await completeUsageReservation(reservation, {
+        actualCredits: Math.max(1, Math.ceil(model.credits ?? 1)),
+        providerRequestId: gen.id,
+      });
       return NextResponse.json({ job }, { status: 201 });
     }
 
@@ -353,8 +395,13 @@ export async function POST(req: Request) {
       })
       .returning();
 
+    await completeUsageReservation(reservation, {
+      actualCredits: Math.max(1, Math.ceil(model.credits ?? 1)),
+      providerRequestId: gen.id,
+    });
     return NextResponse.json({ job }, { status: 201 });
   } catch (err) {
+    await failUsageReservation(reservation, err);
     return toErrorResponse(err);
   }
 }

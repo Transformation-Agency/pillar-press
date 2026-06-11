@@ -4,6 +4,7 @@ import { runSchema } from "@/lib/gather-validation";
 import { runGatherForCampaign } from "@/lib/gather/runCampaign";
 import { toErrorResponse } from "@/lib/errors";
 import { campaignInWorkspace, tenantNotFound } from "@/lib/tenant";
+import { completeUsageReservation, failUsageReservation, reserveUsage, type UsageReservation } from "@/lib/billing/usage";
 
 // Per-source LLM summaries can take a few seconds each (run concurrently).
 export const maxDuration = 60;
@@ -14,15 +15,27 @@ export const maxDuration = 60;
 // synthesize that source's fetched results into a research brief. Returns the
 // saved items, per-source counts, and the per-source summaries.
 export async function POST(req: Request) {
+  let reservation: UsageReservation = null;
   try {
     const user = await requireUser();
     const { campaignId } = runSchema.parse(await req.json());
 
     if (!(await campaignInWorkspace(campaignId, user.workspaceId))) return tenantNotFound();
+    reservation = await reserveUsage({
+      user,
+      task: "gather",
+      feature: "gather.run",
+      campaignId,
+    });
     const result = await runGatherForCampaign(campaignId, user);
     if (!result) return NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
+    await completeUsageReservation(reservation, {
+      actualCredits: 1,
+      metadata: { found: result.found, saved: result.saved },
+    });
     return NextResponse.json(result);
   } catch (err) {
+    await failUsageReservation(reservation, err);
     return toErrorResponse(err);
   }
 }
