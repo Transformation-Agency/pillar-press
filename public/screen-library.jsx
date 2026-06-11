@@ -61,7 +61,7 @@ function PieceRow({ piece, onOpen, onDelete }) {
           {titling ? <Spinner size={14} /> : <Icon name="sparkle" size={15} />}
         </button>
         <button className="icon-btn" title="Delete piece"
-          onClick={(e) => { e.stopPropagation(); if (confirm(`Delete "${piece.title}"? This can't be undone.`)) onDelete(piece.id); }}
+          onClick={(e) => { e.stopPropagation(); onDelete(piece); }}
           style={{ opacity: hover ? 1 : 0.55, transition: "opacity 0.15s" }}>
           <Icon name="trash" size={15} />
         </button>
@@ -88,6 +88,9 @@ function ProgressPip({ on, label }) {
 
 function Library({ pieces, campaignName, onOpen, onNew, onDelete }) {
   const [filter, setFilter] = React.useState("All");
+  // window.confirm is a silent no-op inside Tauri's webview, so deletion goes
+  // through an in-app confirmation modal instead.
+  const [confirmDelete, setConfirmDelete] = React.useState(null); // piece or null
   const filters = ["All", ...window.Store.STATUSES];
   const counts = {};
   window.Store.STATUSES.forEach((s) => { counts[s] = pieces.filter((p) => p.status === s).length; });
@@ -139,10 +142,28 @@ function Library({ pieces, campaignName, onOpen, onNew, onDelete }) {
               </button>
             </div>
           ) : shown.map((p) => (
-            <PieceRow key={p.id} piece={p} onOpen={onOpen} onDelete={onDelete} />
+            <PieceRow key={p.id} piece={p} onOpen={onOpen} onDelete={(piece) => setConfirmDelete(piece)} />
           ))}
         </div>
       </div>
+
+      {confirmDelete && (
+        <div onClick={() => setConfirmDelete(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 200, display: "grid", placeItems: "center", padding: 16 }}>
+          <div onClick={(e) => e.stopPropagation()} className="card" style={{ width: "min(420px, 96vw)", padding: "22px 24px" }}>
+            <div className="eyebrow" style={{ marginBottom: 8 }}>Delete piece</div>
+            <p style={{ fontSize: 14.5, lineHeight: 1.55, margin: "0 0 16px" }}>
+              Delete &ldquo;{confirmDelete.title || "this piece"}&rdquo;? This can&rsquo;t be undone.
+            </p>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button className="btn" onClick={() => setConfirmDelete(null)}>Cancel</button>
+              <button className="btn primary" onClick={() => { onDelete(confirmDelete.id); setConfirmDelete(null); }}
+                style={{ background: "var(--sev-must)", borderColor: "var(--sev-must)" }}>
+                <Icon name="trash" size={13} /> Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

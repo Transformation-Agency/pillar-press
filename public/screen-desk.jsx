@@ -349,31 +349,46 @@ function Desk({ campaignId, onOpenPiece, hydrated }) {
   };
   const confirmDeleteThread = confirmDeleteId ? threads.find((t) => t.id === confirmDeleteId) : null;
 
+  // Run a completion against a thread whose last message is the user's turn.
+  // Shared by send() and retry() so a failed send can be re-attempted without
+  // retyping (the user message is already in the thread).
+  async function runCompletion(t) {
+    setBusy(true); setErr(null);
+    try {
+      const answer = await deskChatComplete(t, campaignId);
+      let next = Object.assign({}, t, {
+        messages: t.messages.concat([{ id: deskUid("msg_"), role: "assistant", content: answer || "(No response returned.)" }]),
+        updatedAt: Date.now(),
+      });
+      next = await compressDeskThread(next, win);
+      updateThread(next);
+    } catch (e) {
+      setErr((e && e.message) || "Desk chat failed.");
+      updateThread(t);
+    }
+    setBusy(false);
+  }
+
   async function send() {
     const body = text.trim();
     if (!body || !active || busy) return;
-    setText(""); setBusy(true); setErr(null);
+    setText("");
     if (taRef.current) taRef.current.style.height = "auto";
-    let t = Object.assign({}, active, {
+    const t = Object.assign({}, active, {
       campaignId: active.campaignId || campaignId || null,
       title: active.titleSet ? active.title : body.slice(0, 48),
       messages: (active.messages || []).concat([{ id: deskUid("msg_"), role: "user", content: body }]),
       updatedAt: Date.now(),
     });
     updateThread(t);
-    try {
-      const answer = await deskChatComplete(t, campaignId);
-      t = Object.assign({}, t, {
-        messages: t.messages.concat([{ id: deskUid("msg_"), role: "assistant", content: answer || "(No response returned.)" }]),
-        updatedAt: Date.now(),
-      });
-      t = await compressDeskThread(t, win);
-      updateThread(t);
-    } catch (e) {
-      setErr((e && e.message) || "Desk chat failed.");
-      updateThread(t);
-    }
-    setBusy(false);
+    await runCompletion(t);
+  }
+
+  function retry() {
+    if (!active || busy) return;
+    const msgs = active.messages || [];
+    if (!msgs.length || msgs[msgs.length - 1].role !== "user") return;
+    runCompletion(active);
   }
 
   function grow() {
@@ -457,7 +472,14 @@ function Desk({ campaignId, onOpenPiece, hydrated }) {
             )}
             {active && (active.messages || []).map((m) => <DeskBubble key={m.id} msg={m} />)}
             {busy && <div style={{ display: "flex", justifyContent: "flex-start" }}><div className="card" style={{ padding: "11px 14px" }}><Spinner size={14} /> Thinking…</div></div>}
-            {err && <p style={{ color: "var(--sev-must)", fontSize: 13.5 }}>{err}</p>}
+            {err && (
+              <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                <p style={{ color: "var(--sev-must)", fontSize: 13.5, margin: 0 }}>{err}</p>
+                {active && (active.messages || []).length > 0 && (active.messages[active.messages.length - 1].role === "user") && (
+                  <button className="btn sm" disabled={busy} onClick={retry}><Icon name="arrowR" size={13} /> Retry</button>
+                )}
+              </div>
+            )}
           </div>
         </div>
 

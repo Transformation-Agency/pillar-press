@@ -1,6 +1,6 @@
 # Gather Integration
 
-Gather is now part of King's Press Editorial Desk rather than a drop-in backend
+Gather is now part of Pillar Press Editorial Desk rather than a drop-in backend
 patch. The desktop app uses the same server routes in browser dev and packaged
 Tauri builds, with local-first persistence when SQLite is active.
 

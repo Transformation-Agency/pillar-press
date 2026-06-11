@@ -1,7 +1,7 @@
 /**
  * Drizzle schema for Hedra/Eleven media jobs.
  *
- * Integrates with King's Press's existing content: a job optionally belongs to
+ * Integrates with Pillar Press's existing content: a job optionally belongs to
  * a piece (sourceContentId) and a campaign, and always to a user/workspace for
  * authorization. Prefer this single small table over broad schema changes — it
  * is the "media asset / job" record the UI lists and the poller updates.
@@ -29,7 +29,7 @@ export const mediaJobs = pgTable(
     userId: text("user_id").notNull(),
     workspaceId: text("workspace_id"),
     campaignId: text("campaign_id"),
-    // link to a King's Press article/post/campaign item
+    // link to a Pillar Press article/post/campaign item
     sourceContentId: text("source_content_id"),
 
     // provider references
@@ -78,7 +78,7 @@ export type MediaJob = typeof mediaJobs.$inferSelect;
 export type NewMediaJob = typeof mediaJobs.$inferInsert;
 
 /* ============================================================
-   Core King's Press tables — campaigns, references, pieces,
+   Core Pillar Press tables — campaigns, references, pieces,
    settings, memberships, workspaces. All scoped by
    workspace/user/campaign for authorization.
    ============================================================ */

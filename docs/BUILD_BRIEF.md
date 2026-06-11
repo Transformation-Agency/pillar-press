@@ -1,4 +1,4 @@
-# BUILD_BRIEF.md — King's Press desktop scope
+# BUILD_BRIEF.md — Pillar Press desktop scope
 
 This is the complete feature scope. For each feature: what it does, **where the logic
 already lived** in `prototype-reference/`, and the desktop/local-first work needed to keep
@@ -163,7 +163,7 @@ can still use environment variables instead.
 
 ## Acceptance criteria (whole app)
 
-- `npm run desktop:build` produces a branded King’s Press `.app` and DMG.
+- `npm run desktop:build` produces a branded Pillar Press `.app` and DMG.
 - The packaged app launches from the app icon, starts its local server, initializes SQLite,
   starts with no default campaigns, serves the UI, and does not require Supabase/Postgres.
 - The desktop browser shell boots from local packaged JS and system fonts; it does not

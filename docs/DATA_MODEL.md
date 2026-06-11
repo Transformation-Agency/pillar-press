@@ -2,7 +2,7 @@
 
 The desktop product stores its primary data in SQLite through
 `db/local-sqlite-schema.sql`. The Drizzle/Postgres schema remains for hosted
-compatibility, but it is not required for normal King’s Press Editorial Desk
+compatibility, but it is not required for normal Pillar Press Editorial Desk
 installs.
 
 Object shapes should map onto the original prototype store names because the UI

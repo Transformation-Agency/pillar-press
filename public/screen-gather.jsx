@@ -10,7 +10,7 @@ function GToggle({ on, onChange }) {
 }
 
 function SourceRow({ source }) {
-  const k = window.GATHER.SOURCE_KINDS[source.kind];
+  const k = window.GATHER.SOURCE_KINDS[source.kind] || { label: source.kind, icon: "doc", placeholder: "" };
   return (
     <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto auto", gap: 10, alignItems: "center", padding: "10px 12px", border: "1px solid var(--hair)", borderRadius: "var(--radius)", background: "var(--paper-2)", opacity: source.enabled ? 1 : 0.6 }}>
       <span style={{ width: 30, height: 30, borderRadius: 7, display: "grid", placeItems: "center", background: "var(--paper-sunk)", color: "var(--accent-ink)", flexShrink: 0 }}><Icon name={k.icon} size={16} /></span>
@@ -27,7 +27,7 @@ function SourceRow({ source }) {
 }
 
 function GatherItem({ item, onToggle }) {
-  const k = window.GATHER.SOURCE_KINDS[item.kind];
+  const k = window.GATHER.SOURCE_KINDS[item.kind] || { label: item.kind, icon: "doc" };
   return (
     <div onClick={() => onToggle(item)} style={{ display: "grid", gridTemplateColumns: "22px 1fr", gap: 12, padding: "14px 16px", borderBottom: "1px solid var(--hair)", cursor: "pointer", background: item.selected ? "var(--accent-soft)" : "transparent", transition: "background 0.15s" }}>
       <span style={{ width: 18, height: 18, borderRadius: 5, border: "1.5px solid " + (item.selected ? "var(--accent)" : "var(--hair-2)"), background: item.selected ? "var(--accent)" : "transparent", display: "grid", placeItems: "center", marginTop: 3 }}>
@@ -282,7 +282,7 @@ function Gather({ campaignId, refCtx, onGoWeave }) {
               <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
                 {["all", ...usedKinds].map((kf) => {
                   const on = kf === filter;
-                  const lbl = kf === "all" ? "All" : window.GATHER.SOURCE_KINDS[kf].label;
+                  const lbl = kf === "all" ? "All" : (window.GATHER.SOURCE_KINDS[kf] || { label: kf }).label;
                   return <button key={kf} onClick={() => setFilter(kf)} className="mono" style={{ fontSize: 11, padding: "5px 10px", borderRadius: 999, cursor: "pointer", border: "1px solid " + (on ? "var(--ink)" : "var(--hair)"), background: on ? "var(--ink)" : "transparent", color: on ? "var(--paper)" : "var(--ink-2)" }}>{lbl}</button>;
                 })}
               </div>

@@ -1,35 +1,164 @@
 /* Studio — provider-backed media generation surface. */
 
 function MediaProvidersDialog({ status, onClose }) {
+  // Image providers (OpenAI / xAI / custom) are still configured via server env
+  // vars; Hedra and ElevenLabs connect right here through the integration cards.
   const providers = (status && status.providers) || [];
+  const imageProviders = providers.filter((p) => p.id !== "hedra" && p.id !== "elevenlabs");
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "oklch(0 0 0 / 0.4)", display: "grid", placeItems: "center", zIndex: 80 }}>
-      <div className="card" onClick={(e) => e.stopPropagation()} style={{ width: 560, maxWidth: "92vw", padding: "26px 28px" }}>
+      <div className="card scroll-y" onClick={(e) => e.stopPropagation()} style={{ width: 560, maxWidth: "92vw", maxHeight: "88vh", padding: "26px 28px" }}>
         <div className="eyebrow" style={{ marginBottom: 6 }}>Media providers</div>
-        <h2 style={{ fontSize: 24, marginBottom: 10 }}>Optional cloud media</h2>
+        <h2 style={{ fontSize: 24, marginBottom: 10 }}>Studio integrations</h2>
         <p className="muted" style={{ fontSize: 13.5, marginBottom: 18 }}>
-          Studio can use any configured server-side media provider. Keys stay in the packaged server environment or native app settings, never in browser storage.
+          Connect optional services Studio uses for media. Keys are verified, then stored encrypted in the desktop settings — never in browser storage.
         </p>
-        <div style={{ display: "grid", gap: 8, marginBottom: 18 }}>
-          {providers.map((p) => (
-            <div key={p.id} className="card" style={{ padding: "10px 12px", borderRadius: "var(--radius)", display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
-              <div>
-                <div style={{ fontSize: 15 }}>{p.label}</div>
-                <div className="muted" style={{ fontSize: 12.5 }}>{(p.capabilities || []).join(", ") || "No capabilities"}</div>
-              </div>
-              <StatusChipMini ok={!!p.configured} label={p.configured ? "Configured" : "Not configured"} />
-            </div>
-          ))}
+        <div style={{ display: "grid", gap: 12, marginBottom: 18 }}>
+          <HedraIntegrationCard />
+          <ElevenLabsIntegrationCard />
         </div>
-        <p className="muted" style={{ fontSize: 12.5, lineHeight: 1.5, marginBottom: 18 }}>
-          Configure <span className="mono">HEDRA_API_KEY</span>, <span className="mono">ELEVENLABS_API_KEY</span>,
-          <span className="mono"> OPENAI_API_KEY</span>, <span className="mono">XAI_API_KEY</span>, or custom <span className="mono">MEDIA_IMAGE_*</span> variables for the providers you want to use.
-        </p>
+        {imageProviders.length > 0 && (
+          <div style={{ marginBottom: 18 }}>
+            <div className="eyebrow" style={{ marginBottom: 8 }}>Image providers</div>
+            <div style={{ display: "grid", gap: 8 }}>
+              {imageProviders.map((p) => (
+                <div key={p.id} className="card" style={{ padding: "10px 12px", borderRadius: "var(--radius)", display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontSize: 15 }}>{p.label}</div>
+                    <div className="muted" style={{ fontSize: 12.5 }}>{(p.capabilities || []).join(", ") || "No capabilities"}</div>
+                  </div>
+                  <StatusChipMini ok={!!p.configured} label={p.configured ? "Configured" : "Not configured"} />
+                </div>
+              ))}
+            </div>
+            <p className="muted" style={{ fontSize: 12.5, lineHeight: 1.5, margin: "10px 0 0" }}>
+              Image providers are configured with server keys (<span className="mono">OPENAI_API_KEY</span>, <span className="mono">XAI_API_KEY</span>, or custom <span className="mono">MEDIA_IMAGE_*</span>).
+            </p>
+          </div>
+        )}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
           <button className="btn primary" onClick={onClose}>Done</button>
         </div>
       </div>
     </div>
+  );
+}
+
+/* Generic media-integration connect card — shared by the model setup modal
+   (Integrations section), the onboarding Connect step, and the Studio media
+   dialog. Verifies the pasted key against the provider's verify endpoint, then
+   saves it encrypted through the desktop bridge; the key never touches browser
+   storage. Driven by a per-provider config so Hedra, ElevenLabs (and future
+   providers) share one implementation. */
+function MediaIntegrationCard({ provider, name, logoSrc, blurb, helper, verifyUrl, statusKey, parseStatus }) {
+  const [configured, setConfigured] = React.useState(null); // null = checking
+  const [open, setOpen] = React.useState(false);
+  const [apiKey, setApiKey] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const [message, setMessage] = React.useState("");
+  const [detail, setDetail] = React.useState(null); // e.g. "120 credits" / "8 voices"
+
+  const refresh = React.useCallback(() => {
+    return fetch("/api/media/providers", { headers: { Accept: "application/json" }, cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((s) => { setConfigured(!!(s && s[statusKey] && s[statusKey].configured)); return s; })
+      .catch(() => { setConfigured(false); return null; });
+  }, [statusKey]);
+  React.useEffect(() => { refresh(); }, [refresh]);
+
+  const hasDesktop = !!(window.KINGS_DESKTOP && window.KINGS_DESKTOP.isDesktop && window.KINGS_DESKTOP.isDesktop());
+
+  const testAndSave = async () => {
+    const key = apiKey.trim();
+    if (!key) { setMessage("Paste your " + name + " API key first."); return; }
+    setBusy(true); setMessage("Checking the key with " + name + "…");
+    try {
+      const res = await fetch(verifyUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ apiKey: key }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error((data && data.error) || (name + " rejected the key."));
+      if (parseStatus) setDetail(parseStatus(data));
+      if (hasDesktop && window.KINGS_DESKTOP.saveMediaProviderKey) {
+        await window.KINGS_DESKTOP.saveMediaProviderKey(provider, key);
+        setApiKey(""); setOpen(false);
+        setMessage(name + " key works and was saved encrypted for Studio.");
+        await refresh();
+      } else {
+        setMessage(name + " key works, but it can only be saved from the desktop app.");
+      }
+    } catch (e) {
+      setMessage((e && e.message) || ("Could not reach " + name + "."));
+    }
+    setBusy(false);
+  };
+
+  const statusText = configured === null
+    ? "Checking…"
+    : configured
+      ? "Connected" + (detail ? " · " + detail : "")
+      : "Not connected";
+
+  return (
+    <div style={{ border: "1.5px solid " + (configured ? "var(--st-approved)" : "var(--hair)"), borderRadius: 8, background: "var(--paper-2)", padding: 18 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "44px 1fr auto", gap: 14, alignItems: "start" }}>
+        <span style={{ width: 42, height: 42, display: "grid", placeItems: "center" }}>
+          <img src={logoSrc} alt="" style={{ maxWidth: 38, maxHeight: 38, objectFit: "contain", borderRadius: 8 }} />
+        </span>
+        <span style={{ display: "grid", gap: 5 }}>
+          <strong style={{ fontSize: 21, lineHeight: 1 }}>{name}</strong>
+          <em style={{ fontStyle: "normal", color: configured ? "var(--st-approved)" : "var(--accent-ink)", fontSize: 14 }}>{statusText}</em>
+          <span style={{ color: "var(--muted)", fontSize: 14.5, lineHeight: 1.35 }}>{blurb}</span>
+        </span>
+        <button className="btn sm" disabled={busy} onClick={() => { setOpen(!open); setMessage(""); }}>
+          <Icon name="key" size={13} /> {configured ? "Update key" : "Connect"}
+        </button>
+      </div>
+      {open && (
+        <div style={{ display: "flex", gap: 8, marginTop: 14, alignItems: "center" }}>
+          <input
+            className="field" type="password" value={apiKey} placeholder={name + " API key"}
+            onChange={(e) => setApiKey(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") testAndSave(); }}
+            style={{ flex: 1, fontSize: 14 }} />
+          <button className="btn primary sm" disabled={busy || !apiKey.trim()} onClick={testAndSave}>
+            {busy ? <Spinner size={13} /> : <Icon name="check" size={13} />} Test & save
+          </button>
+        </div>
+      )}
+      {open && helper && (
+        <p className="muted" style={{ margin: "8px 0 0", fontSize: 12.5 }}>{helper}</p>
+      )}
+      {message && <p style={{ margin: "10px 0 0", fontSize: 13.5, color: "var(--accent-ink)" }}>{message}</p>}
+    </div>
+  );
+}
+
+function HedraIntegrationCard() {
+  return (
+    <MediaIntegrationCard
+      provider="hedra" name="Hedra" statusKey="hedra"
+      logoSrc="brand/providers/hedra.png"
+      blurb="Video, avatars, and animation for Studio. Optional — Studio's video features stay off without it."
+      verifyUrl="/api/hedra/credits"
+      parseStatus={(d) => (d && d.credits && typeof d.credits.remaining === "number" ? d.credits.remaining + " credits" : null)}
+      helper="Create a key at hedra.com under API settings. It is verified against your Hedra credits, then stored encrypted in the desktop settings — never in the browser."
+    />
+  );
+}
+
+function ElevenLabsIntegrationCard() {
+  return (
+    <MediaIntegrationCard
+      provider="elevenlabs" name="ElevenLabs" statusKey="elevenlabs"
+      logoSrc="brand/providers/elevenlabs.svg"
+      blurb="Text-to-speech voiceovers for Studio and audio actions. Optional — voiceover stays off without it."
+      verifyUrl="/api/eleven/voices"
+      parseStatus={(d) => (d && Array.isArray(d.voices) ? d.voices.length + " voices" : null)}
+      helper="Create a key at elevenlabs.io under Profile → API Keys. It is verified against your voice list, then stored encrypted in the desktop settings — never in the browser."
+    />
   );
 }
 
@@ -280,6 +409,7 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
   };
 
   const generate = () => {
+    if (!model) { setError("Models are still loading — try again in a moment."); return; }
     const usingDirected = type === "image" && directed.trim().length > 0;
     const effective = usingDirected ? directed.trim() : prompt;
     const params = { prompt: effective, aspect, resolution, duration, batch, voiceId, startImage, estDuration,
@@ -517,4 +647,4 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
   );
 }
 
-Object.assign(window, { Studio, MediaProvidersDialog });
+Object.assign(window, { Studio, MediaProvidersDialog, MediaIntegrationCard, HedraIntegrationCard, ElevenLabsIntegrationCard });

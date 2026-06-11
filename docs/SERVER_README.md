@@ -1,6 +1,6 @@
 # Media Integration
 
-King's Press Editorial Desk keeps media routes server-side even in the desktop
+Pillar Press Editorial Desk keeps media routes server-side even in the desktop
 app. The browser calls allowlisted `/api/*` routes; provider keys stay in the
 packaged local server environment, desktop settings, or hosted deployment
 environment.
@@ -33,7 +33,7 @@ environment.
 
 - `HEDRA_API_KEY`, `ELEVENLABS_API_KEY`, and model provider keys are never placed
   in `NEXT_PUBLIC_*`, browser globals, route responses, or local backups.
-- The browser cannot call arbitrary provider paths; it calls fixed King’s Press
+- The browser cannot call arbitrary provider paths; it calls fixed Pillar Press
   API routes that map to allowlisted provider client functions.
 - Every request body is validated with Zod. Uploads are checked for type/size.
   Prompts and filenames are sanitized before storage/display.

@@ -1,6 +1,6 @@
-# King's Press Editorial Desk
+# Pillar Press Editorial Desk
 
-King's Press Editorial Desk is the local-first desktop publishing and editorial
+Pillar Press Editorial Desk is the local-first desktop publishing and editorial
 operations app. It packages the editorial workflow into a Tauri app that runs a local
 Next.js server, stores data in SQLite, writes generated assets to local app-data
 storage, and uses local models by default.

@@ -1,6 +1,6 @@
-# CLAUDE.md - Working Instructions For King's Press
+# CLAUDE.md - Working Instructions For Pillar Press
 
-You are building **King's Press Editorial Desk**, the local-first editorial
+You are building **Pillar Press Editorial Desk**, the local-first editorial
 operations desktop app. The target product is a Tauri desktop app that runs a
 packaged Next.js server locally, stores app data in SQLite, keeps generated files
 in local app-data storage, and uses local models by default.
@@ -57,7 +57,7 @@ Read these before making architecture changes:
 
 ## Definition Of Done For The Desktop Product
 
-- The app is branded **King's Press Editorial Desk** in UI, bundle metadata,
+- The app is branded **Pillar Press Editorial Desk** in UI, bundle metadata,
   installer artifacts, menus, docs, and normal-user onboarding.
 - `npm run desktop:build` produces a Tauri `.app` and DMG.
 - The app launches from the packaged `.app`, starts its local server, initializes

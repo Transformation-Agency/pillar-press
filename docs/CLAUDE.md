@@ -1,6 +1,6 @@
 # CLAUDE.md - Contributor Notes
 
-King's Press Editorial Desk is a local-first desktop app, not just a hosted
+Pillar Press Editorial Desk is a local-first desktop app, not just a hosted
 backend. Treat the Tauri desktop runtime, local SQLite database, local storage,
 and provider-neutral model layer as the primary product surface.
 

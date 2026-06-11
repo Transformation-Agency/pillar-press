@@ -3227,6 +3227,15 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
                 }))}
               />
             </section>
+            {window.HedraIntegrationCard && (
+              <section style={{ marginTop: 14 }}>
+                <div className="eyebrow" style={{ margin: "0 0 8px" }}>Optional · Studio integrations</div>
+                <div style={{ display: "grid", gap: 12 }}>
+                  <HedraIntegrationCard />
+                  {window.ElevenLabsIntegrationCard && <ElevenLabsIntegrationCard />}
+                </div>
+              </section>
+            )}
             {setupError && (
               <p role="alert" style={{ margin: "16px 0 0", color: "#A74732", fontSize: 15.5 }}>{setupError}</p>
             )}

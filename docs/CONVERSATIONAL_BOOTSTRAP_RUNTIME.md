@@ -55,7 +55,7 @@ Per-app manifest responsibilities:
 - App-specific provider defaults.
 - First successful command or first useful object.
 
-For King's Press, the current implementation maps to these files:
+For Pillar Press, the current implementation maps to these files:
 
 - Runtime shell: `public/onboarding-runtime.js`
 - Conversation controller: `public/onboarding-conversation.js`
@@ -163,7 +163,7 @@ Canonical intent buckets:
 
 This phase connects enough capability to finish setup and support ongoing work.
 
-For King's Press this means:
+For Pillar Press this means:
 
 - Optional voice.
 - LLM provider or local model.
@@ -186,7 +186,7 @@ The handoff should include:
 - Provider capabilities.
 - Clear boundaries around memory, web use, publishing, sending, and outside services.
 
-Current King's Press implementation persists this handoff as `onboardingAssistantHandoffV1` and
+Current Pillar Press implementation persists this handoff as `onboardingAssistantHandoffV1` and
 seeds a durable Desk thread from the setup transcript. The seeded thread is marked
 `source: "kings_press_setup"`, becomes the active Desk thread, and records a
 `live_assistant_handoff` metric so activation can be correlated to the continuing assistant
@@ -247,18 +247,18 @@ type BootstrapNode = {
 };
 ```
 
-## King's Press Manifest V1
+## Pillar Press Manifest V1
 
 ```json
 {
   "id": "kings_press_editorial_desk",
-  "appName": "King's Press",
+  "appName": "Pillar Press",
   "version": "2026-06-10.bootstrap.v1",
   "persona": {
     "role": "warm editorial setup host",
     "tone": ["plainspoken", "calm", "useful", "editorial"],
     "boundaries": [
-      "Do not imply King's Press replaces the writer.",
+      "Do not imply Pillar Press replaces the writer.",
       "Do not infer permission to use memory, web research, publishing, sending, or external services.",
       "Ask before connecting outside providers."
     ]
@@ -278,8 +278,8 @@ type BootstrapNode = {
     {
       "id": "intro",
       "goal": "Orient the user and ask whether they want guided setup.",
-      "spokenPrompt": "I'm King's Press. I help you articulate your thoughts and turn them into clear, publishable work. Would you like a guided intro, or would you rather skip setup for now?",
-      "displayPrompt": "I'm King's Press. Would you like a guided intro?",
+      "spokenPrompt": "I'm Pillar Press. I help you articulate your thoughts and turn them into clear, publishable work. Would you like a guided intro, or would you rather skip setup for now?",
+      "displayPrompt": "I'm Pillar Press. Would you like a guided intro?",
       "expectedIntents": ["affirm", "deny", "skip", "help", "repeat"],
       "validation": { "required": false },
       "sideEffects": ["record_intro_consent"],
@@ -312,7 +312,7 @@ type BootstrapNode = {
     {
       "id": "connect",
       "goal": "Connect a model and optional integrations.",
-      "spokenPrompt": "Now choose the model King's Press can use. Local models are welcome, and cloud keys are optional.",
+      "spokenPrompt": "Now choose the model Pillar Press can use. Local models are welcome, and cloud keys are optional.",
       "displayPrompt": "Choose models and optional integrations.",
       "expectedIntents": ["provider_key", "local_model", "skip", "help", "later"],
       "validation": { "required": false },
@@ -423,12 +423,12 @@ Deliverables:
 
 - `public/onboarding-manifest.js`
 - Runtime validation for required manifest fields.
-- Tests proving the King's Press manifest produces the same current steps.
+- Tests proving the Pillar Press manifest produces the same current steps.
 
-Status: implemented for the King's Press pack. `public/onboarding-manifest.js` owns the
+Status: implemented for the Pillar Press pack. `public/onboarding-manifest.js` owns the
 app-specific graph, slots, actions, activation contract, and trust copy. The shared runtime exposes
 `validateManifest()` plus `manifestValidation`, and `npm run onboarding:verify` proves the shipped
-King's Press manifest is valid while a deliberately malformed app pack is rejected.
+Pillar Press manifest is valid while a deliberately malformed app pack is rejected.
 
 ### Slice 2: Conversation Canvas
 

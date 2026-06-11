@@ -34,6 +34,7 @@ function Workspace({ piece, refs, onBack, onGoStudio }) {
   const update = (patch) => window.Store.updatePiece(piece.id, patch);
 
   const runGates = async () => {
+    if (running) return; // guard re-entry so a second click can't spawn a parallel poll loop
     setRunning(true); setTab("draft");
     // First gate is "running", rest "pending"; the rail advances as completed[] grows.
     const init = {}; window.GATES.forEach((g, i) => init[g.id] = i === 0 ? "running" : "pending"); setGateStatus(init);
@@ -55,7 +56,9 @@ function Workspace({ piece, refs, onBack, onGoStudio }) {
 
     let polling = true;
     const poll = async () => {
-      while (polling) {
+      // Cap the loop so a hung review POST can never poll forever.
+      const deadline = Date.now() + 5 * 60 * 1000;
+      while (polling && Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, 900));
         if (!polling) break;
         try {
@@ -387,7 +390,7 @@ function DesktopOnboarding() {
     { id: "review", label: "Review" },
     { id: "revision", label: "Revision" },
     { id: "outputs", label: "Outputs" },
-    { id: "utility", label: "Utility" },
+    { id: "utility", label: "Utility", hint: "Also used by Desk chat" },
     { id: "mediaPrompt", label: "Media prompts" },
     { id: "file", label: "File extraction" },
   ];
@@ -1127,6 +1130,18 @@ function DesktopOnboarding() {
             </div>
           </div>
 
+          <div style={{ marginTop: 18 }}>
+            <div className="eyebrow" style={{ marginBottom: 5 }}>Integrations</div>
+            <h3 style={{ margin: "0 0 6px", fontSize: 22 }}>Studio integrations</h3>
+            <p className="muted" style={{ fontSize: 14.5, lineHeight: 1.5, maxWidth: 720, margin: "0 0 14px" }}>
+              Optional services Studio uses for media generation. Keys are verified, then saved encrypted in the desktop settings.
+            </p>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 12 }}>
+              <HedraIntegrationCard />
+              <ElevenLabsIntegrationCard />
+            </div>
+          </div>
+
           {!!savedProfiles.length && (
             <div className="card" style={{ marginTop: 18, padding: 18, borderRadius: 8 }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", marginBottom: 14 }}>
@@ -1147,7 +1162,8 @@ function DesktopOnboarding() {
                         const selected = taskDefaults[taskId] || (savedSettings && savedSettings.defaultProfileId) || savedProfiles[0].id;
                         return (
                           <div key={taskId} style={{ border: "1px solid var(--hair)", borderRadius: 8, padding: 12, background: "var(--paper-sunk)" }}>
-                            <div style={{ fontSize: 15.5, fontWeight: 650, marginBottom: 9 }}>{task.label}</div>
+                            <div style={{ fontSize: 15.5, fontWeight: 650, marginBottom: task.hint ? 2 : 9 }}>{task.label}</div>
+                            {task.hint && <div className="muted" style={{ fontSize: 11.5, marginBottom: 9 }}>{task.hint}</div>}
                             <div style={{ display: "grid", gap: 6 }}>
                               {savedProfiles.map((profile) => {
                                 const active = selected === profile.id;
