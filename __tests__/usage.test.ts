@@ -12,6 +12,7 @@ describe("hosted usage reservations", () => {
     const {
       periodForSubscription,
       quotaErrorMessage,
+      subscriptionAllowsUsage,
       usageDimensionForTask,
     } = await import("@/lib/billing/usage");
 
@@ -19,6 +20,10 @@ describe("hosted usage reservations", () => {
     expect(usageDimensionForTask("gather")).toBe("gather");
     expect(usageDimensionForTask("review")).toBe("llm");
     expect(quotaErrorMessage("gather")).toContain("Gather");
+    expect(subscriptionAllowsUsage("trialing")).toBe(true);
+    expect(subscriptionAllowsUsage("active")).toBe(true);
+    expect(subscriptionAllowsUsage("past_due")).toBe(false);
+    expect(subscriptionAllowsUsage("canceled")).toBe(false);
 
     const period = periodForSubscription({
       currentPeriodStart: new Date("2026-06-01T00:00:00.000Z"),
@@ -68,6 +73,7 @@ describe("hosted usage reservations", () => {
     const subscription = {
       workspaceId: "workspace_1",
       planId: "trial",
+      status: "trialing",
       trialStart: new Date("2026-06-01T00:00:00.000Z"),
       trialEnd: new Date("2026-06-08T00:00:00.000Z"),
       currentPeriodStart: null,
@@ -112,6 +118,50 @@ describe("hosted usage reservations", () => {
     })).rejects.toMatchObject({ status: 402, code: "quota_exceeded" });
     expect(insert).not.toHaveBeenCalled();
   });
+
+  it("blocks hosted work before inserting a reservation when subscription is inactive", async () => {
+    class MockBillingError extends Error {
+      status: number;
+      code: string;
+      constructor(status: number, code: string, message: string) {
+        super(message);
+        this.status = status;
+        this.code = code;
+      }
+    }
+    const insert = vi.fn();
+    const select = vi.fn();
+    const subscription = {
+      workspaceId: "workspace_1",
+      planId: "pro",
+      status: "canceled",
+      currentPeriodStart: new Date("2026-06-01T00:00:00.000Z"),
+      currentPeriodEnd: new Date("2026-07-01T00:00:00.000Z"),
+    };
+
+    vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => false }));
+    vi.doMock("@/lib/auth", () => ({ getOrCreateWorkspace: vi.fn() }));
+    vi.doMock("@/lib/billing/stripe", () => ({
+      BillingError: MockBillingError,
+      getLatestSubscription: vi.fn(async () => subscription),
+      getOrCreateTrialSubscription: vi.fn(),
+    }));
+    vi.doMock("@/lib/db", async () => {
+      const actual = await vi.importActual<any>("@/lib/db");
+      return { ...actual, db: { select, insert } };
+    });
+
+    const { reserveUsage } = await import("@/lib/billing/usage");
+
+    await expect(reserveUsage({
+      user: { id: "user_1", workspaceId: "workspace_1", role: "author" },
+      task: "utility",
+      feature: "llm.util.utility",
+      estimatedCredits: 1,
+    })).rejects.toMatchObject({ status: 402, code: "subscription_inactive" });
+    expect(select).not.toHaveBeenCalled();
+    expect(insert).not.toHaveBeenCalled();
+  });
 });
 
 describe("billing error responses", () => {
@@ -126,6 +176,24 @@ describe("billing error responses", () => {
     expect(body).toEqual({
       error: "AI usage limit reached for this billing period.",
       code: "quota_exceeded",
+    });
+  });
+
+  it("returns inactive subscription errors as client-visible 402 responses", async () => {
+    const { BillingError } = await import("@/lib/billing/stripe");
+    const { toErrorResponse } = await import("@/lib/errors");
+
+    const res = toErrorResponse(new BillingError(
+      402,
+      "subscription_inactive",
+      "Your subscription is not active. Manage billing or choose a plan to continue.",
+    ));
+    const body = await res.json();
+
+    expect(res.status).toBe(402);
+    expect(body).toEqual({
+      error: "Your subscription is not active. Manage billing or choose a plan to continue.",
+      code: "subscription_inactive",
     });
   });
 });

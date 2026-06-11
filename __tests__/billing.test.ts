@@ -117,6 +117,54 @@ describe("hosted billing helpers", () => {
     }));
     expect(onConflictDoUpdate).toHaveBeenCalledTimes(1);
   });
+
+  it("builds sanitized Stripe webhook audit rows", async () => {
+    const { stripeAuditEventValues } = await import("@/lib/billing/stripe");
+
+    const values = stripeAuditEventValues({
+      event: {
+        id: "evt_123",
+        type: "customer.subscription.updated",
+        created: 1_700_000_000,
+        livemode: false,
+        account: undefined,
+        data: {
+          object: {
+            id: "sub_123",
+            object: "subscription",
+            customer_email: "private@example.com",
+          },
+        },
+      },
+      handled: true,
+      workspaceId: "workspace_1",
+      targetType: "subscription",
+      targetId: "local_sub_1",
+      metadata: {
+        stripeSubscriptionId: "sub_123",
+        status: "active",
+      },
+    });
+
+    expect(values).toEqual({
+      workspaceId: "workspace_1",
+      actorType: "stripe",
+      actorId: "stripe",
+      action: "stripe.customer.subscription.updated",
+      targetType: "subscription",
+      targetId: "local_sub_1",
+      metadata: {
+        eventId: "evt_123",
+        eventType: "customer.subscription.updated",
+        handled: true,
+        livemode: false,
+        created: 1_700_000_000,
+        stripeSubscriptionId: "sub_123",
+        status: "active",
+      },
+    });
+    expect(JSON.stringify(values)).not.toContain("private@example.com");
+  });
 });
 
 describe("hosted billing status API", () => {

@@ -1,6 +1,7 @@
 import Stripe from "stripe";
 import { and, desc, eq } from "drizzle-orm";
 import {
+  auditEvents,
   billingCustomers,
   db,
   plans,
@@ -328,16 +329,80 @@ export async function syncStripeSubscription(subscription: Stripe.Subscription) 
   return row;
 }
 
+function stripeObjectId(value: unknown) {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as { id?: unknown };
+  return typeof candidate.id === "string" ? candidate.id : null;
+}
+
+function stripeObjectType(value: unknown) {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as { object?: unknown };
+  return typeof candidate.object === "string" ? candidate.object : null;
+}
+
+export function stripeAuditEventValues(input: {
+  event: Pick<Stripe.Event, "id" | "type" | "created" | "livemode" | "account"> & {
+    data: { object: unknown };
+  };
+  handled: boolean;
+  workspaceId?: string | null;
+  targetType?: string | null;
+  targetId?: string | null;
+  metadata?: Record<string, unknown>;
+}) {
+  return {
+    workspaceId: input.workspaceId ?? null,
+    actorType: "stripe" as const,
+    actorId: input.event.account ?? "stripe",
+    action: `stripe.${input.event.type}`,
+    targetType: input.targetType ?? stripeObjectType(input.event.data.object),
+    targetId: input.targetId ?? stripeObjectId(input.event.data.object),
+    metadata: {
+      eventId: input.event.id,
+      eventType: input.event.type,
+      handled: input.handled,
+      livemode: input.event.livemode,
+      created: input.event.created,
+      ...(input.metadata ?? {}),
+    },
+  };
+}
+
+async function recordStripeAuditEvent(input: Parameters<typeof stripeAuditEventValues>[0]) {
+  await db.insert(auditEvents).values(stripeAuditEventValues(input));
+}
+
+async function safeRecordStripeAuditEvent(input: Parameters<typeof stripeAuditEventValues>[0]) {
+  try {
+    await recordStripeAuditEvent(input);
+  } catch (err) {
+    console.warn("stripe_webhook_audit_failed", err instanceof Error ? err.message : String(err));
+  }
+}
+
 export async function handleStripeWebhookEvent(event: Stripe.Event) {
   const stripe = getStripe();
 
   if (event.type === "checkout.session.completed") {
     const session = event.data.object as Stripe.Checkout.Session;
     const subscriptionId = stripeId(session.subscription as string | { id: string } | null);
+    let synced: Awaited<ReturnType<typeof syncStripeSubscription>> | null = null;
     if (subscriptionId) {
       const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-      await syncStripeSubscription(subscription);
+      synced = await syncStripeSubscription(subscription);
     }
+    await safeRecordStripeAuditEvent({
+      event,
+      handled: true,
+      workspaceId: synced?.workspaceId ?? null,
+      targetType: "checkout.session",
+      targetId: session.id,
+      metadata: {
+        stripeSubscriptionId: subscriptionId,
+        localSubscriptionId: synced?.id,
+      },
+    });
     return { handled: true };
   }
 
@@ -346,9 +411,21 @@ export async function handleStripeWebhookEvent(event: Stripe.Event) {
     event.type === "customer.subscription.updated" ||
     event.type === "customer.subscription.deleted"
   ) {
-    await syncStripeSubscription(event.data.object as Stripe.Subscription);
+    const synced = await syncStripeSubscription(event.data.object as Stripe.Subscription);
+    await safeRecordStripeAuditEvent({
+      event,
+      handled: true,
+      workspaceId: synced.workspaceId,
+      targetType: "subscription",
+      targetId: synced.id,
+      metadata: {
+        stripeSubscriptionId: synced.stripeSubscriptionId,
+        status: synced.status,
+      },
+    });
     return { handled: true };
   }
 
+  await safeRecordStripeAuditEvent({ event, handled: false });
   return { handled: false };
 }

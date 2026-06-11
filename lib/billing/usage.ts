@@ -142,6 +142,10 @@ export function quotaErrorMessage(dimension: UsageDimension) {
   return "AI usage limit reached for this billing period.";
 }
 
+export function subscriptionAllowsUsage(status: Subscription["status"] | string | null | undefined) {
+  return status === "trialing" || status === "active";
+}
+
 export async function usageSummaryForSubscription(input: {
   workspaceId: string;
   subscription: Subscription | null;
@@ -178,6 +182,13 @@ export async function reserveUsage(input: UsageReservationInput): Promise<UsageR
   const subscription = await activeSubscriptionForWorkspace(user);
   if (!subscription) {
     throw new BillingError(402, "subscription_required", "A subscription is required.");
+  }
+  if (!subscriptionAllowsUsage(subscription.status)) {
+    throw new BillingError(
+      402,
+      "subscription_inactive",
+      "Your subscription is not active. Manage billing or choose a plan to continue.",
+    );
   }
 
   const entitlement = await entitlementForPlan(subscription.planId);

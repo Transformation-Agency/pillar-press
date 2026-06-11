@@ -1063,6 +1063,10 @@ function BillingPanel({ open, onClose, billing, notice }) {
   };
   const pct = (used, limit) => !limit ? 0 : Math.min(100, Math.round((used / limit) * 100));
   const dimensionLabel = { llm: "AI credits", gather: "Gather runs", media: "Media generations" };
+  const noticeTitle =
+    notice && notice.code === "subscription_required" ? "Subscription required" :
+    notice && notice.code === "subscription_inactive" ? "Billing needs attention" :
+    "Usage limit reached";
 
   const refresh = async () => {
     setBusy("refresh");
@@ -1114,7 +1118,7 @@ function BillingPanel({ open, onClose, billing, notice }) {
               padding: 13,
               background: "color-mix(in oklch, var(--accent) 8%, var(--paper-2))",
             }}>
-              <strong>{notice.code === "subscription_required" ? "Subscription required" : "Usage limit reached"}</strong>
+              <strong>{noticeTitle}</strong>
               <p style={{ margin: "6px 0 0", color: "var(--muted)", lineHeight: 1.45 }}>
                 {notice.error || "Upgrade or manage billing to continue this workflow."}
               </p>
