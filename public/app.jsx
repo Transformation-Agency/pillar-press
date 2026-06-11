@@ -1031,6 +1031,145 @@ function DesktopOnboarding() {
   );
 }
 
+function BillingPanel({ open, onClose, billing }) {
+  const [busy, setBusy] = React.useState("");
+  const [error, setError] = React.useState("");
+
+  if (!open) return null;
+
+  const subscription = billing && billing.subscription;
+  const plans = (billing && billing.plans) || [];
+  const usage = billing && billing.usage;
+  const dims = usage && usage.dimensions ? usage.dimensions : {};
+  const planId = subscription && subscription.planId;
+  const status = subscription && subscription.status ? subscription.status : "trialing";
+  const planLabel = (plans.find((p) => p.id === planId) || { name: planId === "trial" ? "Free Trial" : "Current plan" }).name;
+
+  const money = (cents, currency) => {
+    if (!cents) return "Free";
+    try {
+      return new Intl.NumberFormat(undefined, { style: "currency", currency: currency || "usd", maximumFractionDigits: 0 }).format(cents / 100) + "/mo";
+    } catch {
+      return "$" + Math.round(cents / 100) + "/mo";
+    }
+  };
+  const dateLabel = (value) => {
+    if (!value) return "";
+    try {
+      return new Date(value).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    } catch {
+      return "";
+    }
+  };
+  const pct = (used, limit) => !limit ? 0 : Math.min(100, Math.round((used / limit) * 100));
+  const dimensionLabel = { llm: "AI credits", gather: "Gather runs", media: "Media generations" };
+
+  const refresh = async () => {
+    setBusy("refresh");
+    setError("");
+    try { await window.Store.refreshBilling(); }
+    catch (e) { setError((e && e.message) || "Could not refresh billing."); }
+    setBusy("");
+  };
+  const checkout = async (plan) => {
+    setBusy("checkout-" + plan.id);
+    setError("");
+    try { await window.Store.startCheckout(plan.id); }
+    catch (e) { setError((e && e.message) || "Could not start checkout."); setBusy(""); }
+  };
+  const portal = async () => {
+    setBusy("portal");
+    setError("");
+    try { await window.Store.openBillingPortal(); }
+    catch (e) { setError((e && e.message) || "Could not open billing portal."); setBusy(""); }
+  };
+
+  return (
+    <div role="dialog" aria-label="Billing and usage" style={{
+      position: "fixed", inset: 0, zIndex: 220, background: "oklch(0 0 0 / 0.32)",
+      display: "grid", placeItems: "center", padding: 20,
+    }}>
+      <div style={{
+        width: "min(760px, 100%)", maxHeight: "min(760px, calc(100vh - 40px))",
+        overflow: "auto", border: "1px solid var(--hair)", borderRadius: 16,
+        background: "var(--paper-2)", boxShadow: "var(--shadow-lg)",
+      }}>
+        <div style={{ padding: 22, borderBottom: "1px solid var(--hair)", display: "flex", justifyContent: "space-between", gap: 16 }}>
+          <div>
+            <div className="eyebrow" style={{ marginBottom: 8 }}>Account</div>
+            <h2 style={{ margin: 0, fontFamily: "var(--font-display)", fontSize: 30, fontWeight: 500 }}>Billing and usage</h2>
+            <p className="muted" style={{ margin: "8px 0 0", lineHeight: 1.5 }}>
+              {planLabel} · {status}
+              {subscription && subscription.trialEnd ? " · trial ends " + dateLabel(subscription.trialEnd) : ""}
+            </p>
+          </div>
+          <button className="icon-btn" onClick={onClose} title="Close billing"><Icon name="xLogo" size={14} /></button>
+        </div>
+
+        <div style={{ padding: 22, display: "grid", gap: 18 }}>
+          {usage && (
+            <section>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline", marginBottom: 12 }}>
+                <h3 style={{ margin: 0, fontSize: 19 }}>This billing period</h3>
+                <span className="muted" style={{ fontSize: 13 }}>
+                  {dateLabel(usage.periodStart)} - {dateLabel(usage.periodEnd)}
+                </span>
+              </div>
+              <div style={{ display: "grid", gap: 10 }}>
+                {["llm", "gather", "media"].map((key) => {
+                  const row = dims[key] || { used: 0, limit: 0, remaining: 0 };
+                  const percent = pct(row.used, row.limit);
+                  return (
+                    <div key={key} style={{ display: "grid", gap: 5 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 13.5 }}>
+                        <span>{dimensionLabel[key]}</span>
+                        <span className="muted">{row.used} / {row.limit}</span>
+                      </div>
+                      <div style={{ height: 8, borderRadius: 999, background: "var(--paper)", border: "1px solid var(--hair)", overflow: "hidden" }}>
+                        <div style={{ height: "100%", width: percent + "%", background: "var(--accent)", borderRadius: 999 }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
+          <section>
+            <h3 style={{ margin: "0 0 12px", fontSize: 19 }}>Upgrade</h3>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 10 }}>
+              {plans.map((plan) => (
+                <div key={plan.id} style={{ border: "1px solid var(--hair)", borderRadius: 12, padding: 14, background: "var(--paper)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline" }}>
+                    <strong>{plan.name}</strong>
+                    <span>{money(plan.monthlyPriceCents, plan.currency)}</span>
+                  </div>
+                  <p className="muted" style={{ minHeight: 40, margin: "8px 0 14px", fontSize: 13.5, lineHeight: 1.4 }}>{plan.description}</p>
+                  <button
+                    className={"btn " + (plan.id === "pro" ? "primary" : "")}
+                    disabled={busy || plan.id === planId || !plan.stripeConfigured}
+                    onClick={() => checkout(plan)}
+                    style={{ width: "100%", justifyContent: "center" }}
+                  >
+                    {busy === "checkout-" + plan.id ? <Spinner size={14} /> : plan.id === planId ? "Current plan" : "Upgrade"}
+                  </button>
+                  {!plan.stripeConfigured && <p className="muted" style={{ margin: "8px 0 0", fontSize: 12.5 }}>Stripe price not configured yet.</p>}
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {error && <p role="alert" style={{ color: "var(--sev-must)", margin: 0 }}>{error}</p>}
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+            <button className="btn ghost" onClick={refresh} disabled={busy}>{busy === "refresh" ? <Spinner size={14} /> : "Refresh"}</button>
+            <button className="btn" onClick={portal} disabled={busy}>{busy === "portal" ? <Spinner size={14} /> : "Manage billing"}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const state = useStore();
   const auth = useHostedAuth();
@@ -1042,6 +1181,7 @@ function App() {
   const [sentimentOpen, setSentimentOpen] = React.useState(false);
   const [sentimentBusy, setSentimentBusy] = React.useState(false);
   const [campaignCreateOpen, setCampaignCreateOpen] = React.useState(false);
+  const [billingOpen, setBillingOpen] = React.useState(false);
   const isMobile = window.useIsMobile();
   const role = state.role || "author";
 
@@ -1180,6 +1320,11 @@ function App() {
         <button className="btn sm" onClick={() => setSetupOpen(true)} title="Setup provider, campaign, and preferences">
           <Icon name="gear" size={13} /> Setup
         </button>
+        {auth.hosted && (
+          <button className="btn sm ghost" onClick={() => { window.Store.refreshBilling(); setBillingOpen(true); }} title="Billing and usage">
+            Billing
+          </button>
+        )}
         {auth.requiresLogin && (
           <button className="btn sm ghost" onClick={() => window.KP_AUTH && window.KP_AUTH.signOut()} title="Sign out">
             Sign out
@@ -1289,6 +1434,7 @@ function App() {
         />
       )}
       <CampaignCreateDialog open={campaignCreateOpen} onClose={() => setCampaignCreateOpen(false)} onCreate={createCampaign} />
+      <BillingPanel open={billingOpen} onClose={() => setBillingOpen(false)} billing={state.billing} />
       <DesktopOnboarding />
     </div>
   );

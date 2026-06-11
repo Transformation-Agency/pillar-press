@@ -48,6 +48,7 @@
       eleven: {},
     },
     media: [],
+    billing: null,
     gatherSources: [],
     gatherItems: [],
     gatherSummaries: [], // per-source research briefs from the last run (cache-only)
@@ -201,9 +202,10 @@
   /* ---- top-level hydration ---- */
   async function hydrate() {
     try {
+      let auth = null;
       if (window.KP_AUTH && window.KP_AUTH.ready) {
         await window.KP_AUTH.ready.catch(() => null);
-        const auth = window.KP_AUTH.snapshot ? window.KP_AUTH.snapshot() : null;
+        auth = window.KP_AUTH.snapshot ? window.KP_AUTH.snapshot() : null;
         if (auth && auth.requiresLogin && !auth.authenticated) {
           emit();
           return;
@@ -213,6 +215,9 @@
         apiGet("/campaigns").catch(() => ({ campaigns: [] })),
         apiGet("/settings").catch(() => ({ settings: {} })),
       ]);
+      const billingPromise = auth && auth.hosted
+        ? apiGet("/billing/status").catch(() => null)
+        : Promise.resolve(null);
 
       const camps = (campRes && campRes.campaigns) || [];
       state.campaigns = camps.map((c) => ({ id: c.id, name: c.name, slug: c.slug, references: null }));
@@ -228,6 +233,7 @@
       emit(); // render shell with campaign list + settings
 
       if (activeId) await hydrateCampaign(activeId);
+      state.billing = await billingPromise;
       const deskRes = await apiGet("/desk/session").catch(() => ({ session: { state: {} } }));
       const deskState = deskRes && deskRes.session && deskRes.session.state;
       if (deskState && typeof deskState === "object") {
@@ -255,6 +261,27 @@
     getState: () => state,
     subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     reload() { loadedCampaigns.clear(); return hydrate(); },
+    async refreshBilling() {
+      try {
+        state.billing = await apiGet("/billing/status");
+      } catch (e) {
+        console.warn("[Store] billing refresh failed:", e && e.message);
+        state.billing = Object.assign({}, state.billing || {}, { error: e && e.message ? e.message : "Billing unavailable" });
+      }
+      emit();
+      return state.billing;
+    },
+    billingStatus() { return state.billing || null; },
+    async startCheckout(planId) {
+      const res = await apiSend("POST", "/billing/checkout", { planId });
+      if (res && res.url) window.location.href = res.url;
+      return res;
+    },
+    async openBillingPortal() {
+      const res = await apiSend("POST", "/billing/portal", {});
+      if (res && res.url) window.location.href = res.url;
+      return res;
+    },
 
     setTheme(t) { state.theme = t; document.documentElement.setAttribute("data-theme", t); emit(); persistPrefs(); },
     toggleTheme() { api.setTheme(state.theme === "dark" ? "light" : "dark"); },

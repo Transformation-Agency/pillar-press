@@ -4,6 +4,7 @@ import {
   db,
   entitlements,
   usageEvents,
+  type Entitlement,
   type Subscription,
   type UsageEventTask,
 } from "@/lib/db";
@@ -16,6 +17,7 @@ import {
 } from "@/lib/billing/stripe";
 
 type UsageDimension = "llm" | "media" | "gather";
+const USAGE_DIMENSIONS: UsageDimension[] = ["llm", "media", "gather"];
 
 export type UsageReservationInput = {
   user: SessionUser;
@@ -57,7 +59,7 @@ export function usageDimensionForTask(task: UsageEventTask): UsageDimension {
 }
 
 function limitForDimension(
-  entitlement: typeof entitlements.$inferSelect,
+  entitlement: Entitlement,
   dimension: UsageDimension,
 ) {
   if (dimension === "media") return entitlement.monthlyMediaGenerations;
@@ -101,6 +103,10 @@ async function entitlementForPlan(planId: string) {
   return entitlement ?? null;
 }
 
+export async function getEntitlementForPlan(planId: string) {
+  return entitlementForPlan(planId);
+}
+
 async function usedCredits(input: {
   workspaceId: string;
   dimension: UsageDimension;
@@ -134,6 +140,35 @@ export function quotaErrorMessage(dimension: UsageDimension) {
   if (dimension === "media") return "Media generation limit reached for this billing period.";
   if (dimension === "gather") return "Gather run limit reached for this billing period.";
   return "AI usage limit reached for this billing period.";
+}
+
+export async function usageSummaryForSubscription(input: {
+  workspaceId: string;
+  subscription: Subscription | null;
+  entitlement: Entitlement | null;
+}) {
+  const period = periodForSubscription(input.subscription);
+  const rows = await Promise.all(
+    USAGE_DIMENSIONS.map(async (dimension) => {
+      const used = await usedCredits({
+        workspaceId: input.workspaceId,
+        dimension,
+        periodStart: period.start,
+        periodEnd: period.end,
+      });
+      const limit = input.entitlement ? limitForDimension(input.entitlement, dimension) : 0;
+      return [dimension, {
+        used,
+        limit,
+        remaining: Math.max(limit - used, 0),
+      }] as const;
+    }),
+  );
+  return {
+    periodStart: period.start.toISOString(),
+    periodEnd: period.end.toISOString(),
+    dimensions: Object.fromEntries(rows),
+  };
 }
 
 export async function reserveUsage(input: UsageReservationInput): Promise<UsageReservation> {

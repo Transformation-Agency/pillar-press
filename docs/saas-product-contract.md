@@ -18,7 +18,9 @@ Do this as a staged migration, not a rewrite.
    **Started:** hosted-only usage reservation helpers now enforce plan limits
    for the core writing, research, file extraction, chat, and media surfaces
    while desktop/local-first bypasses them.
-5. Stage 4: trial onboarding and upgrade UI.
+5. Stage 4: trial onboarding and upgrade UI. **Started:** hosted users now
+   have a Billing panel showing trial/subscription status, period usage, paid
+   plan upgrades, and the Stripe customer portal.
 6. Stage 5: workers/jobs for long-running Gather, Weave, media, and batch work.
 7. Stage 6: production ops, admin, support, observability, and launch gates.
 
@@ -396,6 +398,8 @@ Stage 3 is complete only when:
 5. Stage 2: map Stripe Price ids into `plans.stripe_price_id`.
 6. Stage 3: implement `lib/saas/entitlements.ts` and `lib/saas/usage.ts`.
 7. Stage 3: wrap expensive routes.
-8. Stage 4: update onboarding and account/billing UI.
+8. Stage 4: update onboarding and account/billing UI. **Started:** the hosted
+   topbar Billing panel calls `/api/billing/status`, `/api/billing/checkout`,
+   and `/api/billing/portal`.
 9. Stage 5: introduce a worker/job runner for long operations.
 10. Stage 6: add admin/support tooling and production observability.
