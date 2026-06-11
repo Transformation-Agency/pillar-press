@@ -7,6 +7,125 @@ function useStore() {
   return window.Store.getState();
 }
 
+function useHostedAuth() {
+  const initial = () => window.KP_AUTH
+    ? window.KP_AUTH.snapshot()
+    : { ready: true, requiresLogin: false, authenticated: true };
+  const [auth, setAuth] = React.useState(initial);
+  React.useEffect(() => {
+    if (!window.KP_AUTH) return undefined;
+    return window.KP_AUTH.subscribe(setAuth);
+  }, []);
+  return auth;
+}
+
+function HostedAuthScreen({ auth }) {
+  const [mode, setMode] = React.useState("signin");
+  const [email, setEmail] = React.useState("");
+  const [password, setPassword] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const [message, setMessage] = React.useState("");
+  const [error, setError] = React.useState("");
+
+  const submit = async (event) => {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      const result = mode === "signup"
+        ? await window.KP_AUTH.signUp(email.trim(), password)
+        : await window.KP_AUTH.signIn(email.trim(), password);
+      if (result && result.confirmationRequired) {
+        setMessage("Check your email to confirm the account, then come back and sign in.");
+      } else {
+        await window.Store.reload();
+      }
+    } catch (err) {
+      setError(err && err.message ? err.message : "Could not sign in.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!auth.ready) {
+    return (
+      <main className="empty">
+        <Spinner size={22} />
+        <h1>Opening King's Press</h1>
+        <p>Checking your session.</p>
+      </main>
+    );
+  }
+
+  if (!auth.configured) {
+    return (
+      <main className="empty">
+        <h1>Hosted auth needs configuration</h1>
+        <p>Add the hosted Supabase URL and anon key, then redeploy King's Press.</p>
+      </main>
+    );
+  }
+
+  return (
+    <main style={{
+      minHeight: "100vh", display: "grid", placeItems: "center", padding: 24,
+      background: "var(--paper)", color: "var(--ink)",
+    }}>
+      <form onSubmit={submit} style={{
+        width: "min(440px, 100%)", border: "1px solid var(--hair)", borderRadius: 16,
+        background: "var(--paper-2)", boxShadow: "var(--shadow-lg)", padding: 28,
+      }}>
+        <div className="eyebrow" style={{ marginBottom: 10 }}>King's Press</div>
+        <h1 style={{ margin: 0, fontFamily: "var(--font-display)", fontSize: 34, fontWeight: 500 }}>
+          {mode === "signup" ? "Create your account" : "Sign in"}
+        </h1>
+        <p style={{ color: "var(--muted)", lineHeight: 1.5, margin: "10px 0 22px" }}>
+          Your workspace, campaigns, preferences, and writing history stay scoped to your account.
+        </p>
+
+        <label className="eyebrow" style={{ display: "block", marginBottom: 6 }}>Email</label>
+        <input
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          type="email"
+          required
+          autoComplete="email"
+          style={{ width: "100%", marginBottom: 14 }}
+          placeholder="you@example.com"
+        />
+
+        <label className="eyebrow" style={{ display: "block", marginBottom: 6 }}>Password</label>
+        <input
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          type="password"
+          required
+          minLength={6}
+          autoComplete={mode === "signup" ? "new-password" : "current-password"}
+          style={{ width: "100%", marginBottom: 18 }}
+          placeholder="Your password"
+        />
+
+        {error && <p role="alert" style={{ color: "var(--sev-must)", margin: "0 0 12px" }}>{error}</p>}
+        {message && <p role="status" style={{ color: "var(--muted)", margin: "0 0 12px" }}>{message}</p>}
+
+        <button className="btn primary" type="submit" disabled={busy} style={{ width: "100%", justifyContent: "center" }}>
+          {busy ? <Spinner size={15} /> : (mode === "signup" ? "Create account" : "Sign in")}
+        </button>
+        <button
+          className="link"
+          type="button"
+          onClick={() => { setMode(mode === "signup" ? "signin" : "signup"); setError(""); setMessage(""); }}
+          style={{ marginTop: 16, width: "100%", textAlign: "center" }}
+        >
+          {mode === "signup" ? "I already have an account" : "Create an account"}
+        </button>
+      </form>
+    </main>
+  );
+}
+
 function EditableTitle({ value, onCommit }) {
   const [v, setV] = React.useState(value);
   React.useEffect(() => { setV(value); }, [value]);
@@ -914,6 +1033,7 @@ function DesktopOnboarding() {
 
 function App() {
   const state = useStore();
+  const auth = useHostedAuth();
   const [view, setView] = React.useState("library");
   const [desktopNotice, setDesktopNotice] = React.useState(null);
   const [backupBusy, setBackupBusy] = React.useState(false);
@@ -1035,6 +1155,8 @@ function App() {
     setBackupBusy(false);
   };
 
+  if (auth.requiresLogin && !auth.authenticated) return <HostedAuthScreen auth={auth} />;
+
   return (
     <div className="app">
       <div className="topbar">
@@ -1058,6 +1180,11 @@ function App() {
         <button className="btn sm" onClick={() => setSetupOpen(true)} title="Setup provider, campaign, and preferences">
           <Icon name="gear" size={13} /> Setup
         </button>
+        {auth.requiresLogin && (
+          <button className="btn sm ghost" onClick={() => window.KP_AUTH && window.KP_AUTH.signOut()} title="Sign out">
+            Sign out
+          </button>
+        )}
         {hasDesktopBridge && (
           <>
             <button className="icon-btn" onClick={createDesktopBackup} title="Create local backup" disabled={backupBusy}>

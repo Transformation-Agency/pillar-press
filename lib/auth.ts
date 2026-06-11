@@ -22,7 +22,7 @@ export type Role = (typeof import("@/db/schema").membershipRole)[number];
 // dev runs without authentication. Desktop local-first mode has its own branch
 // below and never needs Supabase.
 const DEFAULT_USER_ID = process.env.DEFAULT_USER_ID ?? "dev-user";
-const authDisabled = () => process.env.AUTH_DISABLED !== "false";
+export const isAuthDisabled = () => process.env.AUTH_DISABLED !== "false";
 
 export interface SessionUser {
   id: string;
@@ -120,7 +120,7 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
 
   // Skip-login compatibility: resolve a single default user and workspace. The
   // seed hook now creates no default campaigns.
-  if (authDisabled()) {
+  if (isAuthDisabled()) {
     const workspaceId = await getOrCreateWorkspace(DEFAULT_USER_ID);
     return { id: DEFAULT_USER_ID, workspaceId, role: "author" };
   }
@@ -157,7 +157,7 @@ export async function requireUser(): Promise<SessionUser> {
 export async function requireRole(role: Role): Promise<SessionUser> {
   const u = await requireUser();
   // Skip-login compatibility: roles not enforced.
-  if (authDisabled()) return u;
+  if (isAuthDisabled()) return u;
   if (u.role !== role) throw forbidden(`Requires ${role} role.`);
   return u;
 }

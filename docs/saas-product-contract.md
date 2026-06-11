@@ -326,10 +326,16 @@ Rules:
 ## Stage 1 Success Gate
 
 Stage 1 is complete only when:
-- Hosted production uses `AUTH_DISABLED=false`.
-- Basic Auth is no longer the product auth path.
-- A new user can sign up and get a workspace.
-- `requireUser()` resolves a Supabase user and workspace membership.
+- Hosted production uses `AUTH_DISABLED=false`. **Started:** `.env.hosted.example`
+  and `docs/WEB_DEPLOY.md` now default hosted SaaS to Supabase Auth.
+- Basic Auth is no longer the product auth path. **Started:** Basic Auth remains
+  documented only as a temporary private-preview gate while `AUTH_DISABLED=true`.
+- A new user can sign up and get a workspace. **Started:** the static web app now
+  has a hosted sign-in/sign-up gate, and `/api/auth/session` bootstraps a
+  workspace for authenticated Supabase users with no membership.
+- `requireUser()` resolves a Supabase user and workspace membership. **Started:**
+  browser API calls attach the Supabase bearer token; the existing server auth
+  layer validates it and resolves membership.
 - Cross-workspace object access is denied and tested.
 - The app can still run desktop/local-first without touching hosted auth.
 
@@ -364,4 +370,3 @@ Stage 3 is complete only when:
 8. Stage 4: update onboarding and account/billing UI.
 9. Stage 5: introduce a worker/job runner for long operations.
 10. Stage 6: add admin/support tooling and production observability.
-

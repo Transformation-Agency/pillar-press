@@ -201,6 +201,14 @@
   /* ---- top-level hydration ---- */
   async function hydrate() {
     try {
+      if (window.KP_AUTH && window.KP_AUTH.ready) {
+        await window.KP_AUTH.ready.catch(() => null);
+        const auth = window.KP_AUTH.snapshot ? window.KP_AUTH.snapshot() : null;
+        if (auth && auth.requiresLogin && !auth.authenticated) {
+          emit();
+          return;
+        }
+      }
       const [campRes, setRes] = await Promise.all([
         apiGet("/campaigns").catch(() => ({ campaigns: [] })),
         apiGet("/settings").catch(() => ({ settings: {} })),
@@ -246,6 +254,7 @@
     STATUSES,
     getState: () => state,
     subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
+    reload() { loadedCampaigns.clear(); return hydrate(); },
 
     setTheme(t) { state.theme = t; document.documentElement.setAttribute("data-theme", t); emit(); persistPrefs(); },
     toggleTheme() { api.setTheme(state.theme === "dark" ? "light" : "dark"); },
