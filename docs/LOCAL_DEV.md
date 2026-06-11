@@ -258,6 +258,17 @@ STORAGE_PROVIDER=supabase
 KINGS_PRESS_STORAGE=supabase
 ```
 
+If you enable the built-in password gate, the hosted app accepts `SITE_USERS`
+as a comma-separated allow-list:
+```bash
+SITE_USERS=king,pillar
+SITE_PASSWORD=<strong-password>
+```
+
+If a browser keeps rejecting a newly corrected username/password, close that
+tab/window or open a private window. Browsers cache failed Basic Auth
+credentials aggressively.
+
 Required hosted services:
 ```bash
 DATABASE_URL=postgres://...
@@ -278,6 +289,10 @@ Build and start the hosted web server:
 npm run web:build
 npm run web:start
 ```
+
+`web:build` also prepares `.next/standalone` with the static and public assets
+needed by `web:start`. On a VPS such as Hetzner, run `npm run web:start` behind
+Nginx/Caddy with `PORT=3000` or the port your reverse proxy expects.
 
 If `AUTH_DISABLED=true` on a public URL, set `SITE_PASSWORD` so the app is not
 an open AI/media-credit relay. Set `AUTH_DISABLED=false` only when Supabase auth

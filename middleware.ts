@@ -9,7 +9,7 @@ import type { NextRequest } from "next/server";
  * Password Protection / Vercel Authentication require a paid plan, so we gate at
  * the app level instead:
  *
- *  - Set SITE_PASSWORD (and optionally SITE_USER, default "king") in the
+ *  - Set SITE_PASSWORD (and optionally SITE_USER or SITE_USERS) in the
  *    environment → every request must present matching Basic credentials.
  *  - Leave SITE_PASSWORD unset (e.g. local dev) → no gate.
  *
@@ -17,12 +17,22 @@ import type { NextRequest } from "next/server";
  * browser caches the credentials after the first prompt and resends them on the
  * SPA's same-origin /api fetches automatically.
  */
-export function middleware(req: NextRequest) {
-  const password = process.env.SITE_PASSWORD;
-  if (!password) return NextResponse.next(); // gate disabled when unconfigured
+function configuredUsers(): string[] {
+  const raw = process.env.SITE_USERS || process.env.SITE_USER || "";
+  const users = raw
+    .split(",")
+    .map((user) => user.trim())
+    .filter(Boolean);
+  return users.length ? users : ["king", "pillar"];
+}
 
-  const expectedUser = process.env.SITE_USER || "king";
-  const header = req.headers.get("authorization") || "";
+export function isSiteBasicAuthAuthorized(
+  authorizationHeader: string | null,
+  password = process.env.SITE_PASSWORD,
+  users = configuredUsers(),
+): boolean {
+  if (!password) return true;
+  const header = authorizationHeader || "";
   const [scheme, encoded] = header.split(" ");
   if (scheme === "Basic" && encoded) {
     let decoded = "";
@@ -34,9 +44,17 @@ export function middleware(req: NextRequest) {
     const sep = decoded.indexOf(":");
     const user = sep >= 0 ? decoded.slice(0, sep) : "";
     const pass = sep >= 0 ? decoded.slice(sep + 1) : "";
-    if (user === expectedUser && pass === password) {
-      return NextResponse.next();
-    }
+    return users.includes(user) && pass === password;
+  }
+  return false;
+}
+
+export function middleware(req: NextRequest) {
+  const password = process.env.SITE_PASSWORD;
+  if (!password) return NextResponse.next(); // gate disabled when unconfigured
+
+  if (isSiteBasicAuthAuthorized(req.headers.get("authorization"), password)) {
+    return NextResponse.next();
   }
 
   return new NextResponse("Authentication required.", {
