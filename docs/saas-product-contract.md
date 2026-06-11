@@ -403,13 +403,17 @@ Stage 3 is complete only when:
   reservations require `can_use_managed_keys` and `"managed"` in
   `allowed_providers` before server-managed AI/media/research work begins;
   hosted Hedra credit status no longer calls the platform Hedra account or
-  returns platform credit balances to ordinary users.
+  returns platform credit balances to ordinary users, and hosted live
+  ElevenLabs/Hedra catalog calls require managed-provider access before touching
+  platform provider APIs.
 - BYOK provider access honors plan entitlements. **Started:** user-saved hosted
   provider profiles are marked as `providerSource: "byok"` on usage
   reservations across the core editorial, Gather, Weave, utility, onboarding,
   and Studio prompt paths; they require `"byok"` in `allowed_providers` but do
   not require managed-provider access. BYOK Hedra credit checks require BYOK
-  provider access before touching a user-supplied Hedra key.
+  provider access before touching a user-supplied Hedra key, and BYOK
+  ElevenLabs voice checks require BYOK access before touching user-supplied
+  ElevenLabs keys.
 - Storage quota gates hosted persisted media. **Started:** Supabase public
   storage uploads that receive an authenticated hosted user reserve bytes
   against `storage_quota_gb`, release the reservation on failed upload, and
