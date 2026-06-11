@@ -419,6 +419,9 @@ Stage 3 is complete only when:
   against `storage_quota_gb`, release the reservation on failed upload, and
   report storage usage in the Billing panel; desktop/local-first file writes
   bypass hosted storage billing.
+- Hosted media BYOK generation works end to end. **Not complete:** see
+  `docs/MEDIA_BYOK_AUDIT.md` for the current credential-flow audit and required
+  implementation order.
 - Usage rollups reflect the ledger.
 - Provider failure records failed usage without double-charging. **Started:**
   the first gated routes mark reserved usage as failed when downstream work
