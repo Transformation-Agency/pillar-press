@@ -97,6 +97,30 @@ describe("LLM config", () => {
     }
   });
 
+  it("ignores desktop local defaults when hosted web mode is explicit", () => {
+    const dir = mkdtempSync(join(tmpdir(), "kings-press-llm-"));
+    const settingsPath = join(dir, "desktop-settings.json");
+    writeFileSync(settingsPath, JSON.stringify({ model: "mistral-small:latest" }));
+    try {
+      const cfg = resolveMainLLMConfig({
+        KINGS_PRESS_RUNTIME: "hosted",
+        KINGS_PRESS_LOCAL_FIRST: "true",
+        DATA_BACKEND: "sqlite",
+        KINGS_PRESS_LLM_SETTINGS_PATH: settingsPath,
+        LLM_PROVIDER: "openai",
+        LLM_MODEL: "gpt-4o-mini",
+        OPENAI_API_KEY: "sk-openai",
+      });
+      expect(cfg).toMatchObject({
+        provider: "openai",
+        model: "gpt-4o-mini",
+        apiKey: "sk-openai",
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("uses saved desktop provider settings for local-first OpenAI-compatible endpoints", () => {
     const dir = mkdtempSync(join(tmpdir(), "kings-press-llm-"));
     const settingsPath = join(dir, "desktop-settings.json");

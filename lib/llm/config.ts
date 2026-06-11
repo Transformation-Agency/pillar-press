@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { createDecipheriv } from "node:crypto";
+import { isLocalFirstMode } from "@/lib/local/mode";
 import { LLMError } from "@/lib/llm/errors";
 import type { LLMCapabilities, LLMConfig, LLMProvider, LLMTask } from "@/lib/llm/types";
 
@@ -112,11 +113,7 @@ function taskEnvKey(task: LLMTask): string {
 }
 
 function isLocalFirstEnv(env: Env): boolean {
-  return (
-    env.KINGS_PRESS_LOCAL_FIRST === "true" ||
-    env.DATA_BACKEND === "sqlite" ||
-    Boolean(trim(env.KINGS_PRESS_DB_PATH))
-  );
+  return isLocalFirstMode(env);
 }
 
 function readDesktopLLMSettings(env: Env): DesktopLLMSettings | null {

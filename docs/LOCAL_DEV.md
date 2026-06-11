@@ -244,9 +244,44 @@ MEDIA_IMAGE_MODELS=model-a,model-b
 ```
 
 ## Hosted Compatibility
-The repo still contains the old hosted web stack for compatibility. To exercise
-that path, configure `DATABASE_URL`, `SUPABASE_URL`, Supabase keys, and set
-local-first variables off. Do not run Drizzle push/generate against a local-first
+The repo still contains the old hosted web stack for compatibility and public
+web deployments. Use `.env.hosted.example` as the template for an
+internet-accessible deployment.
+
+Required hosted runtime flags:
+```bash
+KINGS_PRESS_RUNTIME=hosted
+KINGS_PRESS_HOSTED_WEB=true
+KINGS_PRESS_LOCAL_FIRST=false
+DATA_BACKEND=postgres
+STORAGE_PROVIDER=supabase
+KINGS_PRESS_STORAGE=supabase
+```
+
+Required hosted services:
+```bash
+DATABASE_URL=postgres://...
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_ANON_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=...
+```
+
+Run the hosted web path locally:
+```bash
+cp .env.hosted.example .env
+npm run db:migrate
+npm run web:dev
+```
+
+Build and start the hosted web server:
+```bash
+npm run web:build
+npm run web:start
+```
+
+If `AUTH_DISABLED=true` on a public URL, set `SITE_PASSWORD` so the app is not
+an open AI/media-credit relay. Set `AUTH_DISABLED=false` only when Supabase auth
+is fully configured. Do not run Drizzle push/generate against a local-first
 desktop database.
 
 ## Useful Commands

@@ -6,6 +6,9 @@
   "type": "module",
   "scripts": {
     "dev": "next dev",
+    "web:dev": "tsx scripts/run-hosted-web.ts dev",
+    "web:build": "tsx scripts/run-hosted-web.ts build",
+    "web:start": "tsx scripts/run-hosted-web.ts start",
     "desktop:web": "tsx scripts/run-desktop-web.ts dev",
     "desktop:web:build": "tsx scripts/run-desktop-web.ts build",
     "desktop:prepare-sidecar": "tsx scripts/prepare-tauri-sidecar.ts",
