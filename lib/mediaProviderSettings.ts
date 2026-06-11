@@ -100,6 +100,16 @@ export async function getHostedMediaProviderProfile(
   return row ? rowToSecret(row) : null;
 }
 
+export async function getHostedMediaProviderProfileForProvider(
+  user: Pick<SessionUser, "id" | "workspaceId">,
+  provider: MediaProvider,
+): Promise<HostedMediaProviderProfileSecret | null> {
+  const rows = validRows(await db.select().from(providerSecrets).where(scope(user)));
+  const row = rows.find((item) => item.provider === provider && item.isDefault)
+    ?? rows.find((item) => item.provider === provider);
+  return row ? rowToSecret(row) : null;
+}
+
 export async function saveHostedMediaProviderSettings(
   user: Pick<SessionUser, "id" | "workspaceId">,
   settings: HostedMediaProviderSettingsInput,

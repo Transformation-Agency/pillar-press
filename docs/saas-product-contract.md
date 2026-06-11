@@ -343,9 +343,10 @@ Rules:
 - Hosted media BYOK uses the same encrypted secret-store contract. **Started:**
   hosted web now writes media provider profiles to `provider_secrets` with
   `kind = "media"` for Hedra, ElevenLabs, OpenAI media, xAI media, and custom
-  image endpoints through `GET/PUT /api/media/provider-settings`; generation
-  still needs the user-scoped media resolver and client override wiring before
-  Studio media can be called end to end BYOK.
+  image endpoints through `GET/PUT /api/media/provider-settings`; Studio media
+  generation, provider status, Hedra model/status/asset calls, OpenAI-compatible
+  media calls, and ElevenLabs TTS now resolve those hosted BYOK profiles
+  server-side before falling back to managed keys.
 - Trial workspaces can use managed keys only within tight usage caps.
 
 ## Stage 1 Success Gate
@@ -427,8 +428,9 @@ Stage 3 is complete only when:
   bypass hosted storage billing.
 - Hosted media BYOK generation works end to end. **Not complete:** see
   `docs/MEDIA_BYOK_AUDIT.md` for the current credential-flow audit and required
-  implementation order. Encrypted hosted media settings are implemented; the
-  remaining work is generation/status/setup consumption.
+  implementation order. Server-side generation/status consumption is
+  implemented; the remaining work is hosted setup/UI media profile management
+  and live provider smoke coverage.
 - Usage rollups reflect the ledger.
 - Provider failure records failed usage without double-charging. **Started:**
   the first gated routes mark reserved usage as failed when downstream work

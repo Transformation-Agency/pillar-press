@@ -21,7 +21,14 @@ import { craftImagePrompt } from "@/lib/ai/imagePrompt";
 import { getAIForTaskForUser } from "@/lib/llm";
 import { generateBodySchema, validateAgainstModel, sanitizeText } from "@/lib/validation";
 import { toErrorResponse } from "@/lib/errors";
-import { getAudioProviderConfig, getImageProviderConfig } from "@/lib/mediaProviders";
+import {
+  getAudioProviderForUser,
+  getElevenLabsProviderForUser,
+  getHedraProviderForUser,
+  getImageProviderForUser,
+  type MediaProviderSource,
+  type MediaSecretConfig,
+} from "@/lib/mediaProviders";
 import { generateOpenAICompatibleImage } from "@/lib/mediaImage";
 import { generateOpenAICompatibleSpeech } from "@/lib/mediaAudio";
 import { campaignInWorkspace, tenantNotFound } from "@/lib/tenant";
@@ -54,7 +61,7 @@ async function resolvePieceForTenant(id: string | null | undefined, user: Sessio
  * image), or a data: URL (an uploaded file). Hedra's start_keyframe_id needs an
  * asset id, so anything URL-shaped is fetched and uploaded first.
  */
-async function resolveStartAsset(ref: string | undefined): Promise<string | undefined> {
+async function resolveStartAsset(ref: string | undefined, hedraApiKey?: string): Promise<string | undefined> {
   if (!ref) return undefined;
   const isUrl = ref.startsWith("http://") || ref.startsWith("https://") || ref.startsWith("data:");
   if (!isUrl) return ref; // already an asset id
@@ -63,9 +70,22 @@ async function resolveStartAsset(ref: string | undefined): Promise<string | unde
   const blob = await resp.blob();
   const ext = (blob.type && blob.type.split("/")[1]) || "png";
   const name = `start-frame-${Date.now()}.${ext}`;
-  const asset = await createAsset({ name, type: "image" });
-  await uploadAsset(asset.id, blob, name);
+  const asset = await createAsset({ name, type: "image" }, { apiKey: hedraApiKey });
+  await uploadAsset(asset.id, blob, name, { apiKey: hedraApiKey });
   return asset.id;
+}
+
+function profileMetadata(config: { providerSource?: MediaProviderSource; profileId?: string } | null | undefined) {
+  return {
+    providerSource: config?.providerSource ?? "managed",
+    ...(config?.profileId ? { profileId: config.profileId } : {}),
+  };
+}
+
+function combinedSource(primary: MediaSecretConfig | null, secondary: MediaSecretConfig | null): MediaProviderSource {
+  return primary?.providerSource === "byok" && (!secondary || secondary.providerSource === "byok")
+    ? "byok"
+    : "managed";
 }
 
 // POST /api/hedra/generate
@@ -88,15 +108,20 @@ export async function POST(req: Request) {
       const script = sanitizeText(body.script || body.prompt, 100000);
       if (!script) return NextResponse.json({ error: "Provide a script to voice.", code: "validation" }, { status: 422 });
 
-      const audioProvider = getAudioProviderConfig(body.provider);
+      const audioProvider = await getAudioProviderForUser(body.provider, user);
+      const elevenProvider = audioProvider ? null : await getElevenLabsProviderForUser(user);
+      const usageSource = audioProvider?.providerSource ?? elevenProvider?.providerSource ?? "managed";
+      const usageProfileId = audioProvider?.profileId ?? elevenProvider?.profileId;
       reservation = await reserveUsage({
         user,
         task: "media_generation",
         feature: "media.audio",
         campaignId: body.campaignId,
         pieceId: body.pieceId,
+        providerSource: usageSource,
         provider: audioProvider?.provider ?? "elevenlabs",
         model: body.modelId,
+        metadata: usageProfileId ? { profileId: usageProfileId } : {},
       });
       let audioUrl: string;
       let audioVoice = body.voiceId;
@@ -112,12 +137,13 @@ export async function POST(req: Request) {
         audioUrl = result.outputUrl;
         audioVoice = result.voice;
         meta.provider = audioProvider.provider;
+        Object.assign(meta, profileMetadata(audioProvider));
       } else {
         if (!body.voiceId) return NextResponse.json({ error: "Pick a voice.", code: "validation" }, { status: 422 });
         // Long scripts are chunked + stitched, then stored (an inline data URL
         // would exceed the serverless response limit). Fall back to inline only
         // for small clips when storage isn't configured (e.g. local dev).
-        const buf = await textToSpeechLong({ text: script, voiceId: body.voiceId });
+        const buf = await textToSpeechLong({ text: script, voiceId: body.voiceId, apiKey: elevenProvider?.apiKey });
         try {
           audioUrl = await uploadPublicAudio(buf, `voiceover-${Date.now()}.mp3`, { user });
         } catch (e) {
@@ -125,6 +151,7 @@ export async function POST(req: Request) {
           else throw e;
         }
         meta.provider = "elevenlabs";
+        Object.assign(meta, profileMetadata(elevenProvider));
       }
 
       const jobValues = {
@@ -165,7 +192,7 @@ export async function POST(req: Request) {
     }
 
     // ── OpenAI-compatible image providers ─────────────────────────────────
-    const imageProvider = getImageProviderConfig(body.provider);
+    const imageProvider = await getImageProviderForUser(body.provider, user);
     if (body.type === "image" && imageProvider) {
       const prompt = sanitizeText(body.prompt, 2000);
       if (!prompt) return NextResponse.json({ error: "Provide an image prompt.", code: "validation" }, { status: 422 });
@@ -176,8 +203,10 @@ export async function POST(req: Request) {
         feature: "media.image",
         campaignId: body.campaignId,
         pieceId: body.pieceId,
+        providerSource: imageProvider.providerSource ?? "managed",
         provider: imageProvider.provider,
         model: body.modelId,
+        metadata: imageProvider.profileId ? { profileId: imageProvider.profileId } : {},
       });
       const result = await generateOpenAICompatibleImage({
         config: imageProvider,
@@ -204,7 +233,11 @@ export async function POST(req: Request) {
         outputUrl: result.outputUrl,
         downloadUrl: result.downloadUrl,
         completedAt: new Date(),
-        meta: { provider: imageProvider.provider, providerResponseId: result.providerResponseId ?? null },
+        meta: {
+          provider: imageProvider.provider,
+          providerResponseId: result.providerResponseId ?? null,
+          ...profileMetadata(imageProvider),
+        },
       } as const;
 
       if (isLocalFirstMode()) {
@@ -236,7 +269,10 @@ export async function POST(req: Request) {
 
     // ── Image / Video / Avatar (Hedra) ─────────────────────────────────────
     const wanted: GenerationType = body.type === "avatar_video" ? "video" : (body.type as GenerationType);
-    const models = await listModels([wanted]);
+    const hedraProvider = await getHedraProviderForUser(user);
+    const needsVoiceover = !body.audioAssetId && Boolean(body.script) && (body.type === "avatar_video" || body.type === "video");
+    const voiceoverProvider = needsVoiceover ? await getElevenLabsProviderForUser(user) : null;
+    const models = await listModels([wanted], { apiKey: hedraProvider?.apiKey });
     const model = models.find((m) => m.id === body.modelId);
     if (!model) return NextResponse.json({ error: "Unknown or unavailable model.", code: "bad_request" }, { status: 400 });
 
@@ -249,8 +285,13 @@ export async function POST(req: Request) {
       feature: `media.${body.type}`,
       campaignId: body.campaignId,
       pieceId: body.pieceId,
+      providerSource: combinedSource(hedraProvider, voiceoverProvider),
       provider: "hedra",
       model: body.modelId,
+      metadata: {
+        ...(hedraProvider?.profileId ? { profileId: hedraProvider.profileId, hedraProfileId: hedraProvider.profileId } : {}),
+        ...(voiceoverProvider?.profileId ? { elevenlabsProfileId: voiceoverProvider.profileId } : {}),
+      },
     });
 
     let audioAssetId = body.audioAssetId;
@@ -278,16 +319,25 @@ export async function POST(req: Request) {
         abytes = Buffer.from(await ar.arrayBuffer());
       }
       const aname = `combine-${Date.now()}.mp3`;
-      const aasset = await createAsset({ name: aname, type: "audio" });
-      await uploadAsset(aasset.id, new Blob([new Uint8Array(abytes)], { type: "audio/mpeg" }), aname);
+      const aasset = await createAsset({ name: aname, type: "audio" }, { apiKey: hedraProvider?.apiKey });
+      await uploadAsset(aasset.id, new Blob([new Uint8Array(abytes)], { type: "audio/mpeg" }), aname, { apiKey: hedraProvider?.apiKey });
       audioAssetId = aasset.id;
     }
 
     // Voiceover for avatar/synced video: render TTS and upload it to Hedra.
     if (!audioAssetId && body.script && (body.type === "avatar_video" || body.type === "video")) {
-      const buf = await textToSpeechLong({ text: sanitizeText(body.script, 100000), voiceId: body.voiceId ?? "" });
-      const asset = await createAsset({ name: `voiceover-${Date.now()}.mp3`, type: "audio" });
-      await uploadAsset(asset.id, new Blob([new Uint8Array(buf)], { type: "audio/mpeg" }), `voiceover-${Date.now()}.mp3`);
+      const buf = await textToSpeechLong({
+        text: sanitizeText(body.script, 100000),
+        voiceId: body.voiceId ?? "",
+        apiKey: voiceoverProvider?.apiKey,
+      });
+      const asset = await createAsset({ name: `voiceover-${Date.now()}.mp3`, type: "audio" }, { apiKey: hedraProvider?.apiKey });
+      await uploadAsset(
+        asset.id,
+        new Blob([new Uint8Array(buf)], { type: "audio/mpeg" }),
+        `voiceover-${Date.now()}.mp3`,
+        { apiKey: hedraProvider?.apiKey },
+      );
       audioAssetId = asset.id;
     }
 
@@ -297,7 +347,7 @@ export async function POST(req: Request) {
       textPrompt: sanitizeText(body.prompt, 2000) || sanitizeText(body.script, 2000) || undefined,
       aspectRatio: body.aspectRatio,
       resolution: body.resolution,
-      startAssetId: await resolveStartAsset(body.startAssetId),
+      startAssetId: await resolveStartAsset(body.startAssetId, hedraProvider?.apiKey),
       audioAssetId,
       durationMs: body.duration ? body.duration * 1000 : undefined,
     };
@@ -308,6 +358,10 @@ export async function POST(req: Request) {
         : await db.query.styleProfiles.findFirst({ where: eq(styleProfiles.campaignId, body.campaignId) })
       : null;
     const meta: Record<string, unknown> = {};
+    meta.provider = "hedra";
+    Object.assign(meta, profileMetadata(hedraProvider));
+    if (hedraProvider?.profileId) meta.hedraProfileId = hedraProvider.profileId;
+    if (voiceoverProvider?.profileId) meta.elevenlabsProfileId = voiceoverProvider.profileId;
     if (prof) { meta.styleRound = prof.rounds; meta.styleKnobs = prof.knobs; }
 
     if (body.type === "image" && body.enhance !== false) {
@@ -342,7 +396,7 @@ export async function POST(req: Request) {
     }
 
     const styleMeta = Object.keys(meta).length ? meta : undefined;
-    const gen = await generateAsset(input);
+    const gen = await generateAsset(input, { apiKey: hedraProvider?.apiKey });
 
     if (isLocalFirstMode()) {
       const job = createLocalMediaJob({

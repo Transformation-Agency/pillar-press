@@ -17,6 +17,9 @@ describe("hosted provider catalog routes", () => {
     }));
     vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => false }));
     vi.doMock("@/lib/elevenlabs", () => ({ listVoices }));
+    vi.doMock("@/lib/mediaProviders", () => ({
+      getElevenLabsProviderForUser: vi.fn(async () => null),
+    }));
     vi.doMock("@/lib/billing/entitlements", () => ({
       requireManagedProviderAccess,
       requireByokProviderAccess: vi.fn(),
@@ -31,8 +34,9 @@ describe("hosted provider catalog routes", () => {
 
     expect(res.status).toBe(200);
     expect(requireManagedProviderAccess).toHaveBeenCalledWith({ id: "user_1", workspaceId: "workspace_1", role: "author" });
-    expect(listVoices).toHaveBeenCalledWith();
+    expect(listVoices).toHaveBeenCalledWith({ apiKey: undefined });
     expect(body).toEqual({
+      providerSource: "managed",
       source: "elevenlabs",
       voices: [{ id: "voice_1", name: "Narrator", category: "premade", previewUrl: "https://example.test/v.mp3" }],
     });
@@ -47,6 +51,9 @@ describe("hosted provider catalog routes", () => {
     }));
     vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => false }));
     vi.doMock("@/lib/elevenlabs", () => ({ listVoices }));
+    vi.doMock("@/lib/mediaProviders", () => ({
+      getElevenLabsProviderForUser: vi.fn(async () => null),
+    }));
     vi.doMock("@/lib/billing/entitlements", () => ({
       requireManagedProviderAccess: vi.fn(),
       requireByokProviderAccess,
@@ -79,7 +86,13 @@ describe("hosted provider catalog routes", () => {
     }));
     vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => false }));
     vi.doMock("@/lib/hedra", () => ({ listModels }));
-    vi.doMock("@/lib/billing/entitlements", () => ({ requireManagedProviderAccess }));
+    vi.doMock("@/lib/mediaProviders", () => ({
+      getHedraProviderForUser: vi.fn(async () => null),
+    }));
+    vi.doMock("@/lib/billing/entitlements", () => ({
+      requireManagedProviderAccess,
+      requireByokProviderAccess: vi.fn(),
+    }));
     vi.doMock("@/lib/tenant", () => ({
       tenantNotFound: () => Response.json({ error: "Not found.", code: "not_found" }, { status: 404 }),
     }));
@@ -91,7 +104,7 @@ describe("hosted provider catalog routes", () => {
     expect(res.status).toBe(200);
     expect(listModels).not.toHaveBeenCalled();
     expect(body.source).toBe("fallback");
-    expect(body.providerAccess).toBe("managed_unavailable");
+    expect(body.providerAccess).toBe("provider_unavailable");
     expect(body.models.every((model: { type: string }) => model.type === "image")).toBe(true);
   });
 
@@ -104,7 +117,13 @@ describe("hosted provider catalog routes", () => {
     }));
     vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => false }));
     vi.doMock("@/lib/hedra", () => ({ listModels }));
-    vi.doMock("@/lib/billing/entitlements", () => ({ requireManagedProviderAccess }));
+    vi.doMock("@/lib/mediaProviders", () => ({
+      getHedraProviderForUser: vi.fn(async () => null),
+    }));
+    vi.doMock("@/lib/billing/entitlements", () => ({
+      requireManagedProviderAccess,
+      requireByokProviderAccess: vi.fn(),
+    }));
     vi.doMock("@/lib/tenant", () => ({
       tenantNotFound: () => Response.json({ error: "Not found.", code: "not_found" }, { status: 404 }),
     }));
@@ -115,7 +134,11 @@ describe("hosted provider catalog routes", () => {
 
     expect(res.status).toBe(200);
     expect(requireManagedProviderAccess).toHaveBeenCalledWith({ id: "user_1", workspaceId: "workspace_1", role: "author" });
-    expect(listModels).toHaveBeenCalledWith(["image"]);
-    expect(body).toEqual({ source: "hedra", models: [{ id: "m1", name: "Image", type: "image" }] });
+    expect(listModels).toHaveBeenCalledWith(["image"], { apiKey: undefined });
+    expect(body).toEqual({
+      providerSource: "managed",
+      source: "hedra",
+      models: [{ id: "m1", name: "Image", type: "image" }],
+    });
   });
 });

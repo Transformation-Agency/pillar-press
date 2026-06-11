@@ -4,6 +4,7 @@ import { createAsset, uploadAsset } from "@/lib/hedra";
 import { validateUpload, sanitizeFilename } from "@/lib/validation";
 import { toErrorResponse } from "@/lib/errors";
 import { releaseStorageReservation, reserveStorageBytes, type StorageReservation } from "@/lib/billing/usage";
+import { getHedraProviderForUser } from "@/lib/mediaProviders";
 
 // POST /api/hedra/assets   (multipart/form-data: file, kind=image|audio)
 // Validates type/size, registers a Hedra asset, uploads the bytes, returns the
@@ -26,8 +27,9 @@ export async function POST(req: Request) {
       bytes: file.size,
       feature: `storage.hedra_asset.${kind}`,
     });
-    const asset = await createAsset({ name, type: kind });
-    const uploaded = await uploadAsset(asset.id, file, name);
+    const hedraProvider = await getHedraProviderForUser(user);
+    const asset = await createAsset({ name, type: kind }, { apiKey: hedraProvider?.apiKey });
+    const uploaded = await uploadAsset(asset.id, file, name, { apiKey: hedraProvider?.apiKey });
     return NextResponse.json({ asset: uploaded }, { status: 201 });
   } catch (err) {
     await releaseStorageReservation(storageReservation);

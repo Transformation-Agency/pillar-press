@@ -136,8 +136,8 @@ function mapHedraError(status: number, parsed: unknown, raw: string): HedraError
 
 // ---- public, allowlisted operations ----
 
-export function listModels(types?: GenerationType[]): Promise<HedraModel[]> {
-  return hedra<HedraModel[]>("/models", { query: { type: types } });
+export function listModels(types?: GenerationType[], input?: { apiKey?: string }): Promise<HedraModel[]> {
+  return hedra<HedraModel[]>("/models", { query: { type: types }, apiKey: input?.apiKey });
 }
 
 export function getCredits(input?: { apiKey?: string }): Promise<HedraCredits> {
@@ -146,12 +146,12 @@ export function getCredits(input?: { apiKey?: string }): Promise<HedraCredits> {
   return hedra<HedraCredits>("/billing/credits", { apiKey: input?.apiKey });
 }
 
-export function listVoices(): Promise<HedraVoice[]> {
-  return hedra<HedraVoice[]>("/voices");
+export function listVoices(input?: { apiKey?: string }): Promise<HedraVoice[]> {
+  return hedra<HedraVoice[]>("/voices", { apiKey: input?.apiKey });
 }
 
-export async function listAssets(query?: { type?: string }): Promise<HedraAsset[]> {
-  const resp = await hedra<unknown>("/assets", { query });
+export async function listAssets(query?: { type?: string }, input?: { apiKey?: string }): Promise<HedraAsset[]> {
+  const resp = await hedra<unknown>("/assets", { query, apiKey: input?.apiKey });
   if (Array.isArray(resp)) return resp as HedraAsset[];
   const r = resp as { assets?: HedraAsset[]; data?: HedraAsset[] };
   return r.assets ?? r.data ?? [];
@@ -160,9 +160,9 @@ export async function listAssets(query?: { type?: string }): Promise<HedraAsset[
 /** Resolve the public output URL(s) for a finished generation's asset. Hedra's
  *  status endpoint returns a null url for images — the rendered asset carries
  *  the url (nested under `asset.url`); GET /assets/:id 404s, so we list + match. */
-export async function getAssetUrls(assetId: string, type = "image"): Promise<{ url?: string; thumbnailUrl?: string }> {
+export async function getAssetUrls(assetId: string, type = "image", input?: { apiKey?: string }): Promise<{ url?: string; thumbnailUrl?: string }> {
   // Hedra's /assets list REQUIRES a type filter (no-filter returns nothing).
-  const assets = await listAssets({ type });
+  const assets = await listAssets({ type }, { apiKey: input?.apiKey });
   const a = assets.find((x) => x && (x as { id?: string }).id === assetId) as
     | { url?: string; thumbnail_url?: string; asset?: { url?: string } }
     | undefined;
@@ -180,15 +180,20 @@ function normalizeStatus(s: GenerationStatus): GenerationStatus {
 }
 
 /** Create an asset record (e.g. register an image/audio you will upload to). */
-export function createAsset(input: { name: string; type: string }): Promise<HedraAsset> {
-  return hedra<HedraAsset>("/assets", { method: "POST", body: input });
+export function createAsset(input: { name: string; type: string }, opts?: { apiKey?: string }): Promise<HedraAsset> {
+  return hedra<HedraAsset>("/assets", { method: "POST", body: input, apiKey: opts?.apiKey });
 }
 
 /** Upload binary data for an asset. `file` is a Blob/File on the server. */
-export function uploadAsset(assetId: string, file: Blob, filename: string): Promise<HedraAsset> {
+export function uploadAsset(assetId: string, file: Blob, filename: string, opts?: { apiKey?: string }): Promise<HedraAsset> {
   const form = new FormData();
   form.append("file", file, filename);
-  return hedra<HedraAsset>(`/assets/${encodeURIComponent(assetId)}/upload`, { method: "POST", body: form, isForm: true });
+  return hedra<HedraAsset>(`/assets/${encodeURIComponent(assetId)}/upload`, {
+    method: "POST",
+    body: form,
+    isForm: true,
+    apiKey: opts?.apiKey,
+  });
 }
 
 // Hedra occasionally returns transient errors on submission (notably 422 for
@@ -214,7 +219,7 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
   throw lastErr;
 }
 
-export async function generateAsset(input: GenerateInput): Promise<GenerationStatus> {
+export async function generateAsset(input: GenerateInput, opts?: { apiKey?: string }): Promise<GenerationStatus> {
   let body: Record<string, unknown>;
   if (input.type === "image") {
     // Flat body for image generation.
@@ -233,17 +238,18 @@ export async function generateAsset(input: GenerateInput): Promise<GenerationSta
     if (input.startAssetId) body.start_keyframe_id = input.startAssetId;
     if (input.audioAssetId) body.audio_id = input.audioAssetId;
   }
-  const res = await withRetry(() => hedra<GenerationStatus>("/generations", { method: "POST", body }));
+  const res = await withRetry(() => hedra<GenerationStatus>("/generations", { method: "POST", body, apiKey: opts?.apiKey }));
   return normalizeStatus(res);
 }
 
-export async function getGenerationStatus(generationId: string): Promise<GenerationStatus> {
-  const res = await hedra<GenerationStatus>(`/generations/${encodeURIComponent(generationId)}/status`);
+export async function getGenerationStatus(generationId: string, opts?: { apiKey?: string }): Promise<GenerationStatus> {
+  const res = await hedra<GenerationStatus>(`/generations/${encodeURIComponent(generationId)}/status`, { apiKey: opts?.apiKey });
   return normalizeStatus(res);
 }
 
-export function listGenerations(filters?: { type?: string; status?: string; limit?: number }): Promise<GenerationStatus[]> {
+export function listGenerations(filters?: { type?: string; status?: string; limit?: number }, opts?: { apiKey?: string }): Promise<GenerationStatus[]> {
   return hedra<GenerationStatus[]>("/generations", {
     query: { type: filters?.type, status: filters?.status, limit: filters?.limit?.toString() },
+    apiKey: opts?.apiKey,
   });
 }

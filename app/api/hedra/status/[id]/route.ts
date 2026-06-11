@@ -7,9 +7,21 @@ import { isLocalFirstMode } from "@/lib/local/mode";
 import { getGenerationStatus, getAssetUrls } from "@/lib/hedra";
 import { persistRemoteImage, persistRemoteVideo } from "@/lib/storage";
 import { toErrorResponse } from "@/lib/errors";
+import { getHostedMediaProviderProfile } from "@/lib/mediaProviderSettings";
 
 // Downloading + re-uploading a rendered video can take a while.
 export const maxDuration = 60;
+
+function metaRecord(meta: unknown): Record<string, unknown> {
+  return meta && typeof meta === "object" && !Array.isArray(meta) ? meta as Record<string, unknown> : {};
+}
+
+function hedraProfileIdFromMeta(meta: unknown): string | undefined {
+  const record = metaRecord(meta);
+  if (typeof record.hedraProfileId === "string") return record.hedraProfileId;
+  if (record.provider === "hedra" && typeof record.profileId === "string") return record.profileId;
+  return undefined;
+}
 
 // GET /api/hedra/status/[id]
 // Authorizes the job to the current user (no cross-user reads), polls Hedra for
@@ -34,7 +46,11 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       return NextResponse.json({ job });
     }
 
-    const s = await getGenerationStatus(job.hedraGenerationId);
+    const hedraProfileId = hedraProfileIdFromMeta(job.meta);
+    const hedraProfile = !isLocalFirstMode() && hedraProfileId
+      ? await getHostedMediaProviderProfile(user, hedraProfileId)
+      : null;
+    const s = await getGenerationStatus(job.hedraGenerationId, { apiKey: hedraProfile?.apiKey });
     const terminal = ["completed", "failed", "canceled"].includes(s.status);
 
     // Hedra's status endpoint returns a null url for completed images/videos —
@@ -44,7 +60,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     let dl = s.download_url ?? undefined;
     if (terminal && s.status === "completed" && !outUrl && s.asset_id) {
       try {
-        const a = await getAssetUrls(s.asset_id, job.type === "image" ? "image" : "video");
+        const a = await getAssetUrls(s.asset_id, job.type === "image" ? "image" : "video", { apiKey: hedraProfile?.apiKey });
         outUrl = a.url ?? outUrl;
         thumb = thumb ?? a.thumbnailUrl;
         dl = dl ?? a.url;

@@ -47,6 +47,7 @@ export async function listVoices(input?: { apiKey?: string }): Promise<ElevenVoi
 export interface TtsInput {
   text: string;
   voiceId: string;
+  apiKey?: string;
   modelId?: string;       // e.g. "eleven_multilingual_v2"
   stability?: number;
   similarityBoost?: number;
@@ -67,7 +68,7 @@ export async function textToSpeech(input: TtsInput): Promise<Blob> {
     `${ELEVEN_BASE}/text-to-speech/${encodeURIComponent(input.voiceId)}?output_format=${input.format ?? "mp3_44100_128"}`,
     {
       method: "POST",
-      headers: { "xi-api-key": apiKey(), "Content-Type": "application/json", Accept: "audio/mpeg" },
+      headers: { "xi-api-key": apiKey(input.apiKey), "Content-Type": "application/json", Accept: "audio/mpeg" },
       body: JSON.stringify({
         text: input.text,
         model_id: input.modelId ?? "eleven_multilingual_v2",

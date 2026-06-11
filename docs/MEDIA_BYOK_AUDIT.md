@@ -1,18 +1,20 @@
 # Hosted Media BYOK Audit
 
-Status: audit complete, settings API implemented, generation resolver not complete.
+Status: audit complete, hosted media BYOK server plumbing implemented, setup/UI polish not complete.
 
 This audit covers `POST /api/hedra/generate` and the media provider helpers that
 power Studio image, audio, video, and avatar generation in hosted web mode.
 
 ## Current Verdict
 
-Hosted LLM BYOK is real. Hosted media BYOK is not real yet for generation.
+Hosted LLM BYOK is real. Hosted media BYOK now has the same encrypted hosted
+settings foundation plus server-side generation resolution for Studio media
+routes.
 
 The database can store more than LLM secrets because `provider_secrets.kind` is
 generic. Hosted media provider settings now read and write `kind = "media"` via
-`GET/PUT /api/media/provider-settings`, but media generation still resolves
-provider credentials from server env vars or desktop-local encrypted settings.
+`GET/PUT /api/media/provider-settings`; media generation now prefers saved
+hosted BYOK media profiles and falls back to managed env/desktop settings.
 
 ## Current Credential Flow
 
@@ -20,16 +22,18 @@ provider credentials from server env vars or desktop-local encrypted settings.
 flowchart TD
   Browser["Browser Studio"] --> Generate["POST /api/hedra/generate"]
   Generate --> Reserve["reserveUsage(task=media_generation)"]
-  Generate --> MediaConfig["getImageProviderConfig / getAudioProviderConfig"]
-  MediaConfig --> Env["Server env MEDIA_* / OPENAI_API_KEY / XAI_API_KEY"]
-  MediaConfig --> Desktop["desktopMediaProvider() from local settings file"]
+  Generate --> MediaConfig["get*ProviderForUser(user)"]
+  MediaConfig --> HostedMedia["Encrypted provider_secrets kind=media"]
+  MediaConfig --> Env["Managed server env MEDIA_* / provider API keys"]
+  MediaConfig --> Desktop["desktopMediaProvider() in local-first desktop"]
   Generate --> HedraClient["lib/hedra.ts"]
-  HedraClient --> HedraEnv["HEDRA_API_KEY or desktop hedra key"]
+  HedraClient --> HedraKey["BYOK Hedra key or managed Hedra key"]
   Generate --> ElevenClient["textToSpeechLong()"]
-  ElevenClient --> ElevenEnv["ELEVENLABS_API_KEY or desktop elevenlabs key"]
+  ElevenClient --> ElevenKey["BYOK ElevenLabs key or managed ElevenLabs key"]
   Generate --> LLMPrompt["getAIForTaskForUser(mediaPrompt)"]
   LLMPrompt --> LLMByok["Hosted LLM BYOK profile works here"]
-  Generate --> MediaJob["media_jobs persisted by workspace/user"]
+  Generate --> Usage["usage_events providerSource/profileId metadata"]
+  Generate --> MediaJob["media_jobs persisted by workspace/user with secret-free media metadata"]
 ```
 
 ## What Already Works
@@ -47,75 +51,22 @@ flowchart TD
 - Hosted media provider keys can now be saved as encrypted `provider_secrets`
   rows with `kind = "media"` for `hedra`, `elevenlabs`, `openai`, `xai`, and
   `custom-image`. Browser reads receive only secret-free metadata.
+- `lib/mediaProviders.ts` now resolves hosted media providers per user,
+  preferring saved BYOK media profiles and falling back to managed env/desktop
+  settings.
+- `POST /api/hedra/generate` now uses saved BYOK media profiles for OpenAI/xAI
+  compatible image generation, OpenAI audio generation, Hedra image/video/avatar
+  generation, and ElevenLabs voiceover audio used in Hedra videos.
+- Hedra model/status/asset operations and ElevenLabs TTS accept per-request API
+  key overrides.
+- `GET /api/media/providers` merges managed availability with hosted saved BYOK
+  media provider status.
+- Media usage reservations now mark BYOK media generation with
+  `providerSource: "byok"` and profile metadata where applicable.
 
 ## Gaps
 
-### 1. Hosted media provider secrets are modeled, but not consumed
-
-`lib/mediaProviderSettings.ts` and `GET/PUT /api/media/provider-settings` now
-store encrypted hosted media profiles in `provider_secrets.kind = "media"`.
-
-Impact: a hosted user can save Hedra, ElevenLabs, OpenAI media, xAI media, or
-custom image provider keys, but generation does not consume those saved keys
-yet.
-
-### 2. Media generation does not resolve user-scoped hosted media keys
-
-`lib/mediaProviders.ts` resolves OpenAI/xAI/custom media keys from env vars or
-desktop settings:
-
-- `MEDIA_OPENAI_API_KEY` / `OPENAI_API_KEY`
-- `MEDIA_XAI_API_KEY` / `XAI_API_KEY`
-- `MEDIA_IMAGE_API_KEY`
-- encrypted desktop settings via `desktopMediaProvider()`
-
-Hosted `provider_secrets` are not consulted.
-
-Impact: hosted image/audio generation through OpenAI-compatible media providers
-is managed-key only in practice.
-
-### 3. Hedra generation cannot accept a user API key
-
-`lib/hedra.ts` supports an override key only for `getCredits()`. The following
-generation-critical functions use env/desktop keys only:
-
-- `listModels()`
-- `createAsset()`
-- `uploadAsset()`
-- `generateAsset()`
-- `getGenerationStatus()`
-- `listAssets()`
-
-Impact: hosted Hedra image/video/avatar generation cannot use a user BYOK Hedra
-key yet.
-
-### 4. ElevenLabs generation cannot accept a user API key
-
-`listVoices({ apiKey })` supports BYOK testing, but `textToSpeech()` and
-`textToSpeechLong()` do not accept or forward an API key override.
-
-Impact: hosted voice/audio generation and Hedra video voiceover paths cannot use
-a user BYOK ElevenLabs key yet.
-
-### 5. Usage ledger cannot distinguish media BYOK from media managed
-
-`reserveUsage()` supports `providerSource`, but media generation currently does
-not have a user-scoped media resolver. Reservations therefore still default to
-managed unless a route explicitly supplies another source.
-
-Impact: even after media BYOK keys exist, usage events need to mark
-`providerSource: "byok"` and include the media profile id to make billing and
-support audits accurate.
-
-### 6. `/api/media/providers` is not user-aware
-
-`GET /api/media/providers` reports configured media providers from env/desktop
-settings only.
-
-Impact: hosted users will not see their saved media BYOK providers reflected in
-Studio capability/status UI.
-
-### 7. Setup still prefers the desktop bridge
+### 1. Setup still prefers the desktop bridge
 
 The setup helper calls `desktop.saveMediaProviderKey()` in desktop mode. Hosted
 web mode now has a matching encrypted settings route, but the setup/onboarding
@@ -123,6 +74,26 @@ UI still needs to consistently use it for media provider keys.
 
 Impact: hosted onboarding can test some user-supplied keys and has a route to
 persist them, but does not yet reliably feed them into media generation.
+
+### 2. Studio UI does not yet expose media profile management cleanly
+
+`GET /api/media/providers` now returns user-aware status, but the hosted Studio
+and setup UI still need a clear media provider settings surface that writes to
+`/api/media/provider-settings`.
+
+Impact: the backend can use hosted BYOK media profiles, but the user journey for
+adding, testing, selecting, and rotating those media keys is not production
+quality yet.
+
+### 3. Live provider smoke coverage is still needed
+
+Automated tests prove resolver behavior, secret-free responses, and BYOK usage
+reservation shape. They do not prove live provider behavior against Hedra,
+ElevenLabs, OpenAI image/audio, xAI image, and custom image endpoints.
+
+Impact: before launch, run a hosted staging smoke with real BYOK keys for each
+supported provider and confirm generated assets persist beyond signed provider
+URL expiry.
 
 ## Required Implementation Order
 
@@ -138,7 +109,7 @@ persist them, but does not yet reliably feed them into media generation.
    - Browser must receive only secret-free metadata.
    - PUT must require authenticated hosted user and BYOK-provider entitlement.
 
-3. Add a user-scoped media resolver.
+3. Add a user-scoped media resolver. **Implemented.**
    - Recommended API:
      `getMediaProviderForUser(provider, capability, user)`.
    - Return `{ config, providerSource, provider, model, profileId }`.
@@ -146,13 +117,13 @@ persist them, but does not yet reliably feed them into media generation.
      when plan allows managed providers.
    - Desktop/local-first should keep env/desktop behavior.
 
-4. Add API-key override support to media clients.
+4. Add API-key override support to media clients. **Implemented.**
    - `lib/hedra.ts`: add optional `{ apiKey }` to model listing, asset create,
      upload, generation, generation status, asset listing, and asset URL lookup.
    - `lib/elevenlabs.ts`: add `apiKey` to `TtsInput`, `textToSpeech()`, and
      `textToSpeechLong()`.
 
-5. Wire `POST /api/hedra/generate` through the resolver.
+5. Wire `POST /api/hedra/generate` through the resolver. **Implemented.**
    - OpenAI/xAI/custom image path uses hosted BYOK config when selected.
    - OpenAI audio path uses hosted BYOK config when selected.
    - Hedra image/video/avatar path uses hosted BYOK Hedra key when selected.
@@ -160,13 +131,13 @@ persist them, but does not yet reliably feed them into media generation.
    - All usage reservations include `providerSource`, `provider`, `model`, and
      `profileId`.
 
-6. Update provider status and setup UI.
+6. Update provider status and setup UI. **Partially implemented.**
    - `GET /api/media/providers` should merge managed availability with
      user-saved hosted media BYOK status.
    - Onboarding/setup should save media keys through the hosted media settings
      route when not running in desktop local-first mode.
 
-7. Add tests.
+7. Add tests. **Started.**
    - Media settings encryption tests for `kind = "media"`.
    - Route tests proving hosted media generation uses BYOK keys without reading
      env keys.

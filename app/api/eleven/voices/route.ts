@@ -5,6 +5,7 @@ import { toErrorResponse } from "@/lib/errors";
 import { isLocalFirstMode } from "@/lib/local/mode";
 import { requireByokProviderAccess, requireManagedProviderAccess } from "@/lib/billing/entitlements";
 import { tenantNotFound } from "@/lib/tenant";
+import { getElevenLabsProviderForUser } from "@/lib/mediaProviders";
 
 function publicVoices(voices: Awaited<ReturnType<typeof listVoices>>) {
   return voices.map((v) => ({ id: v.voice_id, name: v.name, category: v.category, previewUrl: v.preview_url }));
@@ -14,13 +15,22 @@ function publicVoices(voices: Awaited<ReturnType<typeof listVoices>>) {
 export async function GET() {
   try {
     const user = await requireUser();
+    const elevenProvider = await getElevenLabsProviderForUser(user);
     if (!isLocalFirstMode()) {
       if (!user.workspaceId) return tenantNotFound();
-      await requireManagedProviderAccess({ ...user, workspaceId: user.workspaceId });
+      if (elevenProvider?.providerSource === "byok") {
+        await requireByokProviderAccess({ ...user, workspaceId: user.workspaceId });
+      } else {
+        await requireManagedProviderAccess({ ...user, workspaceId: user.workspaceId });
+      }
     }
-    const voices = await listVoices();
+    const voices = await listVoices({ apiKey: elevenProvider?.apiKey });
     // trim to what the UI needs (no secrets in here regardless)
-    return NextResponse.json({ voices: publicVoices(voices), source: "elevenlabs" });
+    return NextResponse.json({
+      voices: publicVoices(voices),
+      source: "elevenlabs",
+      providerSource: elevenProvider?.providerSource ?? "managed",
+    });
   } catch (err) {
     return toErrorResponse(err);
   }
