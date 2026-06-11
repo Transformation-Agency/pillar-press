@@ -7,6 +7,8 @@ import {
 } from "@/lib/billing/stripe";
 import {
   billingAccessForSubscription,
+  entitlementAllowsByokProvider,
+  entitlementAllowsManagedProvider,
 } from "@/lib/billing/usage";
 import { campaigns, db, entitlements, type Entitlement, type Subscription } from "@/lib/db";
 
@@ -93,6 +95,30 @@ export async function requireExportEnabled(user: BillingSessionUser) {
       402,
       "export_not_enabled",
       "Downloads and exports are not included in your current plan. Upgrade to export files.",
+    );
+  }
+  return { subscription, entitlement };
+}
+
+export async function requireManagedProviderAccess(user: BillingSessionUser) {
+  const { subscription, entitlement } = await activeEntitlementForUser(user);
+  if (!entitlementAllowsManagedProvider(entitlement)) {
+    throw new BillingError(
+      402,
+      "managed_provider_not_enabled",
+      "Managed AI provider usage is not included in your current plan. Upgrade or connect your own provider to continue.",
+    );
+  }
+  return { subscription, entitlement };
+}
+
+export async function requireByokProviderAccess(user: BillingSessionUser) {
+  const { subscription, entitlement } = await activeEntitlementForUser(user);
+  if (!entitlementAllowsByokProvider(entitlement)) {
+    throw new BillingError(
+      402,
+      "byok_provider_not_enabled",
+      "Bring-your-own-key provider usage is not included in your current plan.",
     );
   }
   return { subscription, entitlement };
