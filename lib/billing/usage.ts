@@ -65,6 +65,20 @@ function limitForDimension(
   return entitlement.monthlyLlmCredits;
 }
 
+function tasksForDimension(dimension: UsageDimension): UsageEventTask[] {
+  if (dimension === "media") return ["media_generation"];
+  if (dimension === "gather") return ["gather"];
+  return [
+    "review",
+    "revision",
+    "outputs",
+    "weave",
+    "file_extract",
+    "chat",
+    "utility",
+  ];
+}
+
 function estimateCredits(input: UsageReservationInput) {
   return Math.max(1, Math.ceil(input.estimatedCredits ?? 1));
 }
@@ -89,7 +103,7 @@ async function entitlementForPlan(planId: string) {
 
 async function usedCredits(input: {
   workspaceId: string;
-  task: UsageEventTask;
+  dimension: UsageDimension;
   periodStart: Date;
   periodEnd: Date;
 }) {
@@ -103,7 +117,7 @@ async function usedCredits(input: {
     .where(
       and(
         eq(usageEvents.workspaceId, input.workspaceId),
-        eq(usageEvents.task, input.task),
+        inArray(usageEvents.task, tasksForDimension(input.dimension)),
         inArray(usageEvents.status, ["reserved", "succeeded"]),
         gte(usageEvents.createdAt, input.periodStart),
         lt(usageEvents.createdAt, input.periodEnd),
@@ -142,7 +156,7 @@ export async function reserveUsage(input: UsageReservationInput): Promise<UsageR
   const period = periodForSubscription(subscription);
   const used = await usedCredits({
     workspaceId: user.workspaceId,
-    task: input.task,
+    dimension,
     periodStart: period.start,
     periodEnd: period.end,
   });

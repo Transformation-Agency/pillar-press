@@ -9,6 +9,7 @@ import { getAIForTask } from "@/lib/llm";
 import type { AIMessage, LLMTask } from "@/lib/llm";
 import { buildRefContext, type ReferencesDoc } from "@/lib/refContext";
 import { toErrorResponse } from "@/lib/errors";
+import { completeUsageReservation, failUsageReservation, reserveUsage, type UsageReservation } from "@/lib/billing/usage";
 
 const messageSchema = z.object({
   role: z.enum(["user", "assistant"]),
@@ -54,6 +55,7 @@ async function resolveRefContext(campaignId: string | null | undefined, workspac
 }
 
 export async function POST(req: Request) {
+  let reservation: UsageReservation = null;
   try {
     const user = await requireUser();
     const body = chatSchema.parse(await req.json());
@@ -71,9 +73,20 @@ export async function POST(req: Request) {
       body.memory ? `Earlier folded context:\n${body.memory}` : "",
     ].filter(Boolean).join("\n\n");
 
+    reservation = await reserveUsage({
+      user,
+      task: "chat",
+      feature: `desk.chat.${body.mode}`,
+      campaignId: body.campaignId,
+      estimatedCredits: Math.max(1, Math.ceil(JSON.stringify(transcript).length / 12000)),
+    });
     const text = await getAIForTask(body.task as LLMTask).complete(transcript as AIMessage[], system);
+    await completeUsageReservation(reservation, {
+      actualCredits: Math.max(1, Math.ceil((JSON.stringify(transcript).length + text.length) / 12000)),
+    });
     return NextResponse.json({ text: text.trim() });
   } catch (err) {
+    await failUsageReservation(reservation, err);
     return toErrorResponse(err);
   }
 }

@@ -10,6 +10,7 @@ import { createJob, setProgress, completeJob, failJob } from "@/lib/weaveJobs";
 import { toErrorResponse } from "@/lib/errors";
 import { getLocalCampaign, getLocalReferences } from "@/lib/local/database";
 import { isLocalFirstMode } from "@/lib/local/mode";
+import { completeUsageReservation, failUsageReservation, reserveUsage, type UsageReservation } from "@/lib/billing/usage";
 
 // Long runs: explicitly opt in to the job path with ?async=1. Default is the
 // synchronous result, which the brief allows.
@@ -59,6 +60,7 @@ async function resolveRefCtx(
 //   - default            → run synchronously, return { extracts, brief, mapping, draft }
 //   - ?async=1           → kick a background job, return { jobId } (poll GET /api/weave/[id])
 export async function POST(req: Request) {
+  let reservation: UsageReservation = null;
   try {
     const user = await requireUser();
     const body = weaveBodySchema.parse(await req.json());
@@ -79,21 +81,38 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
     }
 
+    reservation = await reserveUsage({
+      user,
+      task: "weave",
+      feature: "weave.run",
+      campaignId: body.campaignId,
+      estimatedCredits: Math.max(2, usable.length),
+      metadata: { sourceCount: body.sources.length, async: wantsAsync(req) },
+    });
+
     if (wantsAsync(req)) {
       const job = createJob(user.id);
       // Fire-and-forget; progress + result land in the in-memory job store.
       void runWeave(body.sources, refCtx, getAIForTask("weave"), (p) => setProgress(job.id, p))
-        .then((result) => completeJob(job.id, result))
-        .catch((err: unknown) =>
-          failJob(job.id, err instanceof Error ? err.message : "Weave failed."),
-        );
+        .then(async (result) => {
+          await completeUsageReservation(reservation, {
+            actualCredits: Math.max(2, usable.length),
+          });
+          completeJob(job.id, result);
+        })
+        .catch(async (err: unknown) => {
+          await failUsageReservation(reservation, err);
+          failJob(job.id, err instanceof Error ? err.message : "Weave failed.");
+        });
       return NextResponse.json({ jobId: job.id, status: job.status }, { status: 202 });
     }
 
     const result = await runWeave(body.sources, refCtx, getAIForTask("weave"));
     // { extracts, brief, mapping, draft } (+ generatedAt) — the prototype shape.
+    await completeUsageReservation(reservation, { actualCredits: Math.max(2, usable.length) });
     return NextResponse.json(result);
   } catch (err) {
+    await failUsageReservation(reservation, err);
     return toErrorResponse(err);
   }
 }

@@ -11,6 +11,7 @@ import { buildRefContext, type ReferencesDoc } from "@/lib/refContext";
 import { condensePost } from "@/lib/ai/condense";
 import { getAIForTask } from "@/lib/llm";
 import { toErrorResponse } from "@/lib/errors";
+import { completeUsageReservation, failUsageReservation, reserveUsage, type UsageReservation } from "@/lib/billing/usage";
 
 const notFound = () =>
   NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
@@ -44,6 +45,7 @@ export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string; platform: string }> },
 ) {
+  let reservation: UsageReservation = null;
   try {
     const user = await requireUser();
     const { id, platform } = await params;
@@ -65,11 +67,19 @@ export async function POST(
         });
     const refCtx = buildRefContext((ref?.doc as ReferencesDoc | undefined) ?? null);
 
+    reservation = await reserveUsage({
+      user,
+      task: "outputs",
+      feature: "pieces.outputs.condense",
+      campaignId: piece.campaignId,
+      pieceId: piece.id,
+    });
     const draftPost = await condensePost(target.draftPost, refCtx, ratio, getAIForTask("outputs"));
 
     const nextOutputs = { ...outputs, [platform]: { ...target, draftPost } };
     if (isLocalFirstMode()) {
       updateLocalPiece(piece.id, user.id, { outputs: nextOutputs }, user.workspaceId);
+      await completeUsageReservation(reservation);
       return NextResponse.json({ platform, draftPost });
     }
     await db
@@ -77,8 +87,10 @@ export async function POST(
       .set({ outputs: nextOutputs, updatedAt: new Date() })
       .where(and(eq(pieces.id, piece.id), eq(pieces.userId, user.id)));
 
+    await completeUsageReservation(reservation);
     return NextResponse.json({ platform, draftPost });
   } catch (err) {
+    await failUsageReservation(reservation, err);
     return toErrorResponse(err);
   }
 }

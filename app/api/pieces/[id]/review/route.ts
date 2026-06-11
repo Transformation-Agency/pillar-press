@@ -10,6 +10,7 @@ import { getAIForTask } from "@/lib/llm";
 import { buildRefContext, type ReferencesDoc } from "@/lib/refContext";
 import { GATES, runGate, type GateResult } from "@/lib/gates";
 import { toErrorResponse } from "@/lib/errors";
+import { completeUsageReservation, failUsageReservation, reserveUsage, type UsageReservation } from "@/lib/billing/usage";
 
 const notFound = () =>
   NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
@@ -42,6 +43,7 @@ async function resolvePiece(id: string, user: SessionUser): Promise<Piece | null
 // piece.packet[gateId] incrementally after each gate, then sets status
 // Draft→Reviewed and returns the full packet.
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  let reservation: UsageReservation = null;
   try {
     const user = await requireUser();
     const { id } = await params;
@@ -59,6 +61,14 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
 
     // The draft under review is the piece's original text (prototype: task(draft)).
     const draft = piece.original ?? "";
+    reservation = await reserveUsage({
+      user,
+      task: "review",
+      feature: "pieces.review",
+      campaignId: piece.campaignId,
+      pieceId: piece.id,
+      estimatedCredits: GATES.length,
+    });
 
     // Accumulate into a fresh packet keyed by gate id. Start from any existing
     // packet so a re-review overwrites gate-by-gate rather than wiping it first.
@@ -85,6 +95,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     const nextStatus = piece.status === "Draft" ? "Reviewed" : piece.status;
     if (isLocalFirstMode()) {
       updateLocalPiece(piece.id, user.id, { status: nextStatus }, user.workspaceId);
+      await completeUsageReservation(reservation, { actualCredits: GATES.length });
       return NextResponse.json({ packet, status: nextStatus });
     }
     await db
@@ -92,8 +103,10 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
       .set({ status: nextStatus, updatedAt: new Date() })
       .where(and(eq(pieces.id, piece.id), eq(pieces.userId, user.id)));
 
+    await completeUsageReservation(reservation, { actualCredits: GATES.length });
     return NextResponse.json({ packet, status: nextStatus });
   } catch (err) {
+    await failUsageReservation(reservation, err);
     return toErrorResponse(err);
   }
 }

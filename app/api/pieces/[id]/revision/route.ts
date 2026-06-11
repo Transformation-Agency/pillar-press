@@ -8,6 +8,7 @@ import { getAIForTask } from "@/lib/llm";
 import { buildRefContext, type ReferencesDoc } from "@/lib/refContext";
 import { generateRevision, type RevisionPacket, type RevisionPieceInput } from "@/lib/revision";
 import { toErrorResponse } from "@/lib/errors";
+import { completeUsageReservation, failUsageReservation, reserveUsage, type UsageReservation } from "@/lib/billing/usage";
 import type { SessionUser } from "@/lib/auth";
 import type { Piece } from "@/lib/db";
 
@@ -46,6 +47,7 @@ async function resolvePiece(id: string, user: SessionUser): Promise<Piece | null
  * Reviewed → Revised. Logic ported from generators.js#generateRevision.
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  let reservation: UsageReservation = null;
   try {
     const user = await requireUser();
     const { id } = await params;
@@ -80,6 +82,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       direction: piece.direction ?? null,
     };
 
+    reservation = await reserveUsage({
+      user,
+      task: "revision",
+      feature: `pieces.revision.${mode}`,
+      campaignId: piece.campaignId,
+      pieceId: piece.id,
+      estimatedCredits: mode === "full" ? 3 : 2,
+    });
     const result = await generateRevision(input, refCtx, getAIForTask("revision"), undefined, { mode });
 
     if (isLocalFirstMode()) {
@@ -93,6 +103,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         user.workspaceId,
       );
       if (!updated) return notFound();
+      await completeUsageReservation(reservation, { actualCredits: mode === "full" ? 3 : 2 });
       return NextResponse.json({ piece: updated });
     }
 
@@ -107,8 +118,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       .where(and(eq(pieces.id, piece.id), eq(pieces.userId, user.id)))
       .returning();
 
+    await completeUsageReservation(reservation, { actualCredits: mode === "full" ? 3 : 2 });
     return NextResponse.json({ piece: updated });
   } catch (err) {
+    await failUsageReservation(reservation, err);
     return toErrorResponse(err);
   }
 }

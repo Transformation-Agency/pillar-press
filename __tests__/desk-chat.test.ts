@@ -29,9 +29,16 @@ vi.mock("@/lib/db", () => ({
 }));
 
 vi.mock("@/lib/llm", () => ({
+  LLMError: class LLMError extends Error {},
   getAIForTask: vi.fn(() => ({
     complete: completeMock,
   })),
+}));
+
+vi.mock("@/lib/billing/usage", () => ({
+  reserveUsage: vi.fn(async () => null),
+  completeUsageReservation: vi.fn(),
+  failUsageReservation: vi.fn(),
 }));
 
 describe("POST /api/desk/chat", () => {

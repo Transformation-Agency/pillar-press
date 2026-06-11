@@ -11,6 +11,7 @@ import { buildRefContext, type ReferencesDoc } from "@/lib/refContext";
 import { generateOutputs, type GeneratorPiece } from "@/lib/generators";
 import { outputsBodySchema } from "@/lib/schemas-generators";
 import { toErrorResponse } from "@/lib/errors";
+import { completeUsageReservation, failUsageReservation, reserveUsage, type UsageReservation } from "@/lib/billing/usage";
 
 const notFound = () =>
   NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
@@ -48,6 +49,7 @@ async function resolvePiece(id: string, user: SessionUser): Promise<Piece | null
  * lib/generators.ts#generateOutputs; this handler only does auth + db + persist.
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  let reservation: UsageReservation = null;
   try {
     const user = await requireUser();
     const { id } = await params;
@@ -71,6 +73,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       revision: (piece.revision as GeneratorPiece["revision"]) ?? null,
     };
 
+    reservation = await reserveUsage({
+      user,
+      task: "outputs",
+      feature: "pieces.outputs",
+      campaignId: piece.campaignId,
+      pieceId: piece.id,
+      estimatedCredits: Math.max(1, body.active.length * 2),
+    });
     const { outputs, order } = await generateOutputs(
       generatorPiece,
       body.active,
@@ -82,6 +92,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     if (isLocalFirstMode()) {
       const updated = updateLocalPiece(piece.id, user.id, { outputs, outputOrder: order }, user.workspaceId);
       if (!updated) return notFound();
+      await completeUsageReservation(reservation, { actualCredits: Math.max(1, order.length * 2) });
       return NextResponse.json({ piece: updated, outputs, outputOrder: order });
     }
 
@@ -91,8 +102,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       .where(and(eq(pieces.id, piece.id), eq(pieces.userId, user.id)))
       .returning();
 
+    await completeUsageReservation(reservation, { actualCredits: Math.max(1, order.length * 2) });
     return NextResponse.json({ piece: updated, outputs, outputOrder: order });
   } catch (err) {
+    await failUsageReservation(reservation, err);
     return toErrorResponse(err);
   }
 }
