@@ -129,6 +129,16 @@
     (state.media || []).forEach((m) => { if (m.pieceId === tempId) m.pieceId = realId; });
   }
 
+  function removeOptimisticCampaign(id) {
+    state.campaigns = (state.campaigns || []).filter((c) => c.id !== id);
+    state.pieces = (state.pieces || []).filter((p) => p.campaignId !== id);
+    loadedCampaigns.delete(id);
+    if (state.activeCampaignId === id) {
+      state.activeCampaignId = state.campaigns[0] ? state.campaigns[0].id : null;
+      state.activePieceId = null;
+    }
+  }
+
   /* ---- per-campaign hydration (references + pieces + gather + media) ---- */
   async function hydrateCampaign(id) {
     if (!id || loadedCampaigns.has(id)) return;
@@ -367,6 +377,11 @@
         emit();
         persistPrefs();
         return c || ensureCampaign(serverCampaign.id);
+      }).catch((err) => {
+        removeOptimisticCampaign(id);
+        emit();
+        persistPrefs();
+        throw err;
       });
       pendingCampaignCreates.set(id, created);
       created.then(() => pendingCampaignCreates.delete(id), () => pendingCampaignCreates.delete(id));

@@ -133,7 +133,13 @@
     if (!path || !response || response.status !== 402) return response;
     let data = {};
     try { data = await response.clone().json(); } catch { data = {}; }
-    const billingCodes = ["quota_exceeded", "subscription_required", "subscription_inactive", "trial_expired"];
+    const billingCodes = [
+      "quota_exceeded",
+      "subscription_required",
+      "subscription_inactive",
+      "trial_expired",
+      "campaign_limit_exceeded",
+    ];
     if (data && billingCodes.includes(data.code)) {
       window.dispatchEvent(new CustomEvent("kingspress:billing-action-required", {
         detail: {

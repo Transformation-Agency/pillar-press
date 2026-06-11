@@ -1072,6 +1072,7 @@ function BillingPanel({ open, onClose, billing, notice }) {
     accessNotice && accessNotice.code === "subscription_required" ? "Subscription required" :
     accessNotice && accessNotice.code === "trial_expired" ? "Trial ended" :
     accessNotice && accessNotice.code === "subscription_inactive" ? "Billing needs attention" :
+    accessNotice && accessNotice.code === "campaign_limit_exceeded" ? "Campaign limit reached" :
     "Usage limit reached";
 
   const refresh = async () => {

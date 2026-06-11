@@ -17,9 +17,8 @@ Do this as a staged migration, not a rewrite.
    webhook audit events are in place.
 4. Stage 3: entitlement checks, usage reservations, and quota enforcement.
    **Started:** hosted-only usage reservation helpers now enforce active/trial
-   subscription status, expired trial dates, and plan limits for the core
-   writing, research, file extraction, chat, and media surfaces while
-   desktop/local-first bypasses them.
+   subscription status, expired trial dates, usage limits, and campaign-count
+   limits while desktop/local-first bypasses them.
 5. Stage 4: trial onboarding and upgrade UI. **Started:** hosted users now
    have a Billing panel showing trial/subscription status, period usage, paid
    plan upgrades, the Stripe customer portal, and an automatic upgrade prompt
@@ -383,7 +382,8 @@ Stage 3 is complete only when:
   succeeded/failed afterward.
 - Quotas block over-limit work before provider calls. **Started:** the shared
   reservation helper checks the current subscription period against plan
-  entitlements before inserting the reservation.
+  entitlements before inserting the reservation; hosted campaign creation now
+  checks `max_campaigns` before inserting a campaign.
 - Usage rollups reflect the ledger.
 - Provider failure records failed usage without double-charging. **Started:**
   the first gated routes mark reserved usage as failed when downstream work
