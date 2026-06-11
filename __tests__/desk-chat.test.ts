@@ -30,8 +30,12 @@ vi.mock("@/lib/db", () => ({
 
 vi.mock("@/lib/llm", () => ({
   LLMError: class LLMError extends Error {},
-  getAIForTask: vi.fn(() => ({
-    complete: completeMock,
+  getAIForTaskForUser: vi.fn(async () => ({
+    ai: { complete: completeMock },
+    providerSource: "managed",
+    provider: "openai",
+    model: "gpt-4o-mini",
+    profileId: null,
   })),
 }));
 

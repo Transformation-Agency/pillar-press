@@ -2,12 +2,16 @@ import { LLMError } from "@/lib/llm/errors";
 import { extractJSON, repairJSON } from "@/lib/llm/json";
 import {
   PROVIDER_CAPABILITIES,
+  DEFAULT_MAX_TOKENS,
   publicLLMStatus,
   resolveAnthropicFileFallback,
   resolveFileLLMConfig,
   resolveMainLLMConfig,
   resolveTaskLLMConfig,
 } from "@/lib/llm/config";
+import type { SessionUser } from "@/lib/auth";
+import { isLocalFirstMode } from "@/lib/local/mode";
+import { getHostedProviderProfile, getHostedProviderSettings } from "@/lib/providerSettings";
 import { anthropicProvider } from "@/lib/llm/providers/anthropic";
 import { geminiProvider } from "@/lib/llm/providers/gemini";
 import { openAICompatibleProvider } from "@/lib/llm/providers/openaiCompatible";
@@ -79,6 +83,14 @@ let mainAI: AI | null = null;
 let mainConfigKey: string | null = null;
 const taskAIs = new Map<LLMTask, { key: string; ai: AI }>();
 
+export type ResolvedTaskAI = {
+  ai: AI;
+  providerSource: "managed" | "byok";
+  provider?: string | null;
+  model?: string | null;
+  profileId?: string | null;
+};
+
 function configKey(config: LLMConfig): string {
   return JSON.stringify({
     provider: config.provider,
@@ -113,6 +125,39 @@ export function getAIForTask(task: LLMTask): AI {
   const next = createAI(createAdapter(config));
   taskAIs.set(task, { key, ai: next });
   return next;
+}
+
+export async function getAIForTaskForUser(task: LLMTask, user: SessionUser): Promise<ResolvedTaskAI> {
+  if (!isLocalFirstMode() && user.workspaceId) {
+    const hosted = await getHostedProviderSettings(user);
+    const profileId = hosted.taskDefaults?.[task] ?? hosted.defaultProfileId;
+    const profile = profileId ? await getHostedProviderProfile(user, profileId) : null;
+    if (profile && profile.provider && profile.model) {
+      const config: LLMConfig = {
+        provider: profile.provider,
+        model: profile.model,
+        baseUrl: profile.baseUrl,
+        apiKey: profile.apiKey,
+        maxTokens: DEFAULT_MAX_TOKENS,
+      };
+      return {
+        ai: createAI(createAdapter(config)),
+        providerSource: "byok",
+        provider: profile.provider,
+        model: profile.model,
+        profileId: profile.id,
+      };
+    }
+  }
+
+  const config = resolveTaskLLMConfig(task);
+  return {
+    ai: createAI(createAdapter(config)),
+    providerSource: "managed",
+    provider: config.provider,
+    model: config.model,
+    profileId: null,
+  };
 }
 
 export function createAIFromConfig(config: LLMConfig): AI {

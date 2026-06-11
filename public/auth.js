@@ -141,6 +141,7 @@
       "campaign_limit_exceeded",
       "drive_not_enabled",
       "managed_provider_not_enabled",
+      "byok_provider_not_enabled",
       "export_not_enabled",
       "storage_quota_exceeded",
     ];

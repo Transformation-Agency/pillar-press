@@ -24,6 +24,7 @@ export type UsageReservationInput = {
   user: SessionUser;
   task: UsageEventTask;
   feature: string;
+  providerSource?: "managed" | "byok";
   idempotencyKey?: string;
   campaignId?: string | null;
   pieceId?: string | null;
@@ -88,6 +89,11 @@ export function storageQuotaBytes(entitlement: Pick<Entitlement, "storageQuotaGb
 export function entitlementAllowsManagedProvider(entitlement: Pick<Entitlement, "allowedProviders" | "canUseManagedKeys">) {
   const allowed = Array.isArray(entitlement.allowedProviders) ? entitlement.allowedProviders : [];
   return entitlement.canUseManagedKeys && allowed.includes("managed");
+}
+
+export function entitlementAllowsByokProvider(entitlement: Pick<Entitlement, "allowedProviders">) {
+  const allowed = Array.isArray(entitlement.allowedProviders) ? entitlement.allowedProviders : [];
+  return allowed.includes("byok");
 }
 
 function tasksForDimension(dimension: UsageDimension): UsageEventTask[] {
@@ -282,7 +288,15 @@ export async function reserveUsage(input: UsageReservationInput): Promise<UsageR
   if (!entitlement) {
     throw new BillingError(403, "entitlement_missing", "Plan entitlement is missing.");
   }
-  if (!entitlementAllowsManagedProvider(entitlement)) {
+  const providerSource = input.providerSource ?? "managed";
+  if (providerSource === "byok" && !entitlementAllowsByokProvider(entitlement)) {
+    throw new BillingError(
+      402,
+      "byok_provider_not_enabled",
+      "Bring-your-own-key provider usage is not included in your current plan.",
+    );
+  }
+  if (providerSource === "managed" && !entitlementAllowsManagedProvider(entitlement)) {
     throw new BillingError(
       402,
       "managed_provider_not_enabled",
@@ -320,7 +334,7 @@ export async function reserveUsage(input: UsageReservationInput): Promise<UsageR
       model: input.model ?? null,
       status: "reserved",
       estimatedCredits: credits,
-      metadata: input.metadata ?? {},
+      metadata: { ...(input.metadata ?? {}), providerSource },
     })
     .onConflictDoNothing({
       target: [usageEvents.workspaceId, usageEvents.idempotencyKey],

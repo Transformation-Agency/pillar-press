@@ -333,7 +333,11 @@ Rules:
   opens broad managed-key usage. **Started:** hosted web now writes LLM provider
   profiles to `provider_secrets` with encrypted API keys, returns only
   secret-free metadata, and lets the model setup/test/list flow reuse a saved
-  profile without sending the stored key back to the browser.
+  profile without sending the stored key back to the browser. Desk chat,
+  `/api/llm/util`, and onboarding setup extraction now resolve the user's saved
+  default/task profile server-side, mark usage as BYOK, and bypass only the
+  managed-provider entitlement gate while still enforcing subscription and
+  usage quotas.
 - Trial workspaces can use managed keys only within tight usage caps.
 
 ## Stage 1 Success Gate
@@ -396,6 +400,10 @@ Stage 3 is complete only when:
 - Managed provider access honors plan entitlements. **Started:** hosted usage
   reservations require `can_use_managed_keys` and `"managed"` in
   `allowed_providers` before server-managed AI/media/research work begins.
+- BYOK provider access honors plan entitlements. **Started:** user-saved hosted
+  provider profiles are marked as `providerSource: "byok"` on usage
+  reservations; they require `"byok"` in `allowed_providers` but do not require
+  managed-provider access.
 - Storage quota gates hosted persisted media. **Started:** Supabase public
   storage uploads that receive an authenticated hosted user reserve bytes
   against `storage_quota_gb`, release the reservation on failed upload, and

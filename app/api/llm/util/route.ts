@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireUser } from "@/lib/auth";
-import { getAIForTask } from "@/lib/llm";
+import { getAIForTaskForUser } from "@/lib/llm";
 import type { AIMessage, LLMTask } from "@/lib/llm";
 import type { UsageEventTask } from "@/lib/db";
 import { toErrorResponse } from "@/lib/errors";
@@ -34,13 +34,18 @@ export async function POST(req: Request) {
         : body.task === "mediaPrompt" || body.task === "draft"
           ? "utility"
           : body.task;
+    const taskAI = await getAIForTaskForUser(body.task as LLMTask, user);
     reservation = await reserveUsage({
       user,
       task: usageTask,
       feature: `llm.util.${body.task}`,
+      providerSource: taskAI.providerSource,
+      provider: taskAI.provider,
+      model: taskAI.model,
+      metadata: taskAI.profileId ? { profileId: taskAI.profileId } : {},
       estimatedCredits: Math.max(1, Math.ceil(JSON.stringify(messages).length / 12000)),
     });
-    const text = await getAIForTask(body.task as LLMTask).complete(messages as AIMessage[], body.system);
+    const text = await taskAI.ai.complete(messages as AIMessage[], body.system);
     await completeUsageReservation(reservation, {
       actualCredits: Math.max(1, Math.ceil((JSON.stringify(messages).length + text.length) / 12000)),
     });

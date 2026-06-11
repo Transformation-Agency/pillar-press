@@ -5,7 +5,7 @@ import { requireUser } from "@/lib/auth";
 import { db, campaigns, references } from "@/lib/db";
 import { getLocalCampaign, getLocalReferences } from "@/lib/local/database";
 import { isLocalFirstMode } from "@/lib/local/mode";
-import { getAIForTask } from "@/lib/llm";
+import { getAIForTaskForUser } from "@/lib/llm";
 import type { AIMessage, LLMTask } from "@/lib/llm";
 import { buildRefContext, type ReferencesDoc } from "@/lib/refContext";
 import { toErrorResponse } from "@/lib/errors";
@@ -73,14 +73,19 @@ export async function POST(req: Request) {
       body.memory ? `Earlier folded context:\n${body.memory}` : "",
     ].filter(Boolean).join("\n\n");
 
+    const taskAI = await getAIForTaskForUser(body.task as LLMTask, user);
     reservation = await reserveUsage({
       user,
       task: "chat",
       feature: `desk.chat.${body.mode}`,
       campaignId: body.campaignId,
+      providerSource: taskAI.providerSource,
+      provider: taskAI.provider,
+      model: taskAI.model,
+      metadata: taskAI.profileId ? { profileId: taskAI.profileId } : {},
       estimatedCredits: Math.max(1, Math.ceil(JSON.stringify(transcript).length / 12000)),
     });
-    const text = await getAIForTask(body.task as LLMTask).complete(transcript as AIMessage[], system);
+    const text = await taskAI.ai.complete(transcript as AIMessage[], system);
     await completeUsageReservation(reservation, {
       actualCredits: Math.max(1, Math.ceil((JSON.stringify(transcript).length + text.length) / 12000)),
     });

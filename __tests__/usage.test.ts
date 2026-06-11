@@ -11,6 +11,7 @@ describe("hosted usage reservations", () => {
 
     const {
       billingAccessForSubscription,
+      entitlementAllowsByokProvider,
       entitlementAllowsManagedProvider,
       periodForSubscription,
       quotaErrorMessage,
@@ -30,6 +31,8 @@ describe("hosted usage reservations", () => {
     expect(entitlementAllowsManagedProvider({ allowedProviders: ["managed", "byok"], canUseManagedKeys: true } as any)).toBe(true);
     expect(entitlementAllowsManagedProvider({ allowedProviders: ["byok"], canUseManagedKeys: true } as any)).toBe(false);
     expect(entitlementAllowsManagedProvider({ allowedProviders: ["managed"], canUseManagedKeys: false } as any)).toBe(false);
+    expect(entitlementAllowsByokProvider({ allowedProviders: ["byok"] } as any)).toBe(true);
+    expect(entitlementAllowsByokProvider({ allowedProviders: ["managed"] } as any)).toBe(false);
     expect(storageQuotaBytes({ storageQuotaGb: 2 } as any)).toBe(2n * 1024n * 1024n * 1024n);
     expect(billingAccessForSubscription(null)).toMatchObject({ allowed: false, code: "subscription_required" });
     expect(billingAccessForSubscription({
@@ -286,6 +289,141 @@ describe("hosted usage reservations", () => {
       feature: "llm.util.utility",
       estimatedCredits: 1,
     })).rejects.toMatchObject({ status: 402, code: "managed_provider_not_enabled" });
+    expect(insert).not.toHaveBeenCalled();
+  });
+
+  it("allows hosted BYOK reservations when managed keys are disabled but BYOK is allowed", async () => {
+    const entitlement = {
+      planId: "starter",
+      allowedProviders: ["byok"],
+      canUseManagedKeys: false,
+      monthlyLlmCredits: 250,
+      monthlyMediaGenerations: 5,
+      monthlyGatherRuns: 10,
+    };
+    const subscription = {
+      workspaceId: "workspace_1",
+      planId: "starter",
+      status: "active",
+      currentPeriodStart: new Date("2026-06-01T00:00:00.000Z"),
+      currentPeriodEnd: new Date("2026-07-01T00:00:00.000Z"),
+    };
+    const returning = vi.fn(async () => [{ id: "usage_1" }]);
+    const onConflictDoNothing = vi.fn(() => ({ returning }));
+    const values = vi.fn(() => ({ onConflictDoNothing }));
+    const insert = vi.fn(() => ({ values }));
+    const select = vi
+      .fn()
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            limit: vi.fn(async () => [entitlement]),
+          }),
+        }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({
+          where: vi.fn(async () => []),
+        }),
+      });
+
+    vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => false }));
+    vi.doMock("@/lib/auth", () => ({ getOrCreateWorkspace: vi.fn() }));
+    vi.doMock("@/lib/billing/stripe", () => ({
+      BillingError: class BillingError extends Error {
+        status: number;
+        code: string;
+        constructor(status: number, code: string, message: string) {
+          super(message);
+          this.status = status;
+          this.code = code;
+        }
+      },
+      getLatestSubscription: vi.fn(async () => subscription),
+      getOrCreateTrialSubscription: vi.fn(),
+    }));
+    vi.doMock("@/lib/db", async () => {
+      const actual = await vi.importActual<any>("@/lib/db");
+      return { ...actual, db: { select, insert } };
+    });
+
+    const { reserveUsage } = await import("@/lib/billing/usage");
+    const reservation = await reserveUsage({
+      user: { id: "user_1", workspaceId: "workspace_1", role: "author" },
+      task: "utility",
+      feature: "llm.util.utility",
+      providerSource: "byok",
+      provider: "openai",
+      model: "gpt-4o-mini",
+      metadata: { profileId: "openai-gpt" },
+      estimatedCredits: 1,
+    });
+
+    expect(reservation).toEqual({ id: "usage_1", workspaceId: "workspace_1", idempotencyKey: expect.any(String) });
+    expect(values).toHaveBeenCalledWith(expect.objectContaining({
+      provider: "openai",
+      model: "gpt-4o-mini",
+      metadata: expect.objectContaining({ providerSource: "byok", profileId: "openai-gpt" }),
+    }));
+  });
+
+  it("blocks hosted BYOK reservations when the plan disallows BYOK providers", async () => {
+    class MockBillingError extends Error {
+      status: number;
+      code: string;
+      constructor(status: number, code: string, message: string) {
+        super(message);
+        this.status = status;
+        this.code = code;
+      }
+    }
+    const insert = vi.fn();
+    const entitlement = {
+      planId: "trial",
+      allowedProviders: ["managed"],
+      canUseManagedKeys: true,
+      monthlyLlmCredits: 250,
+      monthlyMediaGenerations: 5,
+      monthlyGatherRuns: 10,
+    };
+    const subscription = {
+      workspaceId: "workspace_1",
+      planId: "trial",
+      status: "trialing",
+      trialStart: new Date("2026-06-01T00:00:00.000Z"),
+      trialEnd: new Date("2099-06-08T00:00:00.000Z"),
+      currentPeriodStart: null,
+      currentPeriodEnd: null,
+    };
+    const select = vi.fn().mockReturnValue({
+      from: () => ({
+        where: () => ({
+          limit: vi.fn(async () => [entitlement]),
+        }),
+      }),
+    });
+
+    vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => false }));
+    vi.doMock("@/lib/auth", () => ({ getOrCreateWorkspace: vi.fn() }));
+    vi.doMock("@/lib/billing/stripe", () => ({
+      BillingError: MockBillingError,
+      getLatestSubscription: vi.fn(async () => subscription),
+      getOrCreateTrialSubscription: vi.fn(),
+    }));
+    vi.doMock("@/lib/db", async () => {
+      const actual = await vi.importActual<any>("@/lib/db");
+      return { ...actual, db: { select, insert } };
+    });
+
+    const { reserveUsage } = await import("@/lib/billing/usage");
+
+    await expect(reserveUsage({
+      user: { id: "user_1", workspaceId: "workspace_1", role: "author" },
+      task: "utility",
+      feature: "llm.util.utility",
+      providerSource: "byok",
+      estimatedCredits: 1,
+    })).rejects.toMatchObject({ status: 402, code: "byok_provider_not_enabled" });
     expect(insert).not.toHaveBeenCalled();
   });
 

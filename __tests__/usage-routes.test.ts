@@ -16,7 +16,15 @@ describe("usage reservations in hosted routes", () => {
       requireUser: vi.fn(async () => ({ id: "user_1", workspaceId: "workspace_1", role: "author" })),
     }));
     vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => false }));
-    vi.doMock("@/lib/llm", () => ({ getAIForTask: () => ({ complete }) }));
+    vi.doMock("@/lib/llm", () => ({
+      getAIForTaskForUser: vi.fn(async () => ({
+        ai: { complete },
+        providerSource: "managed",
+        provider: "openai",
+        model: "gpt-4o-mini",
+        profileId: null,
+      })),
+    }));
     vi.doMock("@/lib/billing/usage", () => ({
       reserveUsage,
       completeUsageReservation,
@@ -39,6 +47,9 @@ describe("usage reservations in hosted routes", () => {
       task: "chat",
       feature: "desk.chat.desk",
       campaignId: undefined,
+      providerSource: "managed",
+      provider: "openai",
+      model: "gpt-4o-mini",
     }));
     expect(completeUsageReservation).toHaveBeenCalledWith(
       { id: "usage_1", workspaceId: "workspace_1", idempotencyKey: "k" },
@@ -74,6 +85,52 @@ describe("usage reservations in hosted routes", () => {
     expect(res.status).toBe(200);
     expect(reserveUsage).not.toHaveBeenCalled();
     expect(completeUsageReservation).toHaveBeenCalledWith(null);
+    expect(failUsageReservation).not.toHaveBeenCalled();
+  });
+
+  it("marks hosted utility LLM usage as BYOK when a saved provider profile is used", async () => {
+    const reservation = { id: "usage_1", workspaceId: "workspace_1", idempotencyKey: "k" };
+    const reserveUsage = vi.fn(async () => reservation);
+    const completeUsageReservation = vi.fn();
+    const failUsageReservation = vi.fn();
+    const complete = vi.fn(async () => "OK");
+
+    vi.doMock("@/lib/auth", () => ({
+      requireUser: vi.fn(async () => ({ id: "user_1", workspaceId: "workspace_1", role: "author" })),
+    }));
+    vi.doMock("@/lib/llm", () => ({
+      getAIForTaskForUser: vi.fn(async () => ({
+        ai: { complete },
+        providerSource: "byok",
+        provider: "openai",
+        model: "gpt-4o-mini",
+        profileId: "openai-gpt",
+      })),
+    }));
+    vi.doMock("@/lib/billing/usage", () => ({
+      reserveUsage,
+      completeUsageReservation,
+      failUsageReservation,
+    }));
+
+    const { POST } = await import("../app/api/llm/util/route");
+    const res = await POST(new Request("http://test.local/api/llm/util", {
+      method: "POST",
+      body: JSON.stringify({ prompt: "Say OK.", task: "utility" }),
+    }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body).toEqual({ text: "OK" });
+    expect(reserveUsage).toHaveBeenCalledWith(expect.objectContaining({
+      task: "utility",
+      feature: "llm.util.utility",
+      providerSource: "byok",
+      provider: "openai",
+      model: "gpt-4o-mini",
+      metadata: { profileId: "openai-gpt" },
+    }));
+    expect(completeUsageReservation).toHaveBeenCalledWith(reservation, expect.objectContaining({ actualCredits: 1 }));
     expect(failUsageReservation).not.toHaveBeenCalled();
   });
 
