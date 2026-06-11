@@ -12,6 +12,8 @@ import { runGatherForCampaign } from "@/lib/gather/runCampaign";
 import { isGatherScheduleDue } from "@/lib/gather/scheduleDue";
 import { toErrorResponse } from "@/lib/errors";
 import { tenantNotFound } from "@/lib/tenant";
+import { completeUsageReservation, failUsageReservation, reserveUsage, type UsageReservation } from "@/lib/billing/usage";
+import { getAIForTaskForUser } from "@/lib/llm";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -42,13 +44,35 @@ export async function POST() {
       const due = schedules.filter((schedule) => isGatherScheduleDue(schedule));
       const results = [];
       for (const schedule of due) {
+        let reservation: UsageReservation = null;
         try {
-          const result = await runGatherForCampaign(schedule.campaignId, user);
+          const taskAI = await getAIForTaskForUser("gather", user);
+          const metadata = {
+            scheduleId: schedule.id,
+            providerSource: taskAI.providerSource,
+            ...(taskAI.profileId ? { profileId: taskAI.profileId } : {}),
+          };
+          reservation = await reserveUsage({
+            user,
+            task: "gather",
+            feature: "gather.schedule.run_due",
+            campaignId: schedule.campaignId,
+            providerSource: taskAI.providerSource,
+            provider: taskAI.provider,
+            model: taskAI.model,
+            metadata,
+          });
+          const result = await runGatherForCampaign(schedule.campaignId, user, taskAI.ai);
           if (!result) {
+            await failUsageReservation(reservation, new Error("Scheduled Gather campaign was not found."));
             await markScheduleRun(schedule.id, "not_found", user, schedule.cadence === "once");
             results.push({ id: schedule.id, campaignId: schedule.campaignId, status: "not_found" });
             continue;
           }
+          await completeUsageReservation(reservation, {
+            actualCredits: 1,
+            metadata: { ...metadata, found: result.found, saved: result.saved },
+          });
           await markScheduleRun(schedule.id, "ok", user, schedule.cadence === "once");
           results.push({
             id: schedule.id,
@@ -58,6 +82,7 @@ export async function POST() {
             saved: result.saved,
           });
         } catch (err) {
+          await failUsageReservation(reservation, err);
           const message = err instanceof Error ? err.message : "failed";
           await markScheduleRun(schedule.id, message.slice(0, 160), user, schedule.cadence === "once");
           results.push({ id: schedule.id, campaignId: schedule.campaignId, status: "failed", error: message });

@@ -387,9 +387,9 @@ Stage 2 is complete only when:
 Stage 3 is complete only when:
 - Every expensive route reserves and records usage. **Started:** desk chat,
   utility LLM calls, review, revision, outputs, output condense, title
-  generation, Weave, model-backed file extraction, manual Gather runs, and
-  Studio media generation now reserve usage before provider work and mark usage
-  succeeded/failed afterward.
+  generation, Weave, model-backed file extraction, manual and scheduled Gather
+  runs, and Studio media generation now reserve usage before provider work and
+  mark usage succeeded/failed afterward.
 - Quotas block over-limit work before provider calls. **Started:** the shared
   reservation helper checks the current subscription period against plan
   entitlements before inserting the reservation; hosted campaign creation now

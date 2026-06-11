@@ -127,6 +127,10 @@ describe("hosted Gather schedules", () => {
       update,
     };
     const runGatherForCampaign = vi.fn(async () => ({ found: 2, saved: 1 }));
+    const gatherAI = { complete: vi.fn(), json: vi.fn() };
+    const reserveUsage = vi.fn(async () => ({ id: "usage_1", workspaceId: "workspace_1", idempotencyKey: "k" }));
+    const completeUsageReservation = vi.fn();
+    const failUsageReservation = vi.fn();
 
     vi.doMock("@/lib/db", () => ({ db }));
     vi.doMock("@/lib/auth", () => ({
@@ -134,6 +138,20 @@ describe("hosted Gather schedules", () => {
     }));
     vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => false }));
     vi.doMock("@/lib/gather/runCampaign", () => ({ runGatherForCampaign }));
+    vi.doMock("@/lib/llm", () => ({
+      getAIForTaskForUser: vi.fn(async () => ({
+        ai: gatherAI,
+        providerSource: "byok",
+        provider: "openai",
+        model: "gpt-4o-mini",
+        profileId: "openai-gather",
+      })),
+    }));
+    vi.doMock("@/lib/billing/usage", () => ({
+      reserveUsage,
+      completeUsageReservation,
+      failUsageReservation,
+    }));
 
     const { POST } = await import("../app/api/gather/schedules/run-due/route");
     const res = await POST();
@@ -148,7 +166,34 @@ describe("hosted Gather schedules", () => {
       id: "user_1",
       workspaceId: "workspace_1",
       role: "author",
-    });
+    }, gatherAI);
+    expect(reserveUsage).toHaveBeenCalledWith(expect.objectContaining({
+      task: "gather",
+      feature: "gather.schedule.run_due",
+      campaignId: "campaign_1",
+      providerSource: "byok",
+      provider: "openai",
+      model: "gpt-4o-mini",
+      metadata: {
+        scheduleId: "schedule_1",
+        providerSource: "byok",
+        profileId: "openai-gather",
+      },
+    }));
+    expect(completeUsageReservation).toHaveBeenCalledWith(
+      { id: "usage_1", workspaceId: "workspace_1", idempotencyKey: "k" },
+      {
+        actualCredits: 1,
+        metadata: {
+          scheduleId: "schedule_1",
+          providerSource: "byok",
+          profileId: "openai-gather",
+          found: 2,
+          saved: 1,
+        },
+      },
+    );
+    expect(failUsageReservation).not.toHaveBeenCalled();
     expect(set).toHaveBeenCalledWith(expect.objectContaining({
       lastStatus: "ok",
       enabled: false,
