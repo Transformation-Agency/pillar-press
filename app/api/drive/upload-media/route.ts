@@ -48,7 +48,9 @@ export async function POST(req: Request) {
     const media = isLocalFirstMode()
       ? getLocalMediaJob(mediaId, user.id)
       : await db.query.mediaJobs.findFirst({
-          where: and(eq(mediaJobs.id, mediaId), eq(mediaJobs.userId, user.id)),
+          where: user.workspaceId
+            ? and(eq(mediaJobs.id, mediaId), eq(mediaJobs.userId, user.id), eq(mediaJobs.workspaceId, user.workspaceId))
+            : and(eq(mediaJobs.id, mediaId), eq(mediaJobs.userId, user.id)),
         });
     if (!media) return NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
 

@@ -9,6 +9,7 @@ import { getAIForTask } from "@/lib/llm";
 import { toErrorResponse } from "@/lib/errors";
 import { getLocalCampaign, getLocalPiece, getLocalReferences } from "@/lib/local/database";
 import { isLocalFirstMode } from "@/lib/local/mode";
+import { campaignInWorkspace, tenantNotFound } from "@/lib/tenant";
 
 const bodySchema = z.object({
   pieceId: z.string().uuid(),
@@ -37,12 +38,14 @@ export async function POST(req: Request) {
           where: and(eq(pieces.id, body.pieceId), eq(pieces.userId, user.id)),
         });
     if (!piece) return NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
+    if (!(await campaignInWorkspace(piece.campaignId, user.workspaceId))) return tenantNotFound();
 
     const text = pieceText(piece);
     if (!text) return NextResponse.json({ error: "This piece has no text to voice yet.", code: "validation" }, { status: 422 });
 
     let refCtx = "";
     if (body.campaignId) {
+      if (!(await campaignInWorkspace(body.campaignId, user.workspaceId))) return tenantNotFound();
       if (isLocalFirstMode()) {
         const campaign = getLocalCampaign(body.campaignId, user.workspaceId);
         if (!campaign) return NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });

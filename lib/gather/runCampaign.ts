@@ -14,6 +14,7 @@ import { SOURCE_KIND_LABELS } from "@/lib/gather-validation";
 import { buildRefContext, type ReferencesDoc } from "@/lib/refContext";
 import { craftSourceSummary } from "@/lib/ai/gatherSummary";
 import { getAIForTask } from "@/lib/llm";
+import { campaignInWorkspace } from "@/lib/tenant";
 
 interface SourceSummary {
   sourceId: string;
@@ -25,6 +26,8 @@ interface SourceSummary {
 }
 
 export async function runGatherForCampaign(campaignId: string, user: { id: string; workspaceId?: string | null }) {
+  if (!(await campaignInWorkspace(campaignId, user.workspaceId))) return null;
+
   const sources = isLocalFirstMode()
     ? listLocalGatherSources(campaignId, user.id, user.workspaceId || undefined)
     : await db.select().from(gatherSources)
@@ -40,7 +43,10 @@ export async function runGatherForCampaign(campaignId: string, user: { id: strin
   } else {
     await Promise.all(
       Object.entries(perSource).map(([id, count]) =>
-        db.update(gatherSources).set({ lastRun: new Date(), lastCount: count }).where(eq(gatherSources.id, id)),
+        db
+          .update(gatherSources)
+          .set({ lastRun: new Date(), lastCount: count })
+          .where(and(eq(gatherSources.id, id), eq(gatherSources.userId, user.id))),
       ),
     );
   }
@@ -122,7 +128,7 @@ export async function runGatherForCampaign(campaignId: string, user: { id: strin
               await db
                 .update(gatherSources)
                 .set({ summary: text, summaryAt: new Date(), summaryItemCount: group.length })
-                .where(eq(gatherSources.id, s.id));
+                .where(and(eq(gatherSources.id, s.id), eq(gatherSources.userId, user.id)));
             }
           }
           return { sourceId: s.id, kind: s.kind, label: s.label ?? null, query: s.config ?? "", itemCount: group.length, text };

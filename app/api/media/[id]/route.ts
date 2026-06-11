@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { requireUser } from "@/lib/auth";
-import { db, mediaJobs, pieces } from "@/lib/db";
+import { db, campaigns, mediaJobs, pieces } from "@/lib/db";
 import { getLocalMediaJob, getLocalPiece, updateLocalMediaJob } from "@/lib/local/database";
 import { isLocalFirstMode } from "@/lib/local/mode";
 import { toErrorResponse } from "@/lib/errors";
@@ -34,24 +34,34 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     }
 
     // 1) authorize the job to the current user (no cross-user writes)
+    const jobWhere = user.workspaceId
+      ? and(eq(mediaJobs.id, id), eq(mediaJobs.userId, user.id), eq(mediaJobs.workspaceId, user.workspaceId))
+      : and(eq(mediaJobs.id, id), eq(mediaJobs.userId, user.id));
     const job = await db.query.mediaJobs.findFirst({
-      where: and(eq(mediaJobs.id, id), eq(mediaJobs.userId, user.id)),
+      where: jobWhere,
     });
     if (!job) return NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
 
-    // 2) when attaching, the target piece must be the caller's too (404 otherwise)
+    // 2) when attaching, the target piece must belong to the caller and the
+    // active workspace (404 otherwise, so cross-tenant existence is not leaked).
     if (pieceId) {
       const piece = await db.query.pieces.findFirst({
         where: and(eq(pieces.id, pieceId), eq(pieces.userId, user.id)),
       });
       if (!piece) return NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
+      if (user.workspaceId) {
+        const campaign = await db.query.campaigns.findFirst({
+          where: and(eq(campaigns.id, piece.campaignId), eq(campaigns.workspaceId, user.workspaceId)),
+        });
+        if (!campaign) return NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
+      }
     }
 
     // 3) set (attach) or clear (detach) the link, re-scoped by user.id on write
     const [updated] = await db
       .update(mediaJobs)
       .set({ sourceContentId: pieceId, updatedAt: new Date() })
-      .where(and(eq(mediaJobs.id, job.id), eq(mediaJobs.userId, user.id)))
+      .where(jobWhere)
       .returning();
 
     return NextResponse.json({ job: updated });

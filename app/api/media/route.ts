@@ -14,9 +14,10 @@ export async function GET(req: Request) {
     if (isLocalFirstMode()) {
       return NextResponse.json({ items: listLocalMediaJobs(user.id, pieceId) });
     }
-    const where = pieceId
-      ? and(eq(mediaJobs.userId, user.id), eq(mediaJobs.sourceContentId, pieceId))
+    const base = user.workspaceId
+      ? and(eq(mediaJobs.userId, user.id), eq(mediaJobs.workspaceId, user.workspaceId))
       : eq(mediaJobs.userId, user.id);
+    const where = pieceId ? and(base, eq(mediaJobs.sourceContentId, pieceId)) : base;
     const items = await db.select().from(mediaJobs).where(where).orderBy(desc(mediaJobs.createdAt)).limit(200);
     return NextResponse.json({ items });
   } catch (err) {
@@ -34,7 +35,10 @@ export async function DELETE(req: Request) {
       deleteLocalMediaJob(id, user.id);
       return NextResponse.json({ ok: true });
     }
-    await db.delete(mediaJobs).where(and(eq(mediaJobs.id, id), eq(mediaJobs.userId, user.id)));
+    const where = user.workspaceId
+      ? and(eq(mediaJobs.id, id), eq(mediaJobs.userId, user.id), eq(mediaJobs.workspaceId, user.workspaceId))
+      : and(eq(mediaJobs.id, id), eq(mediaJobs.userId, user.id));
+    await db.delete(mediaJobs).where(where);
     return NextResponse.json({ ok: true });
   } catch (err) {
     return toErrorResponse(err);

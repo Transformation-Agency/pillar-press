@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/auth";
 import { runSchema } from "@/lib/gather-validation";
 import { runGatherForCampaign } from "@/lib/gather/runCampaign";
 import { toErrorResponse } from "@/lib/errors";
+import { campaignInWorkspace, tenantNotFound } from "@/lib/tenant";
 
 // Per-source LLM summaries can take a few seconds each (run concurrently).
 export const maxDuration = 60;
@@ -17,6 +18,7 @@ export async function POST(req: Request) {
     const user = await requireUser();
     const { campaignId } = runSchema.parse(await req.json());
 
+    if (!(await campaignInWorkspace(campaignId, user.workspaceId))) return tenantNotFound();
     const result = await runGatherForCampaign(campaignId, user);
     if (!result) return NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
     return NextResponse.json(result);

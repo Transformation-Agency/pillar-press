@@ -24,6 +24,9 @@ import { toErrorResponse } from "@/lib/errors";
 import { getAudioProviderConfig, getImageProviderConfig } from "@/lib/mediaProviders";
 import { generateOpenAICompatibleImage } from "@/lib/mediaImage";
 import { generateOpenAICompatibleSpeech } from "@/lib/mediaAudio";
+import { campaignInWorkspace, tenantNotFound } from "@/lib/tenant";
+import type { SessionUser } from "@/lib/auth";
+import type { Piece } from "@/lib/db";
 
 /** Trim a piece down to a prompt-sized excerpt for image grounding. */
 function pieceExcerpt(p: { original?: string | null; revision?: unknown } | undefined): string {
@@ -34,6 +37,16 @@ function pieceExcerpt(p: { original?: string | null; revision?: unknown } | unde
 }
 
 const pct = (p: number | undefined) => (p == null ? 0 : Math.round(p <= 1 ? p * 100 : p));
+
+async function resolvePieceForTenant(id: string | null | undefined, user: SessionUser): Promise<Piece | null> {
+  if (!id) return null;
+  if (isLocalFirstMode()) return getLocalPiece(id, user.id, user.workspaceId) as Piece | null;
+  const piece = await db.query.pieces.findFirst({
+    where: and(eq(pieces.id, id), eq(pieces.userId, user.id)),
+  });
+  if (!piece || !(await campaignInWorkspace(piece.campaignId, user.workspaceId))) return null;
+  return piece as Piece;
+}
 
 /**
  * A start image can arrive as a raw Hedra asset id, an http(s) URL (a library
@@ -64,6 +77,9 @@ export async function POST(req: Request) {
   try {
     const user = await requireUser();
     const body = generateBodySchema.parse(await req.json());
+    if (body.campaignId && !(await campaignInWorkspace(body.campaignId, user.workspaceId))) return tenantNotFound();
+    const scopedPiece = body.pieceId ? await resolvePieceForTenant(body.pieceId, user) : null;
+    if (body.pieceId && !scopedPiece) return tenantNotFound();
 
     // ── Audio (ElevenLabs TTS) — no Hedra model involved ───────────────────
     if (body.type === "audio") {
@@ -205,8 +221,12 @@ export async function POST(req: Request) {
       const am = isLocalFirstMode()
         ? getLocalMediaJob(body.audioMediaId, user.id)
         : await db.query.mediaJobs.findFirst({
-            where: and(eq(mediaJobs.id, body.audioMediaId), eq(mediaJobs.userId, user.id)),
+            where: user.workspaceId
+              ? and(eq(mediaJobs.id, body.audioMediaId), eq(mediaJobs.userId, user.id), eq(mediaJobs.workspaceId, user.workspaceId))
+              : and(eq(mediaJobs.id, body.audioMediaId), eq(mediaJobs.userId, user.id)),
           });
+      if (!am) return tenantNotFound();
+      if (am && user.workspaceId && am.workspaceId && am.workspaceId !== user.workspaceId) return tenantNotFound();
       const aurl = am?.downloadUrl || am?.outputUrl;
       if (!aurl) return NextResponse.json({ error: "That audio isn't ready to combine.", code: "validation" }, { status: 422 });
       let abytes: Buffer;
@@ -262,9 +282,7 @@ export async function POST(req: Request) {
       }
       let article: { title?: string; excerpt?: string } | undefined;
       if (body.pieceId) {
-        const pc = isLocalFirstMode()
-          ? getLocalPiece(body.pieceId, user.id, user.workspaceId)
-          : await db.query.pieces.findFirst({ where: eq(pieces.id, body.pieceId) });
+        const pc = scopedPiece;
         if (pc) article = { title: pc.title, excerpt: pieceExcerpt(pc) };
       }
       const enhanced = await craftImagePrompt({

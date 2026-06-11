@@ -7,6 +7,7 @@ import { deleteLocalGatherSource, getLocalGatherSource, updateLocalGatherSource 
 import { isLocalFirstMode } from "@/lib/local/mode";
 import { updateSourceSchema } from "@/lib/gather-validation";
 import { toErrorResponse } from "@/lib/errors";
+import { campaignInWorkspace, tenantNotFound } from "@/lib/tenant";
 
 // PATCH /api/gather/sources/[id] — update config / label / enabled (user-scoped).
 // Without this, typed queries and the on/off toggle never reach the server, so a
@@ -20,13 +21,16 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     // strips; the run route already persists those, so an empty patch is a no-op.
     if (Object.keys(patch).length === 0) {
       if (isLocalFirstMode()) {
-        return NextResponse.json({ source: getLocalGatherSource(id, user.id) });
+        const source = getLocalGatherSource(id, user.id);
+        if (!source || !(await campaignInWorkspace(source.campaignId, user.workspaceId))) return tenantNotFound();
+        return NextResponse.json({ source });
       }
       const [row] = await db
         .select()
         .from(gatherSources)
         .where(and(eq(gatherSources.id, id), eq(gatherSources.userId, user.id)))
         .limit(1);
+      if (!row || !(await campaignInWorkspace(row.campaignId, user.workspaceId))) return tenantNotFound();
       return NextResponse.json({ source: row ?? null });
     }
     // Clearing the brief (summary: null) also clears its timestamp/count.
@@ -35,6 +39,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         ? { ...patch, summaryAt: null, summaryItemCount: null }
         : patch;
     if (isLocalFirstMode()) {
+      const existing = getLocalGatherSource(id, user.id);
+      if (!existing || !(await campaignInWorkspace(existing.campaignId, user.workspaceId))) return tenantNotFound();
       const source = updateLocalGatherSource(
         id,
         user.id,
@@ -45,6 +51,12 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       if (!source) return NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
       return NextResponse.json({ source });
     }
+    const [existing] = await db
+      .select()
+      .from(gatherSources)
+      .where(and(eq(gatherSources.id, id), eq(gatherSources.userId, user.id)))
+      .limit(1);
+    if (!existing || !(await campaignInWorkspace(existing.campaignId, user.workspaceId))) return tenantNotFound();
     const [row] = await db
       .update(gatherSources)
       .set(set)
@@ -63,9 +75,17 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
     const user = await requireUser();
     const { id } = await params;
     if (isLocalFirstMode()) {
+      const source = getLocalGatherSource(id, user.id);
+      if (!source || !(await campaignInWorkspace(source.campaignId, user.workspaceId))) return tenantNotFound();
       deleteLocalGatherSource(id, user.id);
       return NextResponse.json({ ok: true });
     }
+    const [row] = await db
+      .select()
+      .from(gatherSources)
+      .where(and(eq(gatherSources.id, id), eq(gatherSources.userId, user.id)))
+      .limit(1);
+    if (!row || !(await campaignInWorkspace(row.campaignId, user.workspaceId))) return tenantNotFound();
     await db.delete(gatherSources).where(and(eq(gatherSources.id, id), eq(gatherSources.userId, user.id)));
     return NextResponse.json({ ok: true });
   } catch (err) {

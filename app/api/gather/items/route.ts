@@ -12,12 +12,14 @@ import {
 import { isLocalFirstMode } from "@/lib/local/mode";
 import { createItemSchema } from "@/lib/gather-validation";
 import { toErrorResponse } from "@/lib/errors";
+import { campaignInWorkspace, tenantNotFound } from "@/lib/tenant";
 
 // POST /api/gather/items  — create an item directly (uploaded documents).
 export async function POST(req: Request) {
   try {
     const user = await requireUser();
     const body = createItemSchema.parse(await req.json());
+    if (!(await campaignInWorkspace(body.campaignId, user.workspaceId))) return tenantNotFound();
     if (isLocalFirstMode()) {
       const item = createLocalGatherItem(body, user.id, user.workspaceId);
       if (!item) return NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
@@ -45,6 +47,7 @@ export async function GET(req: Request) {
     const user = await requireUser();
     const campaignId = new URL(req.url).searchParams.get("campaignId");
     if (!campaignId) return NextResponse.json({ error: "Missing campaignId.", code: "bad_request" }, { status: 400 });
+    if (!(await campaignInWorkspace(campaignId, user.workspaceId))) return tenantNotFound();
     if (isLocalFirstMode()) {
       const items = listLocalGatherItems(campaignId, user.id, user.workspaceId);
       if (!items) return NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
@@ -66,12 +69,26 @@ export async function DELETE(req: Request) {
     const campaignId = u.searchParams.get("campaignId");
     if (isLocalFirstMode()) {
       if (id) deleteLocalGatherItem(id, user.id);
-      else if (campaignId) deleteLocalGatherItemsForCampaign(campaignId, user.id);
+      else if (campaignId) {
+        if (!(await campaignInWorkspace(campaignId, user.workspaceId))) return tenantNotFound();
+        deleteLocalGatherItemsForCampaign(campaignId, user.id);
+      }
       else return NextResponse.json({ error: "Missing id or campaignId.", code: "bad_request" }, { status: 400 });
       return NextResponse.json({ ok: true });
     }
-    if (id) await db.delete(gatherItems).where(and(eq(gatherItems.id, id), eq(gatherItems.userId, user.id)));
-    else if (campaignId) await db.delete(gatherItems).where(and(eq(gatherItems.campaignId, campaignId), eq(gatherItems.userId, user.id)));
+    if (id) {
+      const [item] = await db
+        .select()
+        .from(gatherItems)
+        .where(and(eq(gatherItems.id, id), eq(gatherItems.userId, user.id)))
+        .limit(1);
+      if (!item || !(await campaignInWorkspace(item.campaignId, user.workspaceId))) return tenantNotFound();
+      await db.delete(gatherItems).where(and(eq(gatherItems.id, id), eq(gatherItems.userId, user.id)));
+    }
+    else if (campaignId) {
+      if (!(await campaignInWorkspace(campaignId, user.workspaceId))) return tenantNotFound();
+      await db.delete(gatherItems).where(and(eq(gatherItems.campaignId, campaignId), eq(gatherItems.userId, user.id)));
+    }
     else return NextResponse.json({ error: "Missing id or campaignId.", code: "bad_request" }, { status: 400 });
     return NextResponse.json({ ok: true });
   } catch (err) { return toErrorResponse(err); }

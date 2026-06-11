@@ -23,7 +23,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     const job = isLocalFirstMode()
       ? getLocalMediaJob(id, user.id)
       : await db.query.mediaJobs.findFirst({
-          where: and(eq(mediaJobs.id, id), eq(mediaJobs.userId, user.id)),
+          where: user.workspaceId
+            ? and(eq(mediaJobs.id, id), eq(mediaJobs.userId, user.id), eq(mediaJobs.workspaceId, user.workspaceId))
+            : and(eq(mediaJobs.id, id), eq(mediaJobs.userId, user.id)),
         });
     if (!job) return NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
 
@@ -112,7 +114,11 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
         completedAt: terminal ? new Date() : dbJob.completedAt,
         updatedAt: new Date(),
       })
-      .where(eq(mediaJobs.id, dbJob.id))
+      .where(
+        user.workspaceId
+          ? and(eq(mediaJobs.id, dbJob.id), eq(mediaJobs.userId, user.id), eq(mediaJobs.workspaceId, user.workspaceId))
+          : and(eq(mediaJobs.id, dbJob.id), eq(mediaJobs.userId, user.id)),
+      )
       .returning();
 
     return NextResponse.json({ job: updated });

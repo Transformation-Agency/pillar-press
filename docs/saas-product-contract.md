@@ -336,8 +336,16 @@ Stage 1 is complete only when:
 - `requireUser()` resolves a Supabase user and workspace membership. **Started:**
   browser API calls attach the Supabase bearer token; the existing server auth
   layer validates it and resolves membership.
-- Cross-workspace object access is denied and tested.
+- Cross-workspace object access is denied and tested. **Started:** shared
+  campaign/workspace scope helper plus regression tests now guard the hosted
+  contract; Gather sources/items/runs and media jobs/prompt/status/export
+  routes now prove campaign or media workspace scope before reads/writes.
 - The app can still run desktop/local-first without touching hosted auth.
+
+Known Stage 1 follow-up:
+- Gather schedules still use the desktop/local scheduler store. Hosted SaaS
+  needs a Postgres-backed schedule table or the hosted schedule endpoints should
+  remain disabled until Stage 5 background jobs are introduced.
 
 ## Stage 2 Success Gate
 

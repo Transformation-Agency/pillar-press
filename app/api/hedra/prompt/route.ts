@@ -11,6 +11,7 @@ import { craftImagePrompt } from "@/lib/ai/imagePrompt";
 import { getAIForTask } from "@/lib/llm";
 import { sanitizeText } from "@/lib/validation";
 import { toErrorResponse } from "@/lib/errors";
+import { campaignInWorkspace, tenantNotFound } from "@/lib/tenant";
 
 const bodySchema = z.object({
   prompt: z.string().max(2000).optional(),
@@ -35,6 +36,7 @@ export async function POST(req: Request) {
     let refCtx = "";
     let directive = "";
     if (body.campaignId) {
+      if (!(await campaignInWorkspace(body.campaignId, user.workspaceId))) return tenantNotFound();
       const ref = isLocalFirstMode()
         ? getLocalReferences(body.campaignId, user.workspaceId)
         : await db.query.references.findFirst({ where: eq(references.campaignId, body.campaignId) });
@@ -52,6 +54,7 @@ export async function POST(req: Request) {
         : await db.query.pieces.findFirst({
             where: and(eq(pieces.id, body.pieceId), eq(pieces.userId, user.id)),
           });
+      if (!pc || !(await campaignInWorkspace(pc.campaignId, user.workspaceId))) return tenantNotFound();
       if (pc) article = { title: pc.title, excerpt: pieceExcerpt(pc) };
     }
 
