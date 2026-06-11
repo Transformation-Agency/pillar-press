@@ -341,10 +341,11 @@ function DesktopOnboarding() {
   const [setupMode, setSetupMode] = React.useState("ollama");
   const [status, setStatus] = React.useState(null);
   const [models, setModels] = React.useState([]);
-  const [dockerModels, setDockerModels] = React.useState([]);
+  const [localCompatibleModels, setLocalCompatibleModels] = React.useState([]);
   const [cloudDetectedModels, setCloudDetectedModels] = React.useState([]);
   const [model, setModel] = React.useState("llama3.2");
   const [dockerBaseUrl, setDockerBaseUrl] = React.useState("http://localhost:12434/engines/v1");
+  const [lmStudioBaseUrl, setLmStudioBaseUrl] = React.useState("http://127.0.0.1:1234/v1");
   const [cloudProvider, setCloudProvider] = React.useState("openai");
   const [cloudBaseUrl, setCloudBaseUrl] = React.useState("");
   const [apiKey, setApiKey] = React.useState("");
@@ -376,6 +377,7 @@ function DesktopOnboarding() {
   ];
   const localProviderOptions = [
     { id: "ollama", name: "Ollama", label: "Local models", logoSrc: "brand/providers/ollama.svg", description: "Run downloaded models on this Mac." },
+    { id: "lmstudio", name: "LM Studio", label: "Local server", logoSrc: "brand/providers/api.svg", description: "Use models loaded through LM Studio's local OpenAI-compatible server." },
     { id: "docker", name: "Docker Model Runner", label: "Local endpoint", logoSrc: "brand/providers/docker.svg", description: "Use Docker Desktop's local OpenAI-compatible endpoint." },
   ];
   const taskOptions = [
@@ -403,6 +405,19 @@ function DesktopOnboarding() {
     ollama: "Ollama",
     "openai-compatible": "OpenAI-compatible",
   }[provider] || provider || "Provider");
+
+  const localCompatibleLabel = (baseUrl) => {
+    const value = String(baseUrl || "");
+    if (value.includes("1234")) return "LM Studio";
+    if (value.includes("12434")) return "Docker Model Runner";
+    return "OpenAI-compatible";
+  };
+
+  const profileLabel = (profile) => {
+    if (!profile) return "Provider";
+    if (profile.provider === "openai-compatible") return localCompatibleLabel(profile.baseUrl);
+    return providerLabel(profile.provider);
+  };
 
   const profileIdFor = (profile) =>
     String([profile.provider, profile.baseUrl || "", profile.model].join("-"))
@@ -488,6 +503,8 @@ function DesktopOnboarding() {
 
   const isDockerModelRunnerSettings = (saved) =>
     !!(saved && saved.provider === "openai-compatible" && saved.baseUrl && saved.baseUrl.includes("12434"));
+  const isLMStudioSettings = (saved) =>
+    !!(saved && saved.provider === "openai-compatible" && saved.baseUrl && saved.baseUrl.includes("1234"));
 
   const pickDetectedModel = (items, current) => {
     const list = Array.isArray(items) ? items.filter(Boolean) : [];
@@ -539,11 +556,13 @@ function DesktopOnboarding() {
     if (setupMode === "ollama") {
       return { provider: "ollama", model: model.trim(), baseUrl: "http://127.0.0.1:11434" };
     }
-    if (setupMode === "docker") {
+    if (setupMode === "docker" || setupMode === "lmstudio") {
       return {
         provider: "openai-compatible",
         model: model.trim(),
-        baseUrl: dockerBaseUrl.trim() || "http://localhost:12434/engines/v1",
+        baseUrl: setupMode === "lmstudio"
+          ? (lmStudioBaseUrl.trim() || "http://127.0.0.1:1234/v1")
+          : (dockerBaseUrl.trim() || "http://localhost:12434/engines/v1"),
       };
     }
     return {
@@ -556,14 +575,14 @@ function DesktopOnboarding() {
     };
   };
 
-  const savedModelChoiceComplete = (saved, ollamaStatus, ollamaModels, savedDockerModels) => {
+  const savedModelChoiceComplete = (saved, ollamaStatus, ollamaModels, savedLocalCompatibleModels) => {
     const active = activeProfileFromSettings(saved);
     if (!active || !active.provider || !active.model) return false;
     if (active.provider === "ollama") {
       return !!(ollamaStatus && ollamaStatus.installed && ollamaStatus.running && (ollamaModels || []).includes(active.model));
     }
-    if (isDockerModelRunnerSettings(active)) {
-      return !!(active.baseUrl && (savedDockerModels || []).includes(active.model));
+    if (isDockerModelRunnerSettings(active) || isLMStudioSettings(active)) {
+      return !!(active.baseUrl && (savedLocalCompatibleModels || []).includes(active.model));
     }
     if (active.provider === "openai-compatible") {
       return !!(active.baseUrl && profileHasApiKey(active));
@@ -582,18 +601,19 @@ function DesktopOnboarding() {
       ]);
       setStatus(s);
       setModels(list || []);
-      let savedDockerModels = [];
+      let savedLocalCompatibleModels = [];
       const activeSaved = activeProfileFromSettings(saved);
-      if (isDockerModelRunnerSettings(activeSaved)) {
-        savedDockerModels = await fetchOpenAICompatibleModels(activeSaved.baseUrl).catch(() => []);
-        setDockerModels(savedDockerModels);
+      if (isDockerModelRunnerSettings(activeSaved) || isLMStudioSettings(activeSaved)) {
+        savedLocalCompatibleModels = await fetchOpenAICompatibleModels(activeSaved.baseUrl).catch(() => []);
+        setLocalCompatibleModels(savedLocalCompatibleModels);
       }
-      const hasSavedModelChoice = savedModelChoiceComplete(saved, s, list || [], savedDockerModels);
+      const hasSavedModelChoice = savedModelChoiceComplete(saved, s, list || [], savedLocalCompatibleModels);
       setSavedSettings(saved);
       setTaskDefaults((saved && saved.taskDefaults) || {});
       const applySavedSelection = !(options && options.preserveSelection);
       if (applySavedSelection && activeSaved && activeSaved.provider) {
         if (activeSaved.provider === "ollama") setSetupMode("ollama");
+        else if (isLMStudioSettings(activeSaved)) setSetupMode("lmstudio");
         else if (isDockerModelRunnerSettings(activeSaved)) setSetupMode("docker");
         else {
           setSetupMode("cloud");
@@ -602,12 +622,13 @@ function DesktopOnboarding() {
       }
       if (applySavedSelection && activeSaved && activeSaved.baseUrl) {
         if (activeSaved.provider === "openai-compatible" && activeSaved.baseUrl.includes("12434")) setDockerBaseUrl(activeSaved.baseUrl);
+        else if (activeSaved.provider === "openai-compatible" && activeSaved.baseUrl.includes("1234")) setLmStudioBaseUrl(activeSaved.baseUrl);
         else setCloudBaseUrl(activeSaved.baseUrl);
       }
       if (applySavedSelection && activeSaved && activeSaved.apiKey) setApiKey(activeSaved.apiKey);
       if (applySavedSelection && activeSaved && activeSaved.model) {
         setModel(activeSaved.model);
-        setProfileName(activeSaved.label || providerLabel(activeSaved.provider) + " " + activeSaved.model);
+        setProfileName(activeSaved.label || profileLabel(activeSaved) + " " + activeSaved.model);
       }
       else if (options && options.localProvider === "ollama") setModel((current) => pickDetectedModel(list, current));
       else if (list && list.length && applySavedSelection) setModel(list[0]);
@@ -676,17 +697,20 @@ function DesktopOnboarding() {
     setBusy(false);
   };
 
-  const listDockerModels = async () => {
-    setBusy(true); setMessage("Checking Docker Model Runner.");
+  const listLocalCompatibleModels = async (kind) => {
+    const isLmStudio = kind === "lmstudio" || setupMode === "lmstudio";
+    const label = isLmStudio ? "LM Studio" : "Docker Model Runner";
+    const baseUrl = isLmStudio ? lmStudioBaseUrl : dockerBaseUrl;
+    setBusy(true); setMessage("Checking " + label + ".");
     try {
-      const listed = await fetchOpenAICompatibleModels(dockerBaseUrl);
-      setDockerModels(listed);
+      const listed = await fetchOpenAICompatibleModels(baseUrl);
+      setLocalCompatibleModels(listed);
       if (listed.length) setModel(listed[0]);
       setProfileName("");
-      setMessage(listed.length ? "Docker models detected." : "Docker Model Runner responded, but no models were listed.");
+      setMessage(listed.length ? label + " models detected." : label + " responded, but no models were listed. Make sure a model is loaded and the local server is on.");
     } catch (e) {
-      setDockerModels([]);
-      setMessage((e && e.message) || "Could not reach Docker Model Runner.");
+      setLocalCompatibleModels([]);
+      setMessage((e && e.message) || ("Could not reach " + label + "."));
     }
     setBusy(false);
   };
@@ -754,12 +778,15 @@ function DesktopOnboarding() {
       if (setupMode === "ollama") {
         if (!installed || !running || !models.includes(picked)) throw new Error("Install or start Ollama, then pull the selected model.");
         nextProfile = { provider: "ollama", model: picked, baseUrl: "http://127.0.0.1:11434" };
-      } else if (setupMode === "docker") {
-        if (!dockerBaseUrl.trim()) throw new Error("Add the Docker Model Runner URL.");
+      } else if (setupMode === "docker" || setupMode === "lmstudio") {
+        const localBaseUrl = setupMode === "lmstudio"
+          ? (lmStudioBaseUrl.trim() || "http://127.0.0.1:1234/v1")
+          : (dockerBaseUrl.trim() || "http://localhost:12434/engines/v1");
+        if (!localBaseUrl.trim()) throw new Error("Add the local server URL.");
         nextProfile = {
           provider: "openai-compatible",
           model: picked,
-          baseUrl: dockerBaseUrl.trim() || "http://localhost:12434/engines/v1",
+          baseUrl: localBaseUrl,
         };
       } else {
         const key = usableApiKey();
@@ -790,7 +817,7 @@ function DesktopOnboarding() {
       }
       setMessage("Saving model settings.");
       nextProfile.id = profileIdFor(nextProfile);
-      nextProfile.label = profileName.trim() || providerLabel(nextProfile.provider) + " " + nextProfile.model;
+      nextProfile.label = profileName.trim() || profileLabel(nextProfile) + " " + nextProfile.model;
       const priorProfiles = profilesFromSettings(savedSettings);
       const profiles = priorProfiles.filter((p) => p.id !== nextProfile.id).concat(nextProfile);
       const priorDefaultId = savedSettings && savedSettings.defaultProfileId;
@@ -814,6 +841,7 @@ function DesktopOnboarding() {
       setSavedSettings(persistedSettings || cleanedSettings);
       setTaskDefaults(nextTaskDefaults);
       window.localStorage.setItem(setupCompleteKey, "true");
+      window.dispatchEvent(new CustomEvent("pillarpress:llm-settings-changed"));
       notifyModelSetupSaved(persistedSettings || cleanedSettings, nextProfile);
       setOpen(false);
     } catch (e) {
@@ -842,6 +870,7 @@ function DesktopOnboarding() {
       await desktop.saveLLMSettings(cleanedSettings);
       const persistedSettings = await desktop.getModelChoice().catch(() => cleanedSettings);
       setSavedSettings(persistedSettings || cleanedSettings);
+      window.dispatchEvent(new CustomEvent("pillarpress:llm-settings-changed"));
       setMessage("Task defaults saved.");
     } catch (e) {
       setMessage((e && e.message) || (typeof e === "string" ? e : "Could not save task defaults."));
@@ -864,16 +893,16 @@ function DesktopOnboarding() {
       }, 650);
       return () => window.clearTimeout(timer);
     }
-    if (setupMode === "docker") {
-      const ready = !!dockerBaseUrl.trim();
+    if (setupMode === "docker" || setupMode === "lmstudio") {
+      const ready = setupMode === "lmstudio" ? !!lmStudioBaseUrl.trim() : !!dockerBaseUrl.trim();
       if (!ready) return undefined;
       const timer = window.setTimeout(() => {
-        listDockerModels();
+        listLocalCompatibleModels(setupMode);
       }, 650);
       return () => window.clearTimeout(timer);
     }
     return undefined;
-  }, [open, setupMode, cloudProvider, apiKey, cloudBaseUrl, dockerBaseUrl, savedSettings]);
+  }, [open, setupMode, cloudProvider, apiKey, cloudBaseUrl, dockerBaseUrl, lmStudioBaseUrl, savedSettings]);
 
   if (!open) return null;
   const installed = !!(status && status.installed);
@@ -884,19 +913,21 @@ function DesktopOnboarding() {
   const hasCloudBaseUrl = setupMode !== "cloud" || cloudProvider !== "openai-compatible" || !!cloudBaseUrl.trim() || !!(activeSavedCloudProfile && activeSavedCloudProfile.baseUrl);
   const canUseModel = setupMode === "ollama"
     ? installed && running && hasModel && !!model.trim()
-    : setupMode === "docker"
-      ? !!model.trim() && dockerModels.includes(model) && !!dockerBaseUrl.trim()
+    : (setupMode === "docker" || setupMode === "lmstudio")
+      ? !!model.trim() && localCompatibleModels.includes(model) && !!(setupMode === "lmstudio" ? lmStudioBaseUrl.trim() : dockerBaseUrl.trim())
       : !!model.trim() && hasCloudCredential && hasCloudBaseUrl;
   const savedProfiles = profilesFromSettings(savedSettings);
   const modelSource = setupMode === "cloud" ? "cloud" : "local";
   const activeProviderId = setupMode === "cloud" ? cloudProvider : setupMode;
   const selectedProviderLabel = setupMode === "cloud"
     ? providerLabel(cloudProvider)
+    : setupMode === "lmstudio"
+      ? "LM Studio"
     : setupMode === "docker"
       ? "Docker Model Runner"
       : "Ollama";
-  const selectableModels = setupMode === "docker"
-    ? dockerModels
+  const selectableModels = (setupMode === "docker" || setupMode === "lmstudio")
+    ? localCompatibleModels
     : setupMode === "cloud"
       ? modelOptionsFor(cloudProvider, cloudDetectedModels)
       : models.length
@@ -976,25 +1007,28 @@ function DesktopOnboarding() {
 
           {modelSource === "local" && (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12 }}>
-              {localProviderOptions.map((option) => {
-                const active = activeProviderId === option.id;
-                const statusText = option.id === "ollama"
-                  ? installed ? (running ? ((models.length || 0) + " model" + (models.length === 1 ? "" : "s") + " detected") : "Installed, not running") : "Not detected"
-                  : dockerModels.length ? (dockerModels.length + " model" + (dockerModels.length === 1 ? "" : "s") + " detected") : "Detects from Docker Desktop";
+	      {localProviderOptions.map((option) => {
+	        const active = activeProviderId === option.id;
+	        const statusText = option.id === "ollama"
+	          ? installed ? (running ? ((models.length || 0) + " model" + (models.length === 1 ? "" : "s") + " detected") : "Installed, not running") : "Not detected"
+	          : active && localCompatibleModels.length
+	            ? (localCompatibleModels.length + " model" + (localCompatibleModels.length === 1 ? "" : "s") + " detected")
+	            : option.id === "lmstudio" ? "Detects from LM Studio" : "Detects from Docker Desktop";
                 return (
                   <button
                     key={option.id}
                     onClick={() => {
-                      if (option.id === "ollama") {
-                        setSetupMode("ollama");
-                        setModel(pickDetectedModel(models, ""));
-                        checkAgain();
-                      } else {
-                        setSetupMode("docker");
-                        setDockerBaseUrl(dockerBaseUrl || "http://localhost:12434/engines/v1");
-                        setModel(pickDetectedModel(dockerModels, ""));
-                        listDockerModels();
-                      }
+	                    if (option.id === "ollama") {
+	                      setSetupMode("ollama");
+	                      setModel(pickDetectedModel(models, ""));
+	                      checkAgain();
+	                    } else {
+	                      setSetupMode(option.id);
+	                      if (option.id === "lmstudio") setLmStudioBaseUrl(lmStudioBaseUrl || "http://127.0.0.1:1234/v1");
+	                      else setDockerBaseUrl(dockerBaseUrl || "http://localhost:12434/engines/v1");
+	                      setModel(pickDetectedModel(localCompatibleModels, ""));
+	                      listLocalCompatibleModels(option.id);
+	                    }
                       setMessage("");
                       setProfileName("");
                     }}
@@ -1020,9 +1054,9 @@ function DesktopOnboarding() {
                 <div className="eyebrow" style={{ marginBottom: 5 }}>{selectedProviderLabel}</div>
                 <h3 style={{ margin: 0, fontSize: 22 }}>Writing model setup</h3>
               </div>
-              <button className="btn ghost sm" disabled={busy} onClick={setupMode === "ollama" ? checkAgain : setupMode === "docker" ? listDockerModels : listCloudModels}>
-                <Icon name="check" size={13} /> Refresh
-              </button>
+	              <button className="btn ghost sm" disabled={busy} onClick={setupMode === "ollama" ? checkAgain : (setupMode === "docker" || setupMode === "lmstudio") ? () => listLocalCompatibleModels(setupMode) : listCloudModels}>
+	                <Icon name="check" size={13} /> Refresh
+	              </button>
             </div>
             {setupMode === "cloud" && (
               <div style={{ display: "grid", gridTemplateColumns: cloudProvider === "openai-compatible" ? "1fr 1fr" : "1fr", gap: 10, marginBottom: 12 }}>
@@ -1038,12 +1072,18 @@ function DesktopOnboarding() {
                 )}
               </div>
             )}
-            {setupMode === "docker" && (
-              <label style={{ display: "block", marginBottom: 12 }}>
-                <span className="eyebrow" style={{ display: "block", marginBottom: 6 }}>Docker Model Runner URL</span>
-                <input className="field" value={dockerBaseUrl} onChange={(e) => setDockerBaseUrl(e.target.value)} placeholder="http://localhost:12434/engines/v1" />
-              </label>
-            )}
+	            {setupMode === "docker" && (
+	              <label style={{ display: "block", marginBottom: 12 }}>
+	                <span className="eyebrow" style={{ display: "block", marginBottom: 6 }}>Docker Model Runner URL</span>
+	                <input className="field" value={dockerBaseUrl} onChange={(e) => setDockerBaseUrl(e.target.value)} placeholder="http://localhost:12434/engines/v1" />
+	              </label>
+	            )}
+	            {setupMode === "lmstudio" && (
+	              <label style={{ display: "block", marginBottom: 12 }}>
+	                <span className="eyebrow" style={{ display: "block", marginBottom: 6 }}>LM Studio local server URL</span>
+	                <input className="field" value={lmStudioBaseUrl} onChange={(e) => setLmStudioBaseUrl(e.target.value)} placeholder="http://127.0.0.1:1234/v1" />
+	              </label>
+	            )}
             {setupMode === "ollama" && !installed && (
               <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
                 <span className="muted" style={{ fontSize: 14.5 }}>Ollama was not detected on this Mac.</span>
@@ -1069,11 +1109,11 @@ function DesktopOnboarding() {
                     <option value="">{!installed ? "Install Ollama to detect models" : !running ? "Start Ollama to detect models" : models.length ? "Select a local model" : "No local models detected"}</option>
                     {models.map((m) => <option key={m} value={m}>{m}</option>)}
                   </select>
-                ) : setupMode === "docker" ? (
-                  <select className="field" value={dockerModels.includes(model) ? model : ""} onChange={(e) => setModel(e.target.value)} disabled={!dockerModels.length}>
-                    <option value="">{busy ? "Detecting Docker models..." : dockerModels.length ? "Select a Docker model" : "No Docker models detected"}</option>
-                    {dockerModels.map((m) => <option key={m} value={m}>{m}</option>)}
-                  </select>
+	                ) : (setupMode === "docker" || setupMode === "lmstudio") ? (
+	                  <select className="field" value={localCompatibleModels.includes(model) ? model : ""} onChange={(e) => setModel(e.target.value)} disabled={!localCompatibleModels.length}>
+	                    <option value="">{busy ? "Detecting models..." : localCompatibleModels.length ? ("Select a " + selectedProviderLabel + " model") : ("No " + selectedProviderLabel + " models detected")}</option>
+	                    {localCompatibleModels.map((m) => <option key={m} value={m}>{m}</option>)}
+	                  </select>
                 ) : (
                   <>
                     <input className="field" value={model} onChange={(e) => setModel(e.target.value)} list="desktop-model-options" placeholder={setupMode === "docker" ? "Detected Docker model" : "llama3.2"} />

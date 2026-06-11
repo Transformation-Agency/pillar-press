@@ -8,7 +8,7 @@ import { driveOnboardingUiProof } from "./onboarding-ui-proof";
 const root = process.cwd();
 const dmgPath = join(root, "src-tauri", "target", "release", "bundle", "dmg", "Pillar Press_0.1.0_aarch64.dmg");
 const appName = "Pillar Press.app";
-const executableName = "pillar-press";
+const executableName = "Pillar Press";
 
 async function exists(path: string) {
   try {

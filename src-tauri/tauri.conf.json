@@ -1,6 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Pillar Press",
+  "mainBinaryName": "Pillar Press",
   "version": "0.1.0",
   "identifier": "com.pillar.press",
   "build": {
@@ -40,6 +41,7 @@
     "shortDescription": "Local-first content generation desk for Pillar Press",
     "longDescription": "Pillar Press is a local-first AI-assisted content generation and editorial operations workstation.",
     "macOS": {
+      "bundleName": "Pillar Press",
       "signingIdentity": "-"
     },
     "resources": [

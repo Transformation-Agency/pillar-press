@@ -9,9 +9,10 @@ function deskUid(prefix) {
   return prefix + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 }
 
-function newDeskThread() {
+function newDeskThread(campaignId) {
   return {
     id: deskUid("thread_"),
+    campaignId: campaignId || null,
     title: "New thread",
     titleSet: false,
     messages: [],
@@ -27,6 +28,9 @@ function estimateTokens(text) {
 
 function contextWindowFor(status) {
   const profile = effectiveLLMProfile(status);
+  // Prefer the real loaded context reported by the server's provider probe
+  // (LM Studio); the name-based guesses below are a fallback.
+  if (profile && profile.contextWindow > 0) return profile.contextWindow;
   const provider = profile && profile.provider;
   const model = ((profile && profile.model) || "").toLowerCase();
   if (provider === "anthropic") return 200000;
@@ -57,11 +61,16 @@ function effectiveLLMProfile(status) {
 function modelLabelFor(status) {
   const profile = effectiveLLMProfile(status);
   if (!profile || !profile.model) return "Model setup";
+  const compatibleBaseUrl = String(profile.baseUrl || "");
   const provider = {
     anthropic: "Anthropic",
     gemini: "Gemini",
     openai: "OpenAI",
-    "openai-compatible": "Compatible",
+    "openai-compatible": compatibleBaseUrl.includes("1234")
+      ? "LM Studio"
+      : compatibleBaseUrl.includes("12434")
+        ? "Docker Model Runner"
+        : "Compatible",
     xai: "xAI",
     ollama: "Ollama",
   }[profile.provider] || "";
@@ -254,48 +263,91 @@ function Desk({ campaignId, onOpenPiece, hydrated }) {
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState(null);
   const [status, setStatus] = React.useState(null);
+  const [confirmDeleteId, setConfirmDeleteId] = React.useState(null);
   const streamRef = React.useRef(null);
   const taRef = React.useRef(null);
+  const statusMountedRef = React.useRef(false);
 
-  React.useEffect(() => {
-    let alive = true;
-    fetch("/api/llm/status", { headers: { Accept: "application/json" } })
+  const refreshLLMStatus = React.useCallback(() => {
+    return fetch("/api/llm/status", { headers: { Accept: "application/json" }, cache: "no-store" })
       .then((r) => r.ok ? r.json() : null)
-      .then((s) => { if (alive && s) setStatus(s); })
-      .catch(() => {});
-    return () => { alive = false; };
+      .then((s) => { if (s && statusMountedRef.current) setStatus(s); return s; })
+      .catch(() => null);
   }, []);
 
   React.useEffect(() => {
-    if (!hydrated) return;
-    if ((desk.threads || []).length) return;
-    const t = newDeskThread();
-    window.Store.setDesk({ threads: [t], activeId: t.id });
-  }, [hydrated, desk.threads && desk.threads.length]);
+    statusMountedRef.current = true;
+    refreshLLMStatus();
+    const onSettingsChanged = () => {
+      refreshLLMStatus();
+    };
+    const onFocus = () => {
+      refreshLLMStatus();
+    };
+    window.addEventListener("pillarpress:llm-settings-changed", onSettingsChanged);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      statusMountedRef.current = false;
+      window.removeEventListener("pillarpress:llm-settings-changed", onSettingsChanged);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [refreshLLMStatus]);
 
-  React.useEffect(() => {
-    const el = streamRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [desk.activeId, busy, desk.threads && desk.threads.map((t) => (t.messages || []).length).join(",")]);
-
-  const threads = desk.threads || [];
-  const active = threads.find((t) => t.id === desk.activeId) || threads[0];
+  const allThreads = desk.threads || [];
+  const belongsToCurrentCampaign = (thread) => {
+    const threadCampaignId = thread && thread.campaignId;
+    if (campaignId) return threadCampaignId === campaignId;
+    return !threadCampaignId;
+  };
+  const threads = allThreads.filter(belongsToCurrentCampaign);
+  const active = threads.find((t) => t.id === desk.activeId) || threads[0] || null;
   const isSetupHandoff = !!(active && active.source === "pillar_press_setup");
   const win = contextWindowFor(status);
   const used = active ? deskUsedTokens(active) : 0;
   const pct = Math.min(1, used / win);
 
-  const saveThreads = (nextThreads, activeId) => window.Store.setDesk({ threads: nextThreads, activeId: activeId || (active && active.id) || null });
-  const updateThread = (next) => saveThreads(threads.map((t) => t.id === next.id ? next : t), next.id);
+  React.useEffect(() => {
+    if (!hydrated) return;
+    if (threads.length) return;
+    const t = newDeskThread(campaignId);
+    window.Store.setDesk({ threads: [t].concat(allThreads), activeId: t.id });
+  }, [hydrated, campaignId, threads.length, allThreads.length]);
+
+  React.useEffect(() => {
+    if (!hydrated || !active || active.id === desk.activeId) return;
+    window.Store.setDesk({ threads: allThreads, activeId: active.id });
+  }, [hydrated, campaignId, desk.activeId, active && active.id, threads.length, allThreads.length]);
+
+  React.useEffect(() => {
+    const el = streamRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [desk.activeId, busy, threads.map((t) => (t.messages || []).length).join(",")]);
+
+  const saveThreads = (nextCampaignThreads, activeId) => {
+    const otherThreads = allThreads.filter((thread) => !belongsToCurrentCampaign(thread));
+    window.Store.setDesk({
+      threads: nextCampaignThreads.concat(otherThreads),
+      activeId: activeId || (active && active.id) || (nextCampaignThreads[0] && nextCampaignThreads[0].id) || null,
+    });
+  };
+  const updateThread = (next) => {
+    const scoped = Object.assign({}, next, { campaignId: next.campaignId || campaignId || null });
+    saveThreads(threads.map((t) => t.id === scoped.id ? scoped : t), scoped.id);
+  };
   const addThread = () => {
-    const t = newDeskThread();
+    const t = newDeskThread(campaignId);
     saveThreads([t].concat(threads), t.id);
   };
-  const deleteThread = (id) => {
+  // window.confirm is a silent no-op inside Tauri's webview, so deletion goes
+  // through an in-app confirmation modal instead.
+  const deleteThread = (id) => setConfirmDeleteId(id);
+  const reallyDeleteThread = (id) => {
+    setConfirmDeleteId(null);
     const rest = threads.filter((t) => t.id !== id);
-    const next = rest.length ? rest : [newDeskThread()];
+    const next = rest.length ? rest : [newDeskThread(campaignId)];
     saveThreads(next, desk.activeId === id ? next[0].id : desk.activeId);
   };
+  const confirmDeleteThread = confirmDeleteId ? threads.find((t) => t.id === confirmDeleteId) : null;
 
   async function send() {
     const body = text.trim();
@@ -303,6 +355,7 @@ function Desk({ campaignId, onOpenPiece, hydrated }) {
     setText(""); setBusy(true); setErr(null);
     if (taRef.current) taRef.current.style.height = "auto";
     let t = Object.assign({}, active, {
+      campaignId: active.campaignId || campaignId || null,
       title: active.titleSet ? active.title : body.slice(0, 48),
       messages: (active.messages || []).concat([{ id: deskUid("msg_"), role: "user", content: body }]),
       updatedAt: Date.now(),
@@ -351,7 +404,7 @@ function Desk({ campaignId, onOpenPiece, hydrated }) {
           {threads.map((t) => {
             const on = active && t.id === active.id;
             return (
-              <button key={t.id} onClick={() => window.Store.setDesk({ threads, activeId: t.id })}
+              <button key={t.id} onClick={() => window.Store.setDesk({ threads: allThreads, activeId: t.id })}
                 style={{ all: "unset", cursor: "pointer", boxSizing: "border-box", display: "grid", gridTemplateColumns: "1fr auto", gap: 8, width: "100%", padding: "10px 11px", borderRadius: "var(--radius)", marginBottom: 3, background: on ? "var(--paper-2)" : "transparent", border: "1px solid " + (on ? "var(--hair)" : "transparent") }}>
                 <span style={{ minWidth: 0 }}>
                   <span style={{ display: "block", fontFamily: "var(--font-display)", fontSize: 15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.title || "New thread"}</span>
@@ -421,6 +474,24 @@ function Desk({ campaignId, onOpenPiece, hydrated }) {
           </div>
         </div>
       </div>
+
+      {confirmDeleteThread && (
+        <div onClick={() => setConfirmDeleteId(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 200, display: "grid", placeItems: "center", padding: 16 }}>
+          <div onClick={(e) => e.stopPropagation()} className="card" style={{ width: "min(420px, 96vw)", padding: "22px 24px" }}>
+            <div className="eyebrow" style={{ marginBottom: 8 }}>Delete thread</div>
+            <p style={{ fontSize: 14.5, lineHeight: 1.55, margin: "0 0 16px" }}>
+              Delete &ldquo;{confirmDeleteThread.title || "this thread"}&rdquo;? This cannot be undone.
+            </p>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button className="btn" onClick={() => setConfirmDeleteId(null)}>Cancel</button>
+              <button className="btn primary" onClick={() => reallyDeleteThread(confirmDeleteThread.id)}
+                style={{ background: "var(--sev-must)", borderColor: "var(--sev-must)" }}>
+                <Icon name="trash" size={13} /> Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

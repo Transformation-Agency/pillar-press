@@ -5,15 +5,19 @@ function wordCount(t) { return (t || "").trim() ? (t.trim().split(/\s+/).length)
 function PieceRow({ piece, onOpen, onDelete }) {
   const [hover, setHover] = React.useState(false);
   const [titling, setTitling] = React.useState(false);
+  const [titleErr, setTitleErr] = React.useState(null); // window.alert is a no-op in Tauri's webview
   const autoTitle = async (e) => {
     e.stopPropagation();
-    setTitling(true);
+    setTitling(true); setTitleErr(null);
     try {
       const r = await fetch("/api/pieces/" + piece.id + "/title", { method: "POST", headers: { Accept: "application/json" }, credentials: "same-origin" });
       const d = await r.json().catch(() => null);
       if (!r.ok) throw new Error((d && d.error) || "Couldn't auto-title.");
       if (d && d.title) window.Store.updatePiece(piece.id, { title: d.title });
-    } catch (err) { window.alert((err && err.message) || "Couldn't auto-title."); }
+    } catch (err) {
+      setTitleErr((err && err.message) || "Couldn't auto-title.");
+      setTimeout(() => setTitleErr(null), 4000);
+    }
     setTitling(false);
   };
   const snippet = (piece.original || "").trim().split("\n").find((l) => l.trim()) || "No draft yet — paste one to begin.";
@@ -39,6 +43,7 @@ function PieceRow({ piece, onOpen, onDelete }) {
           margin: 0, fontSize: 15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
           maxWidth: "62ch", fontStyle: piece.original ? "normal" : "italic",
         }}>{snippet}</p>
+        {titleErr && <p style={{ margin: "6px 0 0", fontSize: 13, color: "var(--sev-must)" }}>{titleErr}</p>}
         <div style={{ display: "flex", gap: 14, marginTop: 10, alignItems: "center" }}>
           <span className="eyebrow">{wordCount(piece.original)} words</span>
           <span className="eyebrow">· edited {window.relTime(piece.updatedAt)}</span>

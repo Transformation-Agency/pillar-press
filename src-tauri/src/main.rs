@@ -31,6 +31,8 @@ use tauri::{
     menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu},
     AppHandle, Emitter, Manager, Url,
 };
+#[cfg(target_os = "macos")]
+use objc2_foundation::{NSProcessInfo, NSString};
 
 const MENU_SETUP_MODEL: &str = "setup-local-model";
 const MENU_OPEN_DATA_DIR: &str = "open-data-folder";
@@ -394,6 +396,12 @@ fn storage_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app_data_dir(app)?.join("storage");
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir)
+}
+
+#[cfg(target_os = "macos")]
+fn set_macos_process_name() {
+    let name = NSString::from_str("Pillar Press");
+    NSProcessInfo::processInfo().setProcessName(&name);
 }
 
 #[cfg(target_os = "macos")]
@@ -1670,6 +1678,9 @@ fn stop_voice_session(app: AppHandle) -> Result<(), String> {
 
 fn main() {
     #[cfg(target_os = "macos")]
+    set_macos_process_name();
+
+    #[cfg(target_os = "macos")]
     disable_macos_window_restoration();
 
     tauri::Builder::default()
@@ -1677,6 +1688,9 @@ fn main() {
         .on_menu_event(|app, event| handle_menu_event(app, event.id().as_ref()))
         .manage(DesktopServer::new())
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            set_macos_process_name();
+
             if let Some(server_url) = start_packaged_server(app.handle())? {
                 start_gather_scheduler(app.handle())?;
                 if let Some(window) = app.get_webview_window("main") {

@@ -85,6 +85,7 @@ function DraftTab({ piece, running, gateStatus, onRun, onChangeOriginal, onGoRev
   const [text, setText] = React.useState(piece.original || "");
   const fileRef = React.useRef(null);
   const [uploading, setUploading] = React.useState(false);
+  const [uploadErr, setUploadErr] = React.useState(null); // window.alert is a no-op in Tauri's webview
   const isMobile = window.useIsMobile();
   React.useEffect(() => { setText(piece.original || ""); }, [piece.id]);
 
@@ -96,12 +97,13 @@ function DraftTab({ piece, running, gateStatus, onRun, onChangeOriginal, onGoRev
     const f = e.target.files[0];
     e.target.value = "";
     if (!f) return;
-    setUploading(true);
+    setUploading(true); setUploadErr(null);
     try {
       const t = await window.extractFileText(f);
       setText(t); onChangeOriginal(t);
     } catch (err) {
-      window.alert((err && err.message) || ("Couldn't read " + f.name + "."));
+      setUploadErr((err && err.message) || ("Couldn't read " + f.name + "."));
+      setTimeout(() => setUploadErr(null), 5000);
     }
     setUploading(false);
   };
@@ -124,6 +126,7 @@ function DraftTab({ piece, running, gateStatus, onRun, onChangeOriginal, onGoRev
               </button>
             </div>
           </div>
+          {uploadErr && <p style={{ margin: "0 0 10px", fontSize: 13.5, color: "var(--sev-must)" }}>{uploadErr}</p>}
           <textarea
             className="field"
             value={text}

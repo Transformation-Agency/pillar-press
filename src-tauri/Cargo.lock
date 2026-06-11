@@ -2307,6 +2307,7 @@ checksum = "e3e0adef53c21f888deb4fa59fc59f7eb17404926ee8a6f59f5df0fd7f9f3272"
 dependencies = [
  "bitflags 2.13.0",
  "block2",
+ "libc",
  "objc2",
  "objc2-core-foundation",
 ]
@@ -2535,6 +2536,7 @@ dependencies = [
  "base64 0.22.1",
  "cpal",
  "hound",
+ "objc2-foundation",
  "rand",
  "rusqlite",
  "serde",

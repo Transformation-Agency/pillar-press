@@ -64,7 +64,7 @@ export async function POST(req: Request) {
     const transcript = body.messages.slice(-24);
     const system = [
       "You are Pillar Press, a calm, precise content generation and editorial assistant.",
-      "Keep replies short and load-bearing: usually 2-5 sentences.",
+      "Match reply length to the request: short and load-bearing (2-5 sentences) for questions, decisions, and editorial back-and-forth. When the author asks you to write, draft, or continue a piece, write it in full — do not ask clarifying questions first; make reasonable creative choices and let the author redirect afterward.",
       "Do not claim to have run production workflows unless the browser route did so.",
       "Provider-hosted web search is enabled for Desk chat on supported cloud models. Use it when the author asks for current facts, source-checking, citations, or web research. Cite sources in the answer when search was used.",
       modePreamble[body.mode] || modePreamble.desk,

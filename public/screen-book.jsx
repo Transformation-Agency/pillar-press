@@ -442,6 +442,8 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
   const [fullRevise, setFullRevise] = React.useState(false); // full = restructure + polish
   const [uploadingDraft, setUploadingDraft] = React.useState(false);
   const draftFileRef = React.useRef(null);
+  const [naming, setNaming] = React.useState(false);
+  const [bookName, setBookName] = React.useState("");
 
   // Drop a stale book selection if the campaign no longer exists; load the
   // book's pieces/references on demand (without making it the active campaign).
@@ -459,10 +461,14 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
   const piece = selectedId ? window.Store.getPiece(selectedId) : null;
 
   const pickBook = (id) => { setBookId(id); window.Store.setPref("bookCampaignId", id); setSelectedId(null); setErr(null); setNote(null); };
-  const newBook = () => {
-    const n = window.prompt("Name your book");
-    if (!n || !n.trim()) return;
-    const id = window.Store.addCampaign(n.trim(), { activate: false }); // don't hijack the active campaign
+  // window.prompt is a silent no-op inside Tauri's webview, so naming a new
+  // book goes through an in-app modal instead.
+  const newBook = () => { setBookName(""); setNaming(true); };
+  const createBook = () => {
+    const n = bookName.trim();
+    if (!n) return;
+    setNaming(false);
+    const id = window.Store.addCampaign(n, { activate: false }); // don't hijack the active campaign
     window.Store.loadCampaign(id);
     pickBook(id);
   };
@@ -738,6 +744,22 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
             {panel === "review" && <PacketView piece={piece} />}
             {panel === "revision" && <RevisionView piece={piece} onAccept={acceptRevision} accepting={false} />}
             {panel === "outputs" && <OutputsView piece={piece} />}
+          </div>
+        </div>
+      )}
+
+      {naming && (
+        <div onClick={() => setNaming(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 200, display: "grid", placeItems: "center", padding: 16 }}>
+          <div onClick={(e) => e.stopPropagation()} className="card" style={{ width: "min(420px, 96vw)", padding: "22px 24px" }}>
+            <div className="eyebrow" style={{ marginBottom: 8 }}>New book</div>
+            <input className="field" autoFocus value={bookName} placeholder="Name your book"
+              onChange={(e) => setBookName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") createBook(); if (e.key === "Escape") setNaming(false); }}
+              style={{ width: "100%", fontSize: 15, marginBottom: 14 }} />
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button className="btn" onClick={() => setNaming(false)}>Cancel</button>
+              <button className="btn primary" disabled={!bookName.trim()} onClick={createBook}><Icon name="plus" size={13} /> Create book</button>
+            </div>
           </div>
         </div>
       )}
