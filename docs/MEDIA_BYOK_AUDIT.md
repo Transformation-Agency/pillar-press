@@ -1,6 +1,6 @@
 # Hosted Media BYOK Audit
 
-Status: audit complete, implementation not complete.
+Status: audit complete, settings API implemented, generation resolver not complete.
 
 This audit covers `POST /api/hedra/generate` and the media provider helpers that
 power Studio image, audio, video, and avatar generation in hosted web mode.
@@ -10,9 +10,9 @@ power Studio image, audio, video, and avatar generation in hosted web mode.
 Hosted LLM BYOK is real. Hosted media BYOK is not real yet for generation.
 
 The database can store more than LLM secrets because `provider_secrets.kind` is
-generic, but the current hosted provider settings API only reads and writes
-`kind = "llm"`. Media generation still resolves provider credentials from
-server env vars or desktop-local encrypted settings.
+generic. Hosted media provider settings now read and write `kind = "media"` via
+`GET/PUT /api/media/provider-settings`, but media generation still resolves
+provider credentials from server env vars or desktop-local encrypted settings.
 
 ## Current Credential Flow
 
@@ -44,17 +44,20 @@ flowchart TD
 - Hosted Hedra credit checks and hosted Eleven/Hedra catalog calls now respect
   managed/BYOK provider access gates before touching platform or user provider
   keys.
+- Hosted media provider keys can now be saved as encrypted `provider_secrets`
+  rows with `kind = "media"` for `hedra`, `elevenlabs`, `openai`, `xai`, and
+  `custom-image`. Browser reads receive only secret-free metadata.
 
 ## Gaps
 
-### 1. Hosted media provider secrets are not modeled
+### 1. Hosted media provider secrets are modeled, but not consumed
 
-`lib/providerSettings.ts` scopes all hosted provider settings to
-`provider_secrets.kind = "llm"` and validates providers as LLM providers only.
-There is no hosted equivalent for desktop `mediaProviders`.
+`lib/mediaProviderSettings.ts` and `GET/PUT /api/media/provider-settings` now
+store encrypted hosted media profiles in `provider_secrets.kind = "media"`.
 
-Impact: a hosted user can save LLM keys, but cannot save Hedra, ElevenLabs,
-OpenAI media, xAI media, or custom image provider keys for future generation.
+Impact: a hosted user can save Hedra, ElevenLabs, OpenAI media, xAI media, or
+custom image provider keys, but generation does not consume those saved keys
+yet.
 
 ### 2. Media generation does not resolve user-scoped hosted media keys
 
@@ -112,24 +115,25 @@ settings only.
 Impact: hosted users will not see their saved media BYOK providers reflected in
 Studio capability/status UI.
 
-### 7. Setup saves media keys only through the desktop bridge
+### 7. Setup still prefers the desktop bridge
 
-The setup helper calls `desktop.saveMediaProviderKey()`. In hosted web mode,
-there is no matching server route that saves encrypted media keys.
+The setup helper calls `desktop.saveMediaProviderKey()` in desktop mode. Hosted
+web mode now has a matching encrypted settings route, but the setup/onboarding
+UI still needs to consistently use it for media provider keys.
 
-Impact: hosted onboarding can test some user-supplied keys, but cannot persist
-them for media generation.
+Impact: hosted onboarding can test some user-supplied keys and has a route to
+persist them, but does not yet reliably feed them into media generation.
 
 ## Required Implementation Order
 
-1. Add hosted media provider settings.
+1. Add hosted media provider settings. **Implemented.**
    - Reuse `provider_secrets` with `kind = "media"`.
    - Add schemas for `hedra`, `elevenlabs`, `openai`, `xai`, and
      `custom-image`.
    - Store provider, label, base URL, optional default model ids, and encrypted
      API key.
 
-2. Add server routes for hosted media settings.
+2. Add server routes for hosted media settings. **Implemented.**
    - Recommended route: `GET/PUT /api/media/provider-settings`.
    - Browser must receive only secret-free metadata.
    - PUT must require authenticated hosted user and BYOK-provider entitlement.

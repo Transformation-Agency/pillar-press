@@ -340,6 +340,12 @@ Rules:
   resolve the user's saved default/task profile server-side, mark usage as
   BYOK, and bypass only the managed-provider entitlement gate while still
   enforcing subscription and usage quotas.
+- Hosted media BYOK uses the same encrypted secret-store contract. **Started:**
+  hosted web now writes media provider profiles to `provider_secrets` with
+  `kind = "media"` for Hedra, ElevenLabs, OpenAI media, xAI media, and custom
+  image endpoints through `GET/PUT /api/media/provider-settings`; generation
+  still needs the user-scoped media resolver and client override wiring before
+  Studio media can be called end to end BYOK.
 - Trial workspaces can use managed keys only within tight usage caps.
 
 ## Stage 1 Success Gate
@@ -421,7 +427,8 @@ Stage 3 is complete only when:
   bypass hosted storage billing.
 - Hosted media BYOK generation works end to end. **Not complete:** see
   `docs/MEDIA_BYOK_AUDIT.md` for the current credential-flow audit and required
-  implementation order.
+  implementation order. Encrypted hosted media settings are implemented; the
+  remaining work is generation/status/setup consumption.
 - Usage rollups reflect the ledger.
 - Provider failure records failed usage without double-charging. **Started:**
   the first gated routes mark reserved usage as failed when downstream work
