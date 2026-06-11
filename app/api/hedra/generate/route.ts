@@ -18,7 +18,7 @@ import { textToSpeechLong } from "@/lib/elevenlabs";
 import { uploadPublicAudio } from "@/lib/storage";
 import { buildRefContext, type ReferencesDoc } from "@/lib/refContext";
 import { craftImagePrompt } from "@/lib/ai/imagePrompt";
-import { getAIForTask } from "@/lib/llm";
+import { getAIForTaskForUser } from "@/lib/llm";
 import { generateBodySchema, validateAgainstModel, sanitizeText } from "@/lib/validation";
 import { toErrorResponse } from "@/lib/errors";
 import { getAudioProviderConfig, getImageProviderConfig } from "@/lib/mediaProviders";
@@ -325,12 +325,13 @@ export async function POST(req: Request) {
         const pc = scopedPiece;
         if (pc) article = { title: pc.title, excerpt: pieceExcerpt(pc) };
       }
+      const taskAI = await getAIForTaskForUser("mediaPrompt", user);
       const enhanced = await craftImagePrompt({
         seed: sanitizeText(body.prompt, 2000),
         styleDirective: prof?.directive || "",
         refContext: refCtx,
         article,
-      }, getAIForTask("mediaPrompt"));
+      }, taskAI.ai);
       input.textPrompt = enhanced || input.textPrompt;
       meta.enhancedPrompt = enhanced;
     } else if (prof?.directive && !body.directed) {

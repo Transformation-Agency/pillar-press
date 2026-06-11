@@ -4,7 +4,7 @@ import { requireUser } from "@/lib/auth";
 import { db, campaigns, pieces, references } from "@/lib/db";
 import { getLocalPiece, getLocalReferences, updateLocalPiece } from "@/lib/local/database";
 import { isLocalFirstMode } from "@/lib/local/mode";
-import { getAIForTask } from "@/lib/llm";
+import { getAIForTaskForUser } from "@/lib/llm";
 import { buildRefContext, type ReferencesDoc } from "@/lib/refContext";
 import { generateRevision, type RevisionPacket, type RevisionPieceInput } from "@/lib/revision";
 import { toErrorResponse } from "@/lib/errors";
@@ -82,15 +82,20 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       direction: piece.direction ?? null,
     };
 
+    const taskAI = await getAIForTaskForUser("revision", user);
     reservation = await reserveUsage({
       user,
       task: "revision",
       feature: `pieces.revision.${mode}`,
       campaignId: piece.campaignId,
       pieceId: piece.id,
+      providerSource: taskAI.providerSource,
+      provider: taskAI.provider,
+      model: taskAI.model,
+      metadata: taskAI.profileId ? { profileId: taskAI.profileId } : {},
       estimatedCredits: mode === "full" ? 3 : 2,
     });
-    const result = await generateRevision(input, refCtx, getAIForTask("revision"), undefined, { mode });
+    const result = await generateRevision(input, refCtx, taskAI.ai, undefined, { mode });
 
     if (isLocalFirstMode()) {
       const updated = updateLocalPiece(

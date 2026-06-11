@@ -13,7 +13,7 @@ import { runGather, type GatherItem } from "@/lib/gather";
 import { SOURCE_KIND_LABELS } from "@/lib/gather-validation";
 import { buildRefContext, type ReferencesDoc } from "@/lib/refContext";
 import { craftSourceSummary } from "@/lib/ai/gatherSummary";
-import { getAIForTask } from "@/lib/llm";
+import { getAIForTask, type AI } from "@/lib/llm";
 import { campaignInWorkspace } from "@/lib/tenant";
 
 interface SourceSummary {
@@ -25,7 +25,11 @@ interface SourceSummary {
   text: string;
 }
 
-export async function runGatherForCampaign(campaignId: string, user: { id: string; workspaceId?: string | null }) {
+export async function runGatherForCampaign(
+  campaignId: string,
+  user: { id: string; workspaceId?: string | null },
+  ai?: AI,
+) {
   if (!(await campaignInWorkspace(campaignId, user.workspaceId))) return null;
 
   const sources = isLocalFirstMode()
@@ -105,7 +109,7 @@ export async function runGatherForCampaign(campaignId: string, user: { id: strin
     }
     const sourcesWithItems = sources.filter((s) => (bySource.get(s.id)?.length ?? 0) > 0);
 
-    const gatherAI = getAIForTask("gather");
+    const gatherAI = ai ?? getAIForTask("gather");
     summaries = (
       await Promise.allSettled(
         sourcesWithItems.map(async (s): Promise<SourceSummary> => {

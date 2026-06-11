@@ -5,6 +5,7 @@ import { runGatherForCampaign } from "@/lib/gather/runCampaign";
 import { toErrorResponse } from "@/lib/errors";
 import { campaignInWorkspace, tenantNotFound } from "@/lib/tenant";
 import { completeUsageReservation, failUsageReservation, reserveUsage, type UsageReservation } from "@/lib/billing/usage";
+import { getAIForTaskForUser } from "@/lib/llm";
 
 // Per-source LLM summaries can take a few seconds each (run concurrently).
 export const maxDuration = 60;
@@ -21,13 +22,18 @@ export async function POST(req: Request) {
     const { campaignId } = runSchema.parse(await req.json());
 
     if (!(await campaignInWorkspace(campaignId, user.workspaceId))) return tenantNotFound();
+    const taskAI = await getAIForTaskForUser("gather", user);
     reservation = await reserveUsage({
       user,
       task: "gather",
       feature: "gather.run",
       campaignId,
+      providerSource: taskAI.providerSource,
+      provider: taskAI.provider,
+      model: taskAI.model,
+      metadata: taskAI.profileId ? { profileId: taskAI.profileId } : {},
     });
-    const result = await runGatherForCampaign(campaignId, user);
+    const result = await runGatherForCampaign(campaignId, user, taskAI.ai);
     if (!result) return NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
     await completeUsageReservation(reservation, {
       actualCredits: 1,

@@ -23,7 +23,45 @@ function encryptDesktopSecret(value: string, keyText = Buffer.alloc(32, 7).toStr
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.doUnmock("@/lib/local/mode");
+  vi.doUnmock("@/lib/providerSettings");
+  vi.resetModules();
   vi.unstubAllGlobals();
+});
+
+describe("User-scoped LLM resolver", () => {
+  it("uses hosted saved task profiles as BYOK providers", async () => {
+    vi.resetModules();
+    vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => false }));
+    vi.doMock("@/lib/providerSettings", () => ({
+      getHostedProviderSettings: vi.fn(async () => ({
+        defaultProfileId: "default-profile",
+        taskDefaults: { review: "review-profile" },
+      })),
+      getHostedProviderProfile: vi.fn(async (_user, profileId: string) => ({
+        id: profileId,
+        provider: "openai",
+        model: profileId === "review-profile" ? "gpt-4o" : "gpt-4o-mini",
+        baseUrl: "https://api.openai.com/v1",
+        apiKey: "sk-openai",
+      })),
+    }));
+
+    const { getAIForTaskForUser } = await import("@/lib/llm");
+    const resolved = await getAIForTaskForUser("review", {
+      id: "user_1",
+      workspaceId: "workspace_1",
+      role: "author",
+    });
+
+    expect(resolved).toMatchObject({
+      providerSource: "byok",
+      provider: "openai",
+      model: "gpt-4o",
+      profileId: "review-profile",
+    });
+    expect(resolved.ai).toBeTruthy();
+  });
 });
 
 describe("LLM config", () => {

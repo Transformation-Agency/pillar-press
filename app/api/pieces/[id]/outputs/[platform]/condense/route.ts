@@ -9,7 +9,7 @@ import { getLocalPiece, getLocalReferences, updateLocalPiece } from "@/lib/local
 import { isLocalFirstMode } from "@/lib/local/mode";
 import { buildRefContext, type ReferencesDoc } from "@/lib/refContext";
 import { condensePost } from "@/lib/ai/condense";
-import { getAIForTask } from "@/lib/llm";
+import { getAIForTaskForUser } from "@/lib/llm";
 import { toErrorResponse } from "@/lib/errors";
 import { completeUsageReservation, failUsageReservation, reserveUsage, type UsageReservation } from "@/lib/billing/usage";
 
@@ -67,14 +67,19 @@ export async function POST(
         });
     const refCtx = buildRefContext((ref?.doc as ReferencesDoc | undefined) ?? null);
 
+    const taskAI = await getAIForTaskForUser("outputs", user);
     reservation = await reserveUsage({
       user,
       task: "outputs",
       feature: "pieces.outputs.condense",
       campaignId: piece.campaignId,
       pieceId: piece.id,
+      providerSource: taskAI.providerSource,
+      provider: taskAI.provider,
+      model: taskAI.model,
+      metadata: taskAI.profileId ? { profileId: taskAI.profileId } : {},
     });
-    const draftPost = await condensePost(target.draftPost, refCtx, ratio, getAIForTask("outputs"));
+    const draftPost = await condensePost(target.draftPost, refCtx, ratio, taskAI.ai);
 
     const nextOutputs = { ...outputs, [platform]: { ...target, draftPost } };
     if (isLocalFirstMode()) {

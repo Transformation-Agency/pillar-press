@@ -6,7 +6,7 @@ import { getLocalPiece, getLocalReferences } from "@/lib/local/database";
 import { isLocalFirstMode } from "@/lib/local/mode";
 import { buildRefContext, type ReferencesDoc } from "@/lib/refContext";
 import { craftTitle } from "@/lib/ai/titlePiece";
-import { getAIForTask } from "@/lib/llm";
+import { getAIForTaskForUser } from "@/lib/llm";
 import { toErrorResponse } from "@/lib/errors";
 import { completeUsageReservation, failUsageReservation, reserveUsage, type UsageReservation } from "@/lib/billing/usage";
 
@@ -50,14 +50,19 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
       : await db.query.references.findFirst({ where: eq(references.campaignId, piece.campaignId) });
     const refCtx = buildRefContext((ref?.doc as ReferencesDoc | undefined) ?? null);
 
+    const taskAI = await getAIForTaskForUser("draft", user);
     reservation = await reserveUsage({
       user,
       task: "utility",
       feature: "pieces.title",
       campaignId: piece.campaignId,
       pieceId: piece.id,
+      providerSource: taskAI.providerSource,
+      provider: taskAI.provider,
+      model: taskAI.model,
+      metadata: taskAI.profileId ? { profileId: taskAI.profileId } : {},
     });
-    const title = await craftTitle({ text, refContext: refCtx }, getAIForTask("draft"));
+    const title = await craftTitle({ text, refContext: refCtx }, taskAI.ai);
     if (!title) {
       await failUsageReservation(reservation, new Error("Title generation returned no title."));
       return NextResponse.json({ error: "Couldn't generate a title.", code: "ai" }, { status: 502 });

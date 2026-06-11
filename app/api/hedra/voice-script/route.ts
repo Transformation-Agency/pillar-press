@@ -5,11 +5,12 @@ import { requireUser } from "@/lib/auth";
 import { db, references, pieces } from "@/lib/db";
 import { buildRefContext, type ReferencesDoc } from "@/lib/refContext";
 import { craftVoiceScript } from "@/lib/ai/voiceScript";
-import { getAIForTask } from "@/lib/llm";
+import { getAIForTaskForUser } from "@/lib/llm";
 import { toErrorResponse } from "@/lib/errors";
 import { getLocalCampaign, getLocalPiece, getLocalReferences } from "@/lib/local/database";
 import { isLocalFirstMode } from "@/lib/local/mode";
 import { campaignInWorkspace, tenantNotFound } from "@/lib/tenant";
+import { completeUsageReservation, failUsageReservation, reserveUsage, type UsageReservation } from "@/lib/billing/usage";
 
 const bodySchema = z.object({
   pieceId: z.string().uuid(),
@@ -28,6 +29,7 @@ function pieceText(p: { original?: string | null; revision?: unknown } | undefin
 // from the linked piece (no Hedra/ElevenLabs credits spent here; just the text
 // adaptation). Returns { script } for the Studio's Voice "Generate script".
 export async function POST(req: Request) {
+  let reservation: UsageReservation = null;
   try {
     const user = await requireUser();
     const body = bodySchema.parse(await req.json());
@@ -57,14 +59,29 @@ export async function POST(req: Request) {
       }
     }
 
+    const taskAI = await getAIForTaskForUser("mediaPrompt", user);
+    reservation = await reserveUsage({
+      user,
+      task: "utility",
+      feature: "hedra.voice_script",
+      campaignId: piece.campaignId,
+      pieceId: piece.id,
+      providerSource: taskAI.providerSource,
+      provider: taskAI.provider,
+      model: taskAI.model,
+      metadata: taskAI.profileId ? { profileId: taskAI.profileId } : {},
+      estimatedCredits: Math.max(1, Math.ceil(text.length / 12000)),
+    });
     const script = await craftVoiceScript({
       article: { title: piece.title, text },
       refContext: refCtx,
       voiceName: body.voiceName,
-    }, getAIForTask("mediaPrompt"));
+    }, taskAI.ai);
 
+    await completeUsageReservation(reservation);
     return NextResponse.json({ script });
   } catch (err) {
+    await failUsageReservation(reservation, err);
     return toErrorResponse(err);
   }
 }

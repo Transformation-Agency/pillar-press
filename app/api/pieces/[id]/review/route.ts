@@ -6,7 +6,7 @@ import { db, campaigns, pieces, references } from "@/lib/db";
 import type { Piece } from "@/lib/db";
 import { getLocalPiece, getLocalReferences, updateLocalPiece } from "@/lib/local/database";
 import { isLocalFirstMode } from "@/lib/local/mode";
-import { getAIForTask } from "@/lib/llm";
+import { getAIForTaskForUser } from "@/lib/llm";
 import { buildRefContext, type ReferencesDoc } from "@/lib/refContext";
 import { GATES, runGate, type GateResult } from "@/lib/gates";
 import { toErrorResponse } from "@/lib/errors";
@@ -61,12 +61,17 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
 
     // The draft under review is the piece's original text (prototype: task(draft)).
     const draft = piece.original ?? "";
+    const taskAI = await getAIForTaskForUser("review", user);
     reservation = await reserveUsage({
       user,
       task: "review",
       feature: "pieces.review",
       campaignId: piece.campaignId,
       pieceId: piece.id,
+      providerSource: taskAI.providerSource,
+      provider: taskAI.provider,
+      model: taskAI.model,
+      metadata: taskAI.profileId ? { profileId: taskAI.profileId } : {},
       estimatedCredits: GATES.length,
     });
 
@@ -77,7 +82,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     };
 
     // Run gates IN ORDER, persisting incrementally after each one.
-    const reviewAI = getAIForTask("review");
+    const reviewAI = taskAI.ai;
     for (const gate of GATES) {
       const result = await runGate(gate, draft, refCtx, reviewAI);
       packet[gate.id] = result;

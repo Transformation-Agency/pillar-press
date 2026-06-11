@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { requireUser } from "@/lib/auth";
 import { db, campaigns, references } from "@/lib/db";
-import { getAIForTask } from "@/lib/llm";
+import { getAIForTaskForUser } from "@/lib/llm";
 import { buildRefContext, type ReferencesDoc } from "@/lib/refContext";
 import { runWeave } from "@/lib/weave";
 import { weaveBodySchema } from "@/lib/schemas-weave";
@@ -81,19 +81,27 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
     }
 
+    const taskAI = await getAIForTaskForUser("weave", user);
     reservation = await reserveUsage({
       user,
       task: "weave",
       feature: "weave.run",
       campaignId: body.campaignId,
+      providerSource: taskAI.providerSource,
+      provider: taskAI.provider,
+      model: taskAI.model,
       estimatedCredits: Math.max(2, usable.length),
-      metadata: { sourceCount: body.sources.length, async: wantsAsync(req) },
+      metadata: {
+        sourceCount: body.sources.length,
+        async: wantsAsync(req),
+        ...(taskAI.profileId ? { profileId: taskAI.profileId } : {}),
+      },
     });
 
     if (wantsAsync(req)) {
       const job = createJob(user.id);
       // Fire-and-forget; progress + result land in the in-memory job store.
-      void runWeave(body.sources, refCtx, getAIForTask("weave"), (p) => setProgress(job.id, p))
+      void runWeave(body.sources, refCtx, taskAI.ai, (p) => setProgress(job.id, p))
         .then(async (result) => {
           await completeUsageReservation(reservation, {
             actualCredits: Math.max(2, usable.length),
@@ -107,7 +115,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ jobId: job.id, status: job.status }, { status: 202 });
     }
 
-    const result = await runWeave(body.sources, refCtx, getAIForTask("weave"));
+    const result = await runWeave(body.sources, refCtx, taskAI.ai);
     // { extracts, brief, mapping, draft } (+ generatedAt) — the prototype shape.
     await completeUsageReservation(reservation, { actualCredits: Math.max(2, usable.length) });
     return NextResponse.json(result);
