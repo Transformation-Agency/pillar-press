@@ -16,16 +16,21 @@ use environment keys when you choose to test them.
 ```bash
 npm install
 cp .env.example .env
-ollama pull llama3.2
 npm run dev
 ```
 
 Open http://localhost:3000. With the default `.env.example`, the app uses:
 - SQLite in `.local-data/pillar-press.sqlite3`.
 - Local app-data storage under `.local-data/storage`.
-- Ollama native chat at `http://127.0.0.1:11434`.
+- The model chosen in the in-app model setup (saved to the desktop settings
+  file). Pick a provider there on first run — local options include Ollama,
+  LM Studio, and Docker Model Runner.
 - A single embedded local owner/workspace with no default campaigns. Create the
   first campaign from the app shell.
+
+Do not set `LLM_PROVIDER`/`LLM_MODEL`/`LLM_BASE_URL` in `.env` for normal use:
+env values silently override the in-app model settings for every request. They
+exist only for deliberate project-wide dev overrides.
 
 ## Desktop Dev
 ```bash

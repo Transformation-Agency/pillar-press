@@ -38,11 +38,12 @@ revision, utility, and media-prompt work.
 ```bash
 npm install
 cp .env.example .env
-ollama pull llama3.2
 npm run dev
 ```
 
-Open http://localhost:3000.
+Open http://localhost:3000 and pick a model in the in-app model setup
+(Ollama, LM Studio, Docker Model Runner, or a hosted provider). Leave the
+`LLM_*` vars in `.env` unset — they silently override the in-app settings.
 
 For the desktop app:
 
