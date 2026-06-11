@@ -1075,6 +1075,7 @@ function BillingPanel({ open, onClose, billing, notice }) {
     accessNotice && accessNotice.code === "campaign_limit_exceeded" ? "Campaign limit reached" :
     accessNotice && accessNotice.code === "drive_not_enabled" ? "Drive requires an upgrade" :
     accessNotice && accessNotice.code === "managed_provider_not_enabled" ? "Managed AI requires an upgrade" :
+    accessNotice && accessNotice.code === "export_not_enabled" ? "Exports require an upgrade" :
     "Usage limit reached";
 
   const refresh = async () => {

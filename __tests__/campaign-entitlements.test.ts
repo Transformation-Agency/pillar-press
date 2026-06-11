@@ -103,6 +103,51 @@ describe("hosted campaign entitlement limits", () => {
     });
   });
 
+  it("blocks export features when the current plan does not include exports", async () => {
+    class MockBillingError extends Error {
+      status: number;
+      code: string;
+      constructor(status: number, code: string, message: string) {
+        super(message);
+        this.status = status;
+        this.code = code;
+      }
+    }
+    const subscription = { workspaceId: "workspace_1", planId: "trial", status: "trialing", trialEnd: null };
+    const entitlement = { planId: "trial", maxCampaigns: 2, exportEnabled: false };
+    const select = vi.fn().mockReturnValue({
+      from: () => ({
+        where: () => ({
+          limit: vi.fn(async () => [entitlement]),
+        }),
+      }),
+    });
+
+    vi.doMock("@/lib/billing/stripe", () => ({
+      BillingError: MockBillingError,
+      getLatestSubscription: vi.fn(async () => subscription),
+      getOrCreateTrialSubscription: vi.fn(),
+    }));
+    vi.doMock("@/lib/billing/usage", () => ({
+      billingAccessForSubscription: vi.fn(() => ({ allowed: true })),
+    }));
+    vi.doMock("@/lib/db", async () => {
+      const actual = await vi.importActual<any>("@/lib/db");
+      return { ...actual, db: { select } };
+    });
+
+    const { requireExportEnabled } = await import("@/lib/billing/entitlements");
+
+    await expect(requireExportEnabled({
+      id: "user_1",
+      workspaceId: "workspace_1",
+      role: "author",
+    })).rejects.toMatchObject({
+      status: 402,
+      code: "export_not_enabled",
+    });
+  });
+
   it("checks hosted campaign capacity before inserting a new campaign", async () => {
     const { BillingError } = await import("@/lib/billing/stripe");
     const error = new BillingError(
@@ -228,5 +273,47 @@ describe("hosted campaign entitlement limits", () => {
       role: "author",
     });
     expect(uploadMany).not.toHaveBeenCalled();
+  });
+
+  it("checks hosted export entitlement before assembling a book export", async () => {
+    const { BillingError } = await import("@/lib/billing/stripe");
+    const error = new BillingError(
+      402,
+      "export_not_enabled",
+      "Downloads and exports are not included in your current plan. Upgrade to export files.",
+    );
+    const requireExportEnabled = vi.fn(async () => {
+      throw error;
+    });
+    const select = vi.fn();
+
+    vi.doMock("@/lib/auth", () => ({
+      requireUser: vi.fn(async () => ({ id: "user_1", workspaceId: "workspace_1", role: "author" })),
+      getOrCreateWorkspace: vi.fn(),
+    }));
+    vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => false }));
+    vi.doMock("@/lib/billing/entitlements", () => ({ requireExportEnabled }));
+    vi.doMock("@/lib/db", async () => {
+      const actual = await vi.importActual<any>("@/lib/db");
+      return { ...actual, db: { select, query: { campaigns: { findFirst: vi.fn() } } } };
+    });
+
+    const { GET } = await import("../app/api/campaigns/[id]/book/export/route");
+    const res = await GET(new Request("http://test.local/api/campaigns/campaign_1/book/export"), {
+      params: Promise.resolve({ id: "campaign_1" }),
+    });
+    const body = await res.json();
+
+    expect(res.status).toBe(402);
+    expect(body).toEqual({
+      error: "Downloads and exports are not included in your current plan. Upgrade to export files.",
+      code: "export_not_enabled",
+    });
+    expect(requireExportEnabled).toHaveBeenCalledWith({
+      id: "user_1",
+      workspaceId: "workspace_1",
+      role: "author",
+    });
+    expect(select).not.toHaveBeenCalled();
   });
 });

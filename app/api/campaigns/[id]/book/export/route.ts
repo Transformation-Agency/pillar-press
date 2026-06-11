@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { and, asc, eq } from "drizzle-orm";
-import { requireUser } from "@/lib/auth";
+import { getOrCreateWorkspace, requireUser } from "@/lib/auth";
 import { db, campaigns, pieces } from "@/lib/db";
 import { bookMarkdown, sortChaptersForBook, type BookChapter } from "@/lib/exporters";
 import { toErrorResponse } from "@/lib/errors";
 import { getLocalCampaign, listLocalPieces } from "@/lib/local/database";
 import { isLocalFirstMode } from "@/lib/local/mode";
+import { requireExportEnabled } from "@/lib/billing/entitlements";
 
 const notFound = () =>
   NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
@@ -38,8 +39,15 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   try {
     const user = await requireUser();
     const { id } = await params;
+    let userWithWorkspace = user;
+    if (!isLocalFirstMode()) {
+      const workspaceId = user.workspaceId ?? (await getOrCreateWorkspace(user.id));
+      const hostedUser = { ...user, workspaceId };
+      await requireExportEnabled(hostedUser);
+      userWithWorkspace = hostedUser;
+    }
 
-    const campaign = await resolveCampaign(id, user.workspaceId);
+    const campaign = await resolveCampaign(id, userWithWorkspace.workspaceId);
     if (!campaign) return notFound();
 
     const rows = isLocalFirstMode()

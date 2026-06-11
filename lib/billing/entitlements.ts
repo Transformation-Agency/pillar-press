@@ -85,3 +85,15 @@ export async function driveAccessForUser(user: BillingSessionUser) {
   const { entitlement } = await activeEntitlementForUser(user);
   return { enabled: entitlement.driveEnabled };
 }
+
+export async function requireExportEnabled(user: BillingSessionUser) {
+  const { subscription, entitlement } = await activeEntitlementForUser(user);
+  if (!entitlement.exportEnabled) {
+    throw new BillingError(
+      402,
+      "export_not_enabled",
+      "Downloads and exports are not included in your current plan. Upgrade to export files.",
+    );
+  }
+  return { subscription, entitlement };
+}

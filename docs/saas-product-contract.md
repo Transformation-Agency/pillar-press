@@ -18,7 +18,7 @@ Do this as a staged migration, not a rewrite.
 4. Stage 3: entitlement checks, usage reservations, and quota enforcement.
    **Started:** hosted-only usage reservation helpers now enforce active/trial
    subscription status, expired trial dates, usage limits, and campaign-count
-   limits, plus managed-provider and Drive feature access, while
+   limits, plus managed-provider, export, and Drive feature access, while
    desktop/local-first bypasses them.
 5. Stage 4: trial onboarding and upgrade UI. **Started:** hosted users now
    have a Billing panel showing trial/subscription status, period usage, paid
@@ -385,9 +385,11 @@ Stage 3 is complete only when:
   reservation helper checks the current subscription period against plan
   entitlements before inserting the reservation; hosted campaign creation now
   checks `max_campaigns` before inserting a campaign.
-- Feature gates block plan-restricted integrations. **Started:** hosted Google
-  Drive OAuth and upload routes require `drive_enabled` before linking or
-  exporting to Drive; desktop/local-first continues to use local exports.
+- Feature gates block plan-restricted integrations. **Started:** hosted book
+  export requires `export_enabled`, browser-only output downloads open the
+  billing prompt when exports are disabled, and hosted Google Drive OAuth and
+  upload routes require `drive_enabled` before linking or exporting to Drive;
+  desktop/local-first continues to use local exports.
 - Managed provider access honors plan entitlements. **Started:** hosted usage
   reservations require `can_use_managed_keys` and `"managed"` in
   `allowed_providers` before server-managed AI/media/research work begins.

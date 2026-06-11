@@ -73,13 +73,34 @@ function outputToText(o) {
   ].join("\n");
 }
 
+function exportAllowed() {
+  const auth = window.KP_AUTH && window.KP_AUTH.snapshot ? window.KP_AUTH.snapshot() : null;
+  if (!auth || !auth.hosted) return true;
+  const billing = window.Store && window.Store.billingStatus ? window.Store.billingStatus() : null;
+  return !billing || !billing.entitlement || billing.entitlement.exportEnabled !== false;
+}
+
+function notifyExportBlocked() {
+  window.dispatchEvent(new CustomEvent("kingspress:billing-action-required", {
+    detail: {
+      status: 402,
+      code: "export_not_enabled",
+      error: "Downloads and exports are not included in your current plan. Upgrade to export files.",
+    },
+  }));
+}
+
 function outputFilename(o) { return window.EXPORT.safeName(o.platform) + ".md"; }
-function downloadOutput(o) { window.EXPORT.downloadText(window.EXPORT.outputMarkdown(o), outputFilename(o)); }
+function downloadOutput(o) {
+  if (!exportAllowed()) { notifyExportBlocked(); return; }
+  window.EXPORT.downloadText(window.EXPORT.outputMarkdown(o), outputFilename(o));
+}
 function outputFiles(piece) {
   return (piece.outputOrder || []).map((pid) => piece.outputs[pid]).filter(Boolean)
     .map((o) => ({ name: outputFilename(o), content: window.EXPORT.outputMarkdown(o), mime: "text/markdown" }));
 }
 function downloadAllOutputs(piece) {
+  if (!exportAllowed()) { notifyExportBlocked(); return; }
   const files = outputFiles(piece); if (!files.length) return;
   window.EXPORT.downloadBlob(window.EXPORT.zipBlob(files), window.EXPORT.safeName(piece.title) + "-outputs.zip");
 }
