@@ -26,6 +26,7 @@ export {
   references,
   pieces,
   settings,
+  providerSecrets,
 } from "@/db/schema";
 export type {
   MediaJob,
@@ -61,4 +62,6 @@ export type {
   NewPiece,
   Setting,
   NewSetting,
+  ProviderSecret,
+  NewProviderSecret,
 } from "@/db/schema";

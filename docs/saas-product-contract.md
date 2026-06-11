@@ -330,7 +330,10 @@ Rules:
 - Browser never receives raw provider keys.
 - Desktop keys remain in the encrypted desktop settings path.
 - Hosted BYOK keys must be encrypted at rest before Stage 3 quota enforcement
-  opens broad managed-key usage.
+  opens broad managed-key usage. **Started:** hosted web now writes LLM provider
+  profiles to `provider_secrets` with encrypted API keys, returns only
+  secret-free metadata, and lets the model setup/test/list flow reuse a saved
+  profile without sending the stored key back to the browser.
 - Trial workspaces can use managed keys only within tight usage caps.
 
 ## Stage 1 Success Gate

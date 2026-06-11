@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireUser } from "@/lib/auth";
 import { toErrorResponse } from "@/lib/errors";
+import { getHostedProviderProfile } from "@/lib/providerSettings";
 import {
   DEFAULT_GEMINI_BASE_URL,
   DEFAULT_OLLAMA_BASE_URL,
@@ -17,6 +18,7 @@ const Body = z.object({
   model: z.string().trim().min(1).max(200),
   baseUrl: z.string().url().optional(),
   apiKey: z.string().optional(),
+  profileId: z.string().trim().optional(),
 });
 
 function defaultBaseUrl(provider: LLMProvider): string | undefined {
@@ -50,14 +52,23 @@ function normalizeConfig(body: z.infer<typeof Body>) {
 
 export async function POST(req: Request) {
   try {
-    await requireUser();
+    const user = await requireUser();
     const body = Body.parse(await req.json());
-    const ai = createAIFromConfig(normalizeConfig(body));
+    const saved = body.profileId ? await getHostedProviderProfile(user, body.profileId) : null;
+    const merged = saved
+      ? {
+          provider: saved.provider,
+          model: body.model || saved.model,
+          baseUrl: body.baseUrl || saved.baseUrl,
+          apiKey: body.apiKey || saved.apiKey,
+        }
+      : body;
+    const ai = createAIFromConfig(normalizeConfig(merged));
     const text = await ai.text("Reply with exactly OK. No punctuation, no extra words.");
     return NextResponse.json({
       ok: true,
-      provider: body.provider,
-      model: body.model,
+      provider: merged.provider,
+      model: merged.model,
       sample: text.trim().slice(0, 80),
     });
   } catch (err) {

@@ -36,6 +36,8 @@ STRIPE_SECRET_KEY=...
 STRIPE_WEBHOOK_SECRET=...
 STRIPE_PRICE_STARTER=price_...
 STRIPE_PRICE_PRO=price_...
+
+KINGS_PRESS_HOSTED_SECRET_KEY=<long random encryption secret>
 ```
 
 With `AUTH_DISABLED=false`, the static browser app shows a King's Press
@@ -84,6 +86,21 @@ Subscribe at least to:
 - `customer.subscription.updated`
 - `customer.subscription.deleted`
 
+## Hosted Provider Keys
+
+Hosted users can save BYOK model provider keys through the model setup dialog.
+Those keys are encrypted server-side in the `provider_secrets` table and the
+browser only receives provider metadata such as provider, model, and
+`hasApiKey`.
+
+Set a stable server-only encryption secret before enabling this in production:
+
+```bash
+KINGS_PRESS_HOSTED_SECRET_KEY=<long random value>
+```
+
+Do not rotate this value unless you also re-encrypt existing provider keys.
+
 For a temporary private preview without user accounts, set `AUTH_DISABLED=true`
 and add:
 
@@ -114,6 +131,7 @@ npm run db:migrate
 psql "$DATABASE_URL" -f db/migrations/0005_gather_summary.sql
 psql "$DATABASE_URL" -f db/migrations/0006_saas_foundation.sql
 psql "$DATABASE_URL" -f db/migrations/0007_gather_schedules.sql
+psql "$DATABASE_URL" -f db/migrations/0008_provider_secrets.sql
 ```
 
 ## Hetzner Or Any VPS
@@ -129,6 +147,7 @@ npm run db:migrate
 psql "$DATABASE_URL" -f db/migrations/0005_gather_summary.sql
 psql "$DATABASE_URL" -f db/migrations/0006_saas_foundation.sql
 psql "$DATABASE_URL" -f db/migrations/0007_gather_schedules.sql
+psql "$DATABASE_URL" -f db/migrations/0008_provider_secrets.sql
 npm run web:build
 PORT=3000 npm run web:start
 ```

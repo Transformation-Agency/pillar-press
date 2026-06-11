@@ -236,6 +236,37 @@ export const settings = pgTable(
 export type Setting = typeof settings.$inferSelect;
 export type NewSetting = typeof settings.$inferInsert;
 
+export const providerSecrets = pgTable(
+  "provider_secrets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: text("user_id"),
+    kind: text("kind").notNull().default("llm"),
+    profileId: text("profile_id").notNull(),
+    label: text("label"),
+    provider: text("provider").notNull(),
+    model: text("model"),
+    baseUrl: text("base_url"),
+    encryptedApiKey: text("encrypted_api_key"),
+    hasApiKey: boolean("has_api_key").notNull().default(false),
+    isDefault: boolean("is_default").notNull().default(false),
+    taskDefaults: jsonb("task_defaults").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    byWorkspace: index("provider_secrets_workspace_idx").on(t.workspaceId),
+    byUser: index("provider_secrets_user_idx").on(t.userId),
+    uniqProfile: unique("provider_secrets_workspace_user_kind_profile_unique").on(t.workspaceId, t.userId, t.kind, t.profileId),
+  }),
+);
+
+export type ProviderSecret = typeof providerSecrets.$inferSelect;
+export type NewProviderSecret = typeof providerSecrets.$inferInsert;
+
 /* ============================================================
    SaaS foundation tables — hosted web only.
    Desktop/local-first does not read or write these tables.

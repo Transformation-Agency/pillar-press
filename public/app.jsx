@@ -470,6 +470,9 @@ function DesktopOnboarding() {
   const [taskDefaults, setTaskDefaults] = React.useState({});
 
   const desktop = window.KINGS_DESKTOP;
+  const authSnapshot = window.KP_AUTH && window.KP_AUTH.snapshot ? window.KP_AUTH.snapshot() : {};
+  const isDesktopSetup = !!(desktop && desktop.isDesktop && desktop.isDesktop());
+  const isHostedSetup = !!(authSnapshot && authSnapshot.hosted && !isDesktopSetup);
   const setupCompleteKey = (window.KP_CONVERSATIONAL_ONBOARDING &&
     window.KP_CONVERSATIONAL_ONBOARDING.flags &&
     window.KP_CONVERSATIONAL_ONBOARDING.flags.computeSetupLocalStorageKey) || "kingspress.desktopSetupComplete";
@@ -543,21 +546,23 @@ function DesktopOnboarding() {
   };
 
   React.useEffect(() => {
-    if (!desktop || !desktop.isDesktop()) return;
+    if (!isDesktopSetup && !isHostedSetup) return;
     let active = true;
     let unlisten = null;
     refresh({ syncSetupOpen: true }).catch(() => {
       if (active && window.localStorage.getItem(setupCompleteKey) !== "true") setOpen(true);
     });
 
-    desktop.onShowModelSetup((() => {
-      if (!active) return;
-      setOpen(true);
-      refresh();
-    })).then((fn) => {
-      unlisten = fn;
-      if (!active && typeof unlisten === "function") unlisten();
-    }).catch(() => {});
+    if (isDesktopSetup) {
+      desktop.onShowModelSetup((() => {
+        if (!active) return;
+        setOpen(true);
+        refresh();
+      })).then((fn) => {
+        unlisten = fn;
+        if (!active && typeof unlisten === "function") unlisten();
+      }).catch(() => {});
+    }
 
     const openFromDesk = () => {
       if (!active) return;
@@ -571,7 +576,7 @@ function DesktopOnboarding() {
       if (typeof unlisten === "function") unlisten();
       window.removeEventListener("kingspress:open-model-setup", openFromDesk);
     };
-  }, []);
+  }, [isDesktopSetup, isHostedSetup]);
 
   const isDockerModelRunnerSettings = (saved) =>
     !!(saved && saved.provider === "openai-compatible" && saved.baseUrl && saved.baseUrl.includes("12434"));
@@ -596,24 +601,30 @@ function DesktopOnboarding() {
   }[provider] || "");
 
   const currentProviderConfig = () => {
+    let config;
     if (setupMode === "ollama") {
-      return { provider: "ollama", model: model.trim(), baseUrl: "http://127.0.0.1:11434" };
-    }
-    if (setupMode === "docker") {
-      return {
+      config = { provider: "ollama", model: model.trim(), baseUrl: "http://127.0.0.1:11434" };
+    } else if (setupMode === "docker") {
+      config = {
         provider: "openai-compatible",
         model: model.trim(),
         baseUrl: dockerBaseUrl.trim() || "http://localhost:12434/engines/v1",
       };
+    } else {
+      config = {
+        provider: cloudProvider,
+        model: model.trim(),
+        apiKey: apiKey.trim(),
+        baseUrl: cloudProvider === "openai-compatible"
+          ? cloudBaseUrl.trim()
+          : providerBaseUrl(cloudProvider),
+      };
     }
-    return {
-      provider: cloudProvider,
-      model: model.trim(),
-      apiKey: apiKey.trim(),
-      baseUrl: cloudProvider === "openai-compatible"
-        ? cloudBaseUrl.trim()
-        : providerBaseUrl(cloudProvider),
-    };
+    const active = activeProfileFromSettings(savedSettings);
+    if (!config.apiKey && active && active.hasApiKey && active.provider === config.provider && active.model === config.model) {
+      config.profileId = active.id;
+    }
+    return config;
   };
 
   const savedModelChoiceComplete = (saved, ollamaStatus, ollamaModels, savedDockerModels) => {
@@ -626,13 +637,49 @@ function DesktopOnboarding() {
       return !!(active.baseUrl && (savedDockerModels || []).includes(active.model));
     }
     if (active.provider === "openai-compatible") {
-      return !!(active.baseUrl && active.apiKey);
+      return !!(active.baseUrl && (active.apiKey || active.hasApiKey || isHostedSetup));
     }
-    return !!active.apiKey;
+    return !!(active.apiKey || active.hasApiKey);
   };
 
   const refresh = async (options) => {
-    if (!desktop || !desktop.isDesktop()) return;
+    if (isHostedSetup) {
+      try {
+        const res = await fetch("/api/provider-settings", { headers: { Accept: "application/json" } });
+        const json = await res.json().catch(() => null);
+        if (!res.ok) throw new Error((json && json.error) || "Could not load hosted provider settings.");
+        const saved = json && json.settings ? json.settings : { profiles: [], defaultProfileId: null, taskDefaults: {} };
+        setSavedSettings(saved);
+        setTaskDefaults(saved.taskDefaults || {});
+        const activeSaved = activeProfileFromSettings(saved);
+        if (activeSaved && activeSaved.provider) {
+          setSetupMode("cloud");
+          setCloudProvider(activeSaved.provider);
+        } else {
+          setSetupMode("cloud");
+        }
+        if (activeSaved && activeSaved.baseUrl) setCloudBaseUrl(activeSaved.baseUrl);
+        if (activeSaved && activeSaved.model) {
+          setModel(activeSaved.model);
+          setProfileName(activeSaved.label || providerLabel(activeSaved.provider) + " " + activeSaved.model);
+        }
+        if (options && options.syncSetupOpen) {
+          if (savedModelChoiceComplete(saved, null, [], [])) {
+            window.localStorage.setItem(setupCompleteKey, "true");
+            setOpen(false);
+          } else if (window.localStorage.getItem(setupCompleteKey) !== "true") {
+            setOpen(true);
+          }
+        }
+        setMessage("");
+        return saved;
+      } catch (e) {
+        setMessage((e && e.message) || "Hosted provider setup check failed.");
+        if (options && options.syncSetupOpen && window.localStorage.getItem(setupCompleteKey) !== "true") setOpen(true);
+        return null;
+      }
+    }
+    if (!isDesktopSetup) return;
     try {
       await desktop.initLocalDatabase().catch(() => null);
       const [s, list, saved] = await Promise.all([
@@ -767,7 +814,7 @@ function DesktopOnboarding() {
     setBusy(true); setMessage("Listing models from " + providerLabel(config.provider) + ".");
     try {
       if (config.provider === "openai-compatible" && !config.baseUrl) throw new Error("Add a base URL first.");
-      if (config.provider !== "openai-compatible" && config.provider !== "ollama" && !config.apiKey) throw new Error("Add an API key first.");
+      if (config.provider !== "openai-compatible" && config.provider !== "ollama" && !config.apiKey && !config.profileId) throw new Error("Add an API key first.");
       const res = await fetch("/api/llm/models", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -851,14 +898,26 @@ function DesktopOnboarding() {
         taskDefaults: nextTaskDefaults,
       };
       const cleanedSettings = withoutEmptyOptionals(nextSettings);
-      await desktop.saveLLMSettings(cleanedSettings);
-      if (nextProfile.provider === "openai" && nextProfile.apiKey && desktop.saveMediaProviderKey) {
+      let savedResponse = cleanedSettings;
+      if (isHostedSetup) {
+        const res = await fetch("/api/provider-settings", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ settings: cleanedSettings }),
+        });
+        const json = await res.json().catch(() => null);
+        if (!res.ok) throw new Error((json && json.error) || "Could not save hosted provider settings.");
+        savedResponse = json.settings || cleanedSettings;
+      } else {
+        await desktop.saveLLMSettings(cleanedSettings);
+      }
+      if (!isHostedSetup && nextProfile.provider === "openai" && nextProfile.apiKey && desktop.saveMediaProviderKey) {
         await desktop.saveMediaProviderKey("openai", nextProfile.apiKey, { baseUrl: "https://api.openai.com/v1" });
       }
-      setSavedSettings(cleanedSettings);
+      setSavedSettings(savedResponse);
       setTaskDefaults(nextTaskDefaults);
       window.localStorage.setItem(setupCompleteKey, "true");
-      notifyModelSetupSaved(cleanedSettings, nextProfile);
+      notifyModelSetupSaved(savedResponse, nextProfile);
       setOpen(false);
     } catch (e) {
       setMessage((e && e.message) || (typeof e === "string" ? e : "Could not save the model choice."));
@@ -883,8 +942,19 @@ function DesktopOnboarding() {
         taskDefaults,
       };
       const cleanedSettings = withoutEmptyOptionals(nextSettings);
-      await desktop.saveLLMSettings(cleanedSettings);
-      setSavedSettings(cleanedSettings);
+      if (isHostedSetup) {
+        const res = await fetch("/api/provider-settings", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ settings: cleanedSettings }),
+        });
+        const json = await res.json().catch(() => null);
+        if (!res.ok) throw new Error((json && json.error) || "Could not save hosted task defaults.");
+        setSavedSettings(json.settings || cleanedSettings);
+      } else {
+        await desktop.saveLLMSettings(cleanedSettings);
+        setSavedSettings(cleanedSettings);
+      }
       setMessage("Task defaults saved.");
     } catch (e) {
       setMessage((e && e.message) || (typeof e === "string" ? e : "Could not save task defaults."));
@@ -900,29 +970,33 @@ function DesktopOnboarding() {
     ? installed && running && hasModel && !!model.trim()
     : setupMode === "docker"
       ? !!model.trim() && !!dockerBaseUrl.trim()
-      : !!model.trim() && !!apiKey.trim() && (cloudProvider !== "openai-compatible" || !!cloudBaseUrl.trim());
+      : !!model.trim() && (!!apiKey.trim() || !!currentProviderConfig().profileId) && (cloudProvider !== "openai-compatible" || !!cloudBaseUrl.trim());
   const savedProfiles = profilesFromSettings(savedSettings);
 
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "var(--paper)", display: "flex", flexDirection: "column" }}>
       <div style={{ padding: "28px clamp(20px, 4vw, 56px) 22px", borderBottom: "1px solid var(--hair)", display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start", flexShrink: 0 }}>
         <div>
-          <div className="eyebrow" style={{ marginBottom: 8 }}>King's Press desktop setup</div>
+          <div className="eyebrow" style={{ marginBottom: 8 }}>{isHostedSetup ? "King's Press hosted setup" : "King's Press desktop setup"}</div>
           <h2 style={{ fontSize: 30, marginBottom: 10 }}>Choose your writing model</h2>
           <p className="muted" style={{ fontSize: 15.5, lineHeight: 1.55, maxWidth: 760 }}>
-            King's Press keeps your editorial database local. Use a local model by default, or add a cloud API key when you want hosted compute.
+            {isHostedSetup
+              ? "Save a provider key encrypted on the server, then use it for hosted King's Press workflows without pasting it again."
+              : "King's Press keeps your editorial database local. Use a local model by default, or add a cloud API key when you want hosted compute."}
           </p>
         </div>
         <button className="icon-btn" onClick={closeModelSetup} title="Close setup"><Icon name="xLogo" size={15} /></button>
       </div>
       <div className="scroll-y" style={{ flex: 1, minHeight: 0, padding: "28px clamp(20px, 4vw, 56px) 40px" }}>
         <div style={{ maxWidth: 980, margin: "0 auto" }}>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 16 }}>
-          <button className={"btn " + (setupMode === "ollama" ? "primary" : "ghost")} onClick={() => { setSetupMode("ollama"); if (models.length) setModel(models[0]); setProfileName(""); }} disabled={busy}>Ollama</button>
-          <button className={"btn " + (setupMode === "docker" ? "primary" : "ghost")} onClick={() => { setSetupMode("docker"); setModel(dockerModels.length ? dockerModels[0] : ""); setProfileName(""); }} disabled={busy}>Docker Model Runner</button>
-          <button className={"btn " + (setupMode === "cloud" ? "primary" : "ghost")} onClick={() => { setSetupMode("cloud"); setModel((cloudModels[cloudProvider] || [""])[0]); setProfileName(""); }} disabled={busy}>Cloud API key</button>
-        </div>
-        {setupMode === "ollama" && (
+        {!isHostedSetup && (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 16 }}>
+            <button className={"btn " + (setupMode === "ollama" ? "primary" : "ghost")} onClick={() => { setSetupMode("ollama"); if (models.length) setModel(models[0]); setProfileName(""); }} disabled={busy}>Ollama</button>
+            <button className={"btn " + (setupMode === "docker" ? "primary" : "ghost")} onClick={() => { setSetupMode("docker"); setModel(dockerModels.length ? dockerModels[0] : ""); setProfileName(""); }} disabled={busy}>Docker Model Runner</button>
+            <button className={"btn " + (setupMode === "cloud" ? "primary" : "ghost")} onClick={() => { setSetupMode("cloud"); setModel((cloudModels[cloudProvider] || [""])[0]); setProfileName(""); }} disabled={busy}>Cloud API key</button>
+          </div>
+        )}
+        {!isHostedSetup && setupMode === "ollama" && (
           <>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 18 }}>
           <div className="card" style={{ padding: 12, borderRadius: "var(--radius)" }}>
@@ -953,7 +1027,7 @@ function DesktopOnboarding() {
             )}
           </>
         )}
-        {setupMode === "docker" && (
+        {!isHostedSetup && setupMode === "docker" && (
           <div style={{ marginTop: 18 }}>
             <label className="eyebrow" style={{ display: "block", marginBottom: 6 }}>Docker Model Runner URL</label>
             <div style={{ display: "grid", gridTemplateColumns: "minmax(220px, 1fr) auto", gap: 8 }}>
@@ -1377,11 +1451,13 @@ function App() {
             Sign out
           </button>
         )}
-        {hasDesktopBridge && (
+        {(hasDesktopBridge || auth.hosted) && (
           <>
-            <button className="icon-btn" onClick={createDesktopBackup} title="Create local backup" disabled={backupBusy}>
-              {backupBusy ? <Spinner size={15} /> : <Icon name="db" size={16} />}
-            </button>
+            {hasDesktopBridge && (
+              <button className="icon-btn" onClick={createDesktopBackup} title="Create local backup" disabled={backupBusy}>
+                {backupBusy ? <Spinner size={15} /> : <Icon name="db" size={16} />}
+              </button>
+            )}
             <button className="icon-btn" onClick={openModelSetup} title="Model settings">
               <Icon name="key" size={16} />
             </button>

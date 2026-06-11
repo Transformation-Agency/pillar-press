@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { requireUser } from "@/lib/auth";
 import { toErrorResponse } from "@/lib/errors";
+import { getHostedProviderProfile } from "@/lib/providerSettings";
 import {
   DEFAULT_GEMINI_BASE_URL,
   DEFAULT_OLLAMA_BASE_URL,
@@ -14,6 +16,7 @@ const Body = z.object({
   provider: z.enum(["anthropic", "openai", "openai-compatible", "xai", "ollama", "gemini"]).default("openai-compatible"),
   baseUrl: z.string().url().optional(),
   apiKey: z.string().optional(),
+  profileId: z.string().trim().optional(),
 });
 
 type ModelsResponse = {
@@ -81,9 +84,18 @@ function normalizeGeminiModels(payload: GeminiModelsResponse): string[] {
 
 export async function POST(req: Request) {
   try {
+    const user = await requireUser();
     const body = Body.parse(await req.json());
-    const url = modelsUrl(body.provider, body.baseUrl);
-    const headers = headersFor(body.provider, body.apiKey);
+    const saved = body.profileId ? await getHostedProviderProfile(user, body.profileId) : null;
+    const request = saved
+      ? {
+          provider: saved.provider,
+          baseUrl: body.baseUrl || saved.baseUrl,
+          apiKey: body.apiKey || saved.apiKey,
+        }
+      : body;
+    const url = modelsUrl(request.provider, request.baseUrl);
+    const headers = headersFor(request.provider, request.apiKey);
 
     const res = await fetch(url, { headers });
     if (!res.ok) {
@@ -93,12 +105,12 @@ export async function POST(req: Request) {
         : await res.text().catch(() => "");
       return NextResponse.json({
         models: [],
-        error: providerMessage(body.provider, res.status, detail),
+        error: providerMessage(request.provider, res.status, detail),
         code: "llm",
       }, { status: res.status });
     }
     const payload = await res.json();
-    if (body.provider === "gemini") return NextResponse.json({ models: normalizeGeminiModels(payload as GeminiModelsResponse) });
+    if (request.provider === "gemini") return NextResponse.json({ models: normalizeGeminiModels(payload as GeminiModelsResponse) });
     return NextResponse.json({ models: normalizeModels(payload as ModelsResponse) });
   } catch (err) {
     return toErrorResponse(err);
