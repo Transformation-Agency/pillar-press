@@ -1031,7 +1031,7 @@ function DesktopOnboarding() {
   );
 }
 
-function BillingPanel({ open, onClose, billing }) {
+function BillingPanel({ open, onClose, billing, notice }) {
   const [busy, setBusy] = React.useState("");
   const [error, setError] = React.useState("");
 
@@ -1107,6 +1107,20 @@ function BillingPanel({ open, onClose, billing }) {
         </div>
 
         <div style={{ padding: 22, display: "grid", gap: 18 }}>
+          {notice && (
+            <div role="status" style={{
+              border: "1px solid var(--accent)",
+              borderRadius: 12,
+              padding: 13,
+              background: "color-mix(in oklch, var(--accent) 8%, var(--paper-2))",
+            }}>
+              <strong>{notice.code === "subscription_required" ? "Subscription required" : "Usage limit reached"}</strong>
+              <p style={{ margin: "6px 0 0", color: "var(--muted)", lineHeight: 1.45 }}>
+                {notice.error || "Upgrade or manage billing to continue this workflow."}
+              </p>
+            </div>
+          )}
+
           {usage && (
             <section>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline", marginBottom: 12 }}>
@@ -1182,6 +1196,7 @@ function App() {
   const [sentimentBusy, setSentimentBusy] = React.useState(false);
   const [campaignCreateOpen, setCampaignCreateOpen] = React.useState(false);
   const [billingOpen, setBillingOpen] = React.useState(false);
+  const [billingNotice, setBillingNotice] = React.useState(null);
   const isMobile = window.useIsMobile();
   const role = state.role || "author";
 
@@ -1222,6 +1237,16 @@ function App() {
       if (shouldOpen) setSetupOpen(true);
     });
     return () => { cancelled = true; };
+  }, []);
+  React.useEffect(() => {
+    const onBillingRequired = (event) => {
+      const detail = (event && event.detail) || {};
+      setBillingNotice(detail);
+      setBillingOpen(true);
+      if (window.Store && window.Store.refreshBilling) window.Store.refreshBilling();
+    };
+    window.addEventListener("kingspress:billing-action-required", onBillingRequired);
+    return () => window.removeEventListener("kingspress:billing-action-required", onBillingRequired);
   }, []);
   const completeSetup = (payload) => {
     const result = payload || {};
@@ -1321,7 +1346,7 @@ function App() {
           <Icon name="gear" size={13} /> Setup
         </button>
         {auth.hosted && (
-          <button className="btn sm ghost" onClick={() => { window.Store.refreshBilling(); setBillingOpen(true); }} title="Billing and usage">
+          <button className="btn sm ghost" onClick={() => { setBillingNotice(null); window.Store.refreshBilling(); setBillingOpen(true); }} title="Billing and usage">
             Billing
           </button>
         )}
@@ -1434,7 +1459,7 @@ function App() {
         />
       )}
       <CampaignCreateDialog open={campaignCreateOpen} onClose={() => setCampaignCreateOpen(false)} onCreate={createCampaign} />
-      <BillingPanel open={billingOpen} onClose={() => setBillingOpen(false)} billing={state.billing} />
+      <BillingPanel open={billingOpen} onClose={() => setBillingOpen(false)} billing={state.billing} notice={billingNotice} />
       <DesktopOnboarding />
     </div>
   );

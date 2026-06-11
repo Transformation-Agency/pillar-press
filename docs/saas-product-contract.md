@@ -20,7 +20,8 @@ Do this as a staged migration, not a rewrite.
    while desktop/local-first bypasses them.
 5. Stage 4: trial onboarding and upgrade UI. **Started:** hosted users now
    have a Billing panel showing trial/subscription status, period usage, paid
-   plan upgrades, and the Stripe customer portal.
+   plan upgrades, the Stripe customer portal, and an automatic upgrade prompt
+   when an API route returns `quota_exceeded`.
 6. Stage 5: workers/jobs for long-running Gather, Weave, media, and batch work.
 7. Stage 6: production ops, admin, support, observability, and launch gates.
 
@@ -400,6 +401,7 @@ Stage 3 is complete only when:
 7. Stage 3: wrap expensive routes.
 8. Stage 4: update onboarding and account/billing UI. **Started:** the hosted
    topbar Billing panel calls `/api/billing/status`, `/api/billing/checkout`,
-   and `/api/billing/portal`.
+   and `/api/billing/portal`; hosted API `402 quota_exceeded` responses open
+   the same panel with context.
 9. Stage 5: introduce a worker/job runner for long operations.
 10. Stage 6: add admin/support tooling and production observability.

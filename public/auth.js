@@ -115,18 +115,50 @@
     return Boolean(config && config.requiresLogin);
   }
 
+  function sameOriginApiPath(input) {
+    const raw = typeof input === "string" ? input : (input && input.url);
+    if (!raw) return null;
+    try {
+      const url = new URL(raw, window.location.href);
+      if (url.origin !== window.location.origin) return null;
+      if (!url.pathname.startsWith("/api/")) return null;
+      return url.pathname;
+    } catch {
+      return null;
+    }
+  }
+
+  async function observeApiResponse(input, response) {
+    const path = sameOriginApiPath(input);
+    if (!path || !response || response.status !== 402) return response;
+    let data = {};
+    try { data = await response.clone().json(); } catch { data = {}; }
+    if (data && (data.code === "quota_exceeded" || data.code === "subscription_required")) {
+      window.dispatchEvent(new CustomEvent("kingspress:billing-action-required", {
+        detail: {
+          path,
+          status: response.status,
+          code: data.code,
+          error: data.error || "A subscription or upgrade is required.",
+        },
+      }));
+    }
+    return response;
+  }
+
   window.fetch = async function authFetch(input, init) {
-    if (!shouldAttachAuth(input)) return nativeFetch(input, init);
+    if (!shouldAttachAuth(input)) return observeApiResponse(input, await nativeFetch(input, init));
     const token = await accessToken();
-    if (!token) return nativeFetch(input, init);
+    if (!token) return observeApiResponse(input, await nativeFetch(input, init));
 
     const headers = new Headers((init && init.headers) || (input instanceof Request ? input.headers : undefined));
     if (!headers.has("Authorization")) headers.set("Authorization", "Bearer " + token);
 
     if (input instanceof Request) {
-      return nativeFetch(new Request(input, Object.assign({}, init || {}, { headers })));
+      const request = new Request(input, Object.assign({}, init || {}, { headers }));
+      return observeApiResponse(request, await nativeFetch(request));
     }
-    return nativeFetch(input, Object.assign({}, init || {}, { headers }));
+    return observeApiResponse(input, await nativeFetch(input, Object.assign({}, init || {}, { headers })));
   };
 
   async function loadServerSession() {

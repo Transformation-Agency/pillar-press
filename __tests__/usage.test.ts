@@ -113,3 +113,19 @@ describe("hosted usage reservations", () => {
     expect(insert).not.toHaveBeenCalled();
   });
 });
+
+describe("billing error responses", () => {
+  it("returns quota errors as client-visible 402 responses", async () => {
+    const { BillingError } = await import("@/lib/billing/stripe");
+    const { toErrorResponse } = await import("@/lib/errors");
+
+    const res = toErrorResponse(new BillingError(402, "quota_exceeded", "AI usage limit reached for this billing period."));
+    const body = await res.json();
+
+    expect(res.status).toBe(402);
+    expect(body).toEqual({
+      error: "AI usage limit reached for this billing period.",
+      code: "quota_exceeded",
+    });
+  });
+});

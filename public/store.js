@@ -16,9 +16,20 @@
   function now() { return Date.now(); }
 
   /* ---- minimal REST helpers (same-origin, no auth headers) ---- */
+  async function throwApiError(response, label) {
+    let data = {};
+    try { data = await response.clone().json(); } catch { data = {}; }
+    const message = (data && data.error) || (label + " -> " + response.status);
+    const err = new Error(message);
+    err.status = response.status;
+    err.code = data && data.code;
+    err.body = data;
+    throw err;
+  }
+
   async function apiGet(path) {
     const r = await fetch("/api" + path, { headers: { Accept: "application/json" } });
-    if (!r.ok) throw new Error("GET " + path + " -> " + r.status);
+    if (!r.ok) await throwApiError(r, "GET " + path);
     return r.json();
   }
   async function apiSend(method, path, body) {
@@ -27,7 +38,7 @@
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: body == null ? undefined : JSON.stringify(body),
     });
-    if (!r.ok) throw new Error(method + " " + path + " -> " + r.status);
+    if (!r.ok) await throwApiError(r, method + " " + path);
     const ct = r.headers.get("content-type") || "";
     return ct.indexOf("application/json") >= 0 ? r.json() : null;
   }
