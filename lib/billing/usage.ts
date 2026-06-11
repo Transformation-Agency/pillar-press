@@ -1,9 +1,10 @@
-import { and, eq, gte, inArray, lt } from "drizzle-orm";
+import { and, eq, gte, inArray, lt, sql } from "drizzle-orm";
 import { getOrCreateWorkspace, type SessionUser } from "@/lib/auth";
 import {
   db,
   entitlements,
   usageEvents,
+  usageRollups,
   type Entitlement,
   type Subscription,
   type UsageEventTask,
@@ -38,6 +39,13 @@ export type UsageReservation = {
   idempotencyKey: string;
 } | null;
 
+export type StorageReservation = {
+  workspaceId: string;
+  bytes: number;
+  periodStart: Date;
+  periodEnd: Date;
+} | null;
+
 export type BillingAccess =
   | { allowed: true }
   | { allowed: false; code: "subscription_required" | "subscription_inactive" | "trial_expired"; message: string };
@@ -49,6 +57,8 @@ function startOfUtcMonth(now: Date) {
 function startOfNextUtcMonth(now: Date) {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
 }
+
+const GIB = 1024n * 1024n * 1024n;
 
 export function periodForSubscription(subscription: Subscription | null, now = new Date()) {
   const start = subscription?.currentPeriodStart ?? subscription?.trialStart ?? startOfUtcMonth(now);
@@ -69,6 +79,10 @@ function limitForDimension(
   if (dimension === "media") return entitlement.monthlyMediaGenerations;
   if (dimension === "gather") return entitlement.monthlyGatherRuns;
   return entitlement.monthlyLlmCredits;
+}
+
+export function storageQuotaBytes(entitlement: Pick<Entitlement, "storageQuotaGb">) {
+  return BigInt(Math.max(0, entitlement.storageQuotaGb)) * GIB;
 }
 
 export function entitlementAllowsManagedProvider(entitlement: Pick<Entitlement, "allowedProviders" | "canUseManagedKeys">) {
@@ -112,6 +126,13 @@ async function entitlementForPlan(planId: string) {
   return entitlement ?? null;
 }
 
+function normalizeStorageBytes(value: unknown) {
+  if (typeof value === "bigint") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return BigInt(Math.max(0, Math.trunc(value)));
+  if (typeof value === "string" && /^\d+$/.test(value)) return BigInt(value);
+  return 0n;
+}
+
 export async function getEntitlementForPlan(planId: string) {
   return entitlementForPlan(planId);
 }
@@ -143,6 +164,25 @@ async function usedCredits(input: {
     const actual = row.status === "succeeded" ? row.actualCredits : 0;
     return sum + Math.max(actual || row.estimatedCredits || 0, 0);
   }, 0);
+}
+
+async function usedStorageBytes(input: {
+  workspaceId: string;
+  periodStart: Date;
+  periodEnd: Date;
+}) {
+  const [rollup] = await db
+    .select({ storageBytesUsed: usageRollups.storageBytesUsed })
+    .from(usageRollups)
+    .where(
+      and(
+        eq(usageRollups.workspaceId, input.workspaceId),
+        eq(usageRollups.periodStart, input.periodStart),
+        eq(usageRollups.periodEnd, input.periodEnd),
+      ),
+    )
+    .limit(1);
+  return normalizeStorageBytes(rollup?.storageBytesUsed);
 }
 
 export function quotaErrorMessage(dimension: UsageDimension) {
@@ -205,10 +245,23 @@ export async function usageSummaryForSubscription(input: {
       }] as const;
     }),
   );
+  const storageUsed = await usedStorageBytes({
+    workspaceId: input.workspaceId,
+    periodStart: period.start,
+    periodEnd: period.end,
+  });
+  const storageLimit = input.entitlement ? storageQuotaBytes(input.entitlement) : 0n;
   return {
     periodStart: period.start.toISOString(),
     periodEnd: period.end.toISOString(),
-    dimensions: Object.fromEntries(rows),
+    dimensions: {
+      ...Object.fromEntries(rows),
+      storage: {
+        used: Number(storageUsed),
+        limit: Number(storageLimit),
+        remaining: Number(storageLimit > storageUsed ? storageLimit - storageUsed : 0n),
+      },
+    },
   };
 }
 
@@ -289,6 +342,96 @@ export async function reserveUsage(input: UsageReservationInput): Promise<UsageR
     .limit(1);
 
   return existing ? { id: existing.id, workspaceId: user.workspaceId, idempotencyKey } : null;
+}
+
+export async function reserveStorageBytes(input: {
+  user: SessionUser;
+  bytes: number;
+  feature: string;
+}): Promise<StorageReservation> {
+  if (isLocalFirstMode()) return null;
+
+  const bytes = Math.max(0, Math.ceil(input.bytes));
+  if (!bytes) return null;
+
+  const user = await billingUserFromSession(input.user);
+  const subscription = await activeSubscriptionForWorkspace(user);
+  const access = billingAccessForSubscription(subscription);
+  if (!access.allowed) {
+    throw new BillingError(402, access.code, access.message);
+  }
+  if (!subscription) {
+    throw new BillingError(402, "subscription_required", "A subscription is required.");
+  }
+
+  const entitlement = await entitlementForPlan(subscription.planId);
+  if (!entitlement) {
+    throw new BillingError(403, "entitlement_missing", "Plan entitlement is missing.");
+  }
+
+  const period = periodForSubscription(subscription);
+  const [rollup] = await db
+    .select({ storageBytesUsed: usageRollups.storageBytesUsed })
+    .from(usageRollups)
+    .where(
+      and(
+        eq(usageRollups.workspaceId, user.workspaceId),
+        eq(usageRollups.periodStart, period.start),
+        eq(usageRollups.periodEnd, period.end),
+      ),
+    )
+    .limit(1);
+
+  const used = normalizeStorageBytes(rollup?.storageBytesUsed);
+  const requested = BigInt(bytes);
+  const limit = storageQuotaBytes(entitlement);
+  if (used + requested > limit) {
+    throw new BillingError(
+      402,
+      "storage_quota_exceeded",
+      "Storage quota reached for your plan. Upgrade or remove files to add more.",
+    );
+  }
+
+  await db
+    .insert(usageRollups)
+    .values({
+      workspaceId: user.workspaceId,
+      periodStart: period.start,
+      periodEnd: period.end,
+      storageBytesUsed: requested.toString(),
+    })
+    .onConflictDoUpdate({
+      target: [usageRollups.workspaceId, usageRollups.periodStart, usageRollups.periodEnd],
+      set: {
+        storageBytesUsed: sql`${usageRollups.storageBytesUsed} + ${requested.toString()}`,
+        updatedAt: new Date(),
+      },
+    });
+
+  return {
+    workspaceId: user.workspaceId,
+    bytes,
+    periodStart: period.start,
+    periodEnd: period.end,
+  };
+}
+
+export async function releaseStorageReservation(reservation: StorageReservation) {
+  if (!reservation) return;
+  await db
+    .update(usageRollups)
+    .set({
+      storageBytesUsed: sql`GREATEST(${usageRollups.storageBytesUsed} - ${reservation.bytes.toString()}, 0)`,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(usageRollups.workspaceId, reservation.workspaceId),
+        eq(usageRollups.periodStart, reservation.periodStart),
+        eq(usageRollups.periodEnd, reservation.periodEnd),
+      ),
+    );
 }
 
 export async function completeUsageReservation(

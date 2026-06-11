@@ -1,5 +1,6 @@
 import { uploadPublicFile, persistRemoteImage } from "@/lib/storage";
 import type { ImageProviderConfig } from "@/lib/mediaProviders";
+import type { SessionUser } from "@/lib/auth";
 
 type ImageGenerationResult = {
   outputUrl: string;
@@ -20,6 +21,7 @@ export async function generateOpenAICompatibleImage(input: {
   prompt: string;
   aspectRatio?: string;
   resolution?: string;
+  user?: SessionUser | null;
 }): Promise<ImageGenerationResult> {
   const res = await fetch(`${input.config.baseUrl}/images/generations`, {
     method: "POST",
@@ -50,12 +52,12 @@ export async function generateOpenAICompatibleImage(input: {
 
   if (first.b64_json) {
     const bytes = Buffer.from(first.b64_json, "base64");
-    const outputUrl = await uploadPublicFile(bytes, `image-${Date.now()}.png`, "image/png", "image");
+    const outputUrl = await uploadPublicFile(bytes, `image-${Date.now()}.png`, "image/png", "image", { user: input.user });
     return { outputUrl, downloadUrl: outputUrl, providerResponseId: json.id ?? null };
   }
 
   if (first.url) {
-    const stored = await persistRemoteImage(first.url, `image-${Date.now()}`);
+    const stored = await persistRemoteImage(first.url, `image-${Date.now()}`, { user: input.user });
     const outputUrl = stored || first.url;
     return { outputUrl, downloadUrl: outputUrl, providerResponseId: json.id ?? null };
   }

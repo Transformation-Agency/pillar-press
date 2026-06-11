@@ -14,6 +14,7 @@ describe("hosted usage reservations", () => {
       entitlementAllowsManagedProvider,
       periodForSubscription,
       quotaErrorMessage,
+      storageQuotaBytes,
       subscriptionAllowsUsage,
       usageDimensionForTask,
     } = await import("@/lib/billing/usage");
@@ -29,6 +30,7 @@ describe("hosted usage reservations", () => {
     expect(entitlementAllowsManagedProvider({ allowedProviders: ["managed", "byok"], canUseManagedKeys: true } as any)).toBe(true);
     expect(entitlementAllowsManagedProvider({ allowedProviders: ["byok"], canUseManagedKeys: true } as any)).toBe(false);
     expect(entitlementAllowsManagedProvider({ allowedProviders: ["managed"], canUseManagedKeys: false } as any)).toBe(false);
+    expect(storageQuotaBytes({ storageQuotaGb: 2 } as any)).toBe(2n * 1024n * 1024n * 1024n);
     expect(billingAccessForSubscription(null)).toMatchObject({ allowed: false, code: "subscription_required" });
     expect(billingAccessForSubscription({
       status: "trialing",
@@ -285,6 +287,147 @@ describe("hosted usage reservations", () => {
       estimatedCredits: 1,
     })).rejects.toMatchObject({ status: 402, code: "managed_provider_not_enabled" });
     expect(insert).not.toHaveBeenCalled();
+  });
+
+  it("blocks hosted storage before incrementing rollups when quota is exceeded", async () => {
+    class MockBillingError extends Error {
+      status: number;
+      code: string;
+      constructor(status: number, code: string, message: string) {
+        super(message);
+        this.status = status;
+        this.code = code;
+      }
+    }
+    const insert = vi.fn();
+    const entitlement = {
+      planId: "trial",
+      storageQuotaGb: 1,
+    };
+    const subscription = {
+      workspaceId: "workspace_1",
+      planId: "trial",
+      status: "trialing",
+      trialStart: new Date("2026-06-01T00:00:00.000Z"),
+      trialEnd: new Date("2099-06-08T00:00:00.000Z"),
+      currentPeriodStart: null,
+      currentPeriodEnd: null,
+    };
+    const almostFull = (1024n * 1024n * 1024n - 10n).toString();
+    const select = vi
+      .fn()
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            limit: vi.fn(async () => [entitlement]),
+          }),
+        }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            limit: vi.fn(async () => [{ storageBytesUsed: almostFull }]),
+          }),
+        }),
+      });
+
+    vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => false }));
+    vi.doMock("@/lib/auth", () => ({ getOrCreateWorkspace: vi.fn() }));
+    vi.doMock("@/lib/billing/stripe", () => ({
+      BillingError: MockBillingError,
+      getLatestSubscription: vi.fn(async () => subscription),
+      getOrCreateTrialSubscription: vi.fn(),
+    }));
+    vi.doMock("@/lib/db", async () => {
+      const actual = await vi.importActual<any>("@/lib/db");
+      return { ...actual, db: { select, insert } };
+    });
+
+    const { reserveStorageBytes } = await import("@/lib/billing/usage");
+
+    await expect(reserveStorageBytes({
+      user: { id: "user_1", workspaceId: "workspace_1", role: "author" },
+      bytes: 20,
+      feature: "storage.image",
+    })).rejects.toMatchObject({ status: 402, code: "storage_quota_exceeded" });
+    expect(insert).not.toHaveBeenCalled();
+  });
+
+  it("increments and releases hosted storage reservations", async () => {
+    const entitlement = {
+      planId: "trial",
+      storageQuotaGb: 1,
+    };
+    const subscription = {
+      workspaceId: "workspace_1",
+      planId: "trial",
+      status: "trialing",
+      trialStart: new Date("2026-06-01T00:00:00.000Z"),
+      trialEnd: new Date("2099-06-08T00:00:00.000Z"),
+      currentPeriodStart: null,
+      currentPeriodEnd: null,
+    };
+    const updateWhere = vi.fn(async () => undefined);
+    const updateSet = vi.fn(() => ({ where: updateWhere }));
+    const update = vi.fn(() => ({ set: updateSet }));
+    const onConflictDoUpdate = vi.fn(async () => undefined);
+    const values = vi.fn(() => ({ onConflictDoUpdate }));
+    const insert = vi.fn(() => ({ values }));
+    const select = vi
+      .fn()
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            limit: vi.fn(async () => [entitlement]),
+          }),
+        }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            limit: vi.fn(async () => [{ storageBytesUsed: "100" }]),
+          }),
+        }),
+      });
+
+    vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => false }));
+    vi.doMock("@/lib/auth", () => ({ getOrCreateWorkspace: vi.fn() }));
+    vi.doMock("@/lib/billing/stripe", () => ({
+      BillingError: class BillingError extends Error {
+        status: number;
+        code: string;
+        constructor(status: number, code: string, message: string) {
+          super(message);
+          this.status = status;
+          this.code = code;
+        }
+      },
+      getLatestSubscription: vi.fn(async () => subscription),
+      getOrCreateTrialSubscription: vi.fn(),
+    }));
+    vi.doMock("@/lib/db", async () => {
+      const actual = await vi.importActual<any>("@/lib/db");
+      return { ...actual, db: { select, insert, update } };
+    });
+
+    const { reserveStorageBytes, releaseStorageReservation } = await import("@/lib/billing/usage");
+
+    const reservation = await reserveStorageBytes({
+      user: { id: "user_1", workspaceId: "workspace_1", role: "author" },
+      bytes: 512,
+      feature: "storage.image",
+    });
+    expect(reservation).toMatchObject({ workspaceId: "workspace_1", bytes: 512 });
+    expect(values).toHaveBeenCalledWith(expect.objectContaining({
+      workspaceId: "workspace_1",
+      storageBytesUsed: "512",
+    }));
+    expect(onConflictDoUpdate).toHaveBeenCalled();
+
+    await releaseStorageReservation(reservation);
+    expect(update).toHaveBeenCalled();
+    expect(updateSet).toHaveBeenCalledWith(expect.objectContaining({ updatedAt: expect.any(Date) }));
+    expect(updateWhere).toHaveBeenCalled();
   });
 });
 

@@ -3,13 +3,15 @@ import { requireUser } from "@/lib/auth";
 import { createAsset, uploadAsset } from "@/lib/hedra";
 import { validateUpload, sanitizeFilename } from "@/lib/validation";
 import { toErrorResponse } from "@/lib/errors";
+import { releaseStorageReservation, reserveStorageBytes, type StorageReservation } from "@/lib/billing/usage";
 
 // POST /api/hedra/assets   (multipart/form-data: file, kind=image|audio)
 // Validates type/size, registers a Hedra asset, uploads the bytes, returns the
 // asset id for use as a start frame / audio track in /generate.
 export async function POST(req: Request) {
+  let storageReservation: StorageReservation = null;
   try {
-    await requireUser();
+    const user = await requireUser();
     const form = await req.formData();
     const file = form.get("file");
     const kind = (form.get("kind") as string) === "audio" ? "audio" : "image";
@@ -19,10 +21,16 @@ export async function POST(req: Request) {
     if (err) return NextResponse.json({ error: err, code: "validation" }, { status: 422 });
 
     const name = sanitizeFilename(file.name);
+    storageReservation = await reserveStorageBytes({
+      user,
+      bytes: file.size,
+      feature: `storage.hedra_asset.${kind}`,
+    });
     const asset = await createAsset({ name, type: kind });
     const uploaded = await uploadAsset(asset.id, file, name);
     return NextResponse.json({ asset: uploaded }, { status: 201 });
   } catch (err) {
+    await releaseStorageReservation(storageReservation);
     return toErrorResponse(err);
   }
 }

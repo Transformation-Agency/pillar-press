@@ -17,9 +17,9 @@ Do this as a staged migration, not a rewrite.
    webhook audit events are in place.
 4. Stage 3: entitlement checks, usage reservations, and quota enforcement.
    **Started:** hosted-only usage reservation helpers now enforce active/trial
-   subscription status, expired trial dates, usage limits, and campaign-count
-   limits, plus managed-provider, export, and Drive feature access, while
-   desktop/local-first bypasses them.
+   subscription status, expired trial dates, usage limits, storage quota,
+   campaign-count limits, plus managed-provider, export, and Drive feature
+   access, while desktop/local-first bypasses them.
 5. Stage 4: trial onboarding and upgrade UI. **Started:** hosted users now
    have a Billing panel showing trial/subscription status, period usage, paid
    plan upgrades, the Stripe customer portal, and an automatic upgrade prompt
@@ -393,6 +393,11 @@ Stage 3 is complete only when:
 - Managed provider access honors plan entitlements. **Started:** hosted usage
   reservations require `can_use_managed_keys` and `"managed"` in
   `allowed_providers` before server-managed AI/media/research work begins.
+- Storage quota gates hosted persisted media. **Started:** Supabase public
+  storage uploads that receive an authenticated hosted user reserve bytes
+  against `storage_quota_gb`, release the reservation on failed upload, and
+  report storage usage in the Billing panel; desktop/local-first file writes
+  bypass hosted storage billing.
 - Usage rollups reflect the ledger.
 - Provider failure records failed usage without double-charging. **Started:**
   the first gated routes mark reserved usage as failed when downstream work

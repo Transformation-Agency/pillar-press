@@ -59,7 +59,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     // on any failure we keep the signed URL.
     if (terminal && s.status === "completed" && outUrl) {
       if (job.type === "image") {
-        const permanent = await persistRemoteImage(outUrl, job.id);
+        const permanent = await persistRemoteImage(outUrl, job.id, { user });
         if (permanent) {
           outUrl = permanent;
           dl = permanent;
@@ -68,13 +68,13 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       } else {
         // video / avatar_video: persist the clip, and the poster (a signed
         // image URL that also expires) so it keeps showing before playback.
-        const permanent = await persistRemoteVideo(outUrl, job.id);
+        const permanent = await persistRemoteVideo(outUrl, job.id, { user });
         if (permanent) {
           outUrl = permanent;
           dl = permanent;
         }
         if (thumb) {
-          const poster = await persistRemoteImage(thumb, `${job.id}-poster`);
+          const poster = await persistRemoteImage(thumb, `${job.id}-poster`, { user });
           if (poster) thumb = poster;
         }
       }

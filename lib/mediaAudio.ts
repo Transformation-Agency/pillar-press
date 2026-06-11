@@ -1,5 +1,6 @@
 import { uploadPublicAudio } from "@/lib/storage";
 import type { AudioProviderConfig } from "@/lib/mediaProviders";
+import type { SessionUser } from "@/lib/auth";
 
 const OPENAI_VOICES = new Set(["alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer", "verse"]);
 
@@ -8,6 +9,7 @@ export async function generateOpenAICompatibleSpeech(input: {
   model: string;
   text: string;
   voice?: string;
+  user?: SessionUser | null;
 }) {
   const voice = input.voice && OPENAI_VOICES.has(input.voice) ? input.voice : "alloy";
   const res = await fetch(`${input.config.baseUrl}/audio/speech`, {
@@ -29,6 +31,6 @@ export async function generateOpenAICompatibleSpeech(input: {
     throw new Error(`Audio provider request failed (${res.status}).`);
   }
   const bytes = Buffer.from(await res.arrayBuffer());
-  const outputUrl = await uploadPublicAudio(bytes, `voiceover-${Date.now()}.mp3`);
+  const outputUrl = await uploadPublicAudio(bytes, `voiceover-${Date.now()}.mp3`, { user: input.user });
   return { outputUrl, downloadUrl: outputUrl, voice };
 }

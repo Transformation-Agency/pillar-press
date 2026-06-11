@@ -142,6 +142,7 @@
       "drive_not_enabled",
       "managed_provider_not_enabled",
       "export_not_enabled",
+      "storage_quota_exceeded",
     ];
     if (data && billingCodes.includes(data.code)) {
       window.dispatchEvent(new CustomEvent("kingspress:billing-action-required", {

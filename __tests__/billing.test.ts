@@ -185,6 +185,7 @@ describe("hosted billing status API", () => {
         llm: { used: 4, limit: 250, remaining: 246 },
         gather: { used: 1, limit: 10, remaining: 9 },
         media: { used: 0, limit: 5, remaining: 5 },
+        storage: { used: 0, limit: 1073741824, remaining: 1073741824 },
       },
     };
 

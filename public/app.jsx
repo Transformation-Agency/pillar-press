@@ -1067,7 +1067,14 @@ function BillingPanel({ open, onClose, billing, notice }) {
     }
   };
   const pct = (used, limit) => !limit ? 0 : Math.min(100, Math.round((used / limit) * 100));
-  const dimensionLabel = { llm: "AI credits", gather: "Gather runs", media: "Media generations" };
+  const dimensionLabel = { llm: "AI credits", gather: "Gather runs", media: "Media generations", storage: "Storage" };
+  const formatUsageValue = (key, value) => {
+    if (key !== "storage") return value;
+    const gb = value / (1024 * 1024 * 1024);
+    if (gb >= 1) return gb.toFixed(gb >= 10 ? 0 : 1) + " GB";
+    const mb = value / (1024 * 1024);
+    return Math.max(0, Math.round(mb)) + " MB";
+  };
   const noticeTitle =
     accessNotice && accessNotice.code === "subscription_required" ? "Subscription required" :
     accessNotice && accessNotice.code === "trial_expired" ? "Trial ended" :
@@ -1076,6 +1083,7 @@ function BillingPanel({ open, onClose, billing, notice }) {
     accessNotice && accessNotice.code === "drive_not_enabled" ? "Drive requires an upgrade" :
     accessNotice && accessNotice.code === "managed_provider_not_enabled" ? "Managed AI requires an upgrade" :
     accessNotice && accessNotice.code === "export_not_enabled" ? "Exports require an upgrade" :
+    accessNotice && accessNotice.code === "storage_quota_exceeded" ? "Storage limit reached" :
     "Usage limit reached";
 
   const refresh = async () => {
@@ -1144,14 +1152,14 @@ function BillingPanel({ open, onClose, billing, notice }) {
                 </span>
               </div>
               <div style={{ display: "grid", gap: 10 }}>
-                {["llm", "gather", "media"].map((key) => {
+                {["llm", "gather", "media", "storage"].map((key) => {
                   const row = dims[key] || { used: 0, limit: 0, remaining: 0 };
                   const percent = pct(row.used, row.limit);
                   return (
                     <div key={key} style={{ display: "grid", gap: 5 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 13.5 }}>
                         <span>{dimensionLabel[key]}</span>
-                        <span className="muted">{row.used} / {row.limit}</span>
+                        <span className="muted">{formatUsageValue(key, row.used)} / {formatUsageValue(key, row.limit)}</span>
                       </div>
                       <div style={{ height: 8, borderRadius: 999, background: "var(--paper)", border: "1px solid var(--hair)", overflow: "hidden" }}>
                         <div style={{ height: "100%", width: percent + "%", background: "var(--accent)", borderRadius: 999 }} />

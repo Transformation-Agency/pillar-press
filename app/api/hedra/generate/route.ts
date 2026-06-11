@@ -107,6 +107,7 @@ export async function POST(req: Request) {
           model: body.modelId,
           text: script,
           voice: body.voiceId,
+          user,
         });
         audioUrl = result.outputUrl;
         audioVoice = result.voice;
@@ -118,7 +119,7 @@ export async function POST(req: Request) {
         // for small clips when storage isn't configured (e.g. local dev).
         const buf = await textToSpeechLong({ text: script, voiceId: body.voiceId });
         try {
-          audioUrl = await uploadPublicAudio(buf, `voiceover-${Date.now()}.mp3`);
+          audioUrl = await uploadPublicAudio(buf, `voiceover-${Date.now()}.mp3`, { user });
         } catch (e) {
           if (buf.length <= 4_000_000) audioUrl = `data:audio/mpeg;base64,${buf.toString("base64")}`;
           else throw e;
@@ -184,6 +185,7 @@ export async function POST(req: Request) {
         prompt,
         aspectRatio: body.aspectRatio,
         resolution: body.resolution,
+        user,
       });
 
       const jobValues = {
