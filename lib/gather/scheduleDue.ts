@@ -1,4 +1,11 @@
-import type { LocalGatherSchedule } from "@/lib/local/database";
+type ScheduleDueInput = {
+  cadence: "once" | "daily" | "weekly";
+  enabled: boolean;
+  runAt?: string | null;
+  timeOfDay?: string | null;
+  dayOfWeek?: number | null;
+  lastRunAt?: string | null;
+};
 
 function sameLocalDay(a: string | null | undefined, b: Date): boolean {
   if (!a) return false;
@@ -13,7 +20,7 @@ function timeToday(time: string | null | undefined, now: Date): Date {
   return d;
 }
 
-export function isGatherScheduleDue(schedule: LocalGatherSchedule, now = new Date()): boolean {
+export function isGatherScheduleDue(schedule: ScheduleDueInput, now = new Date()): boolean {
   if (!schedule.enabled) return false;
   if (schedule.cadence === "once") {
     return !!schedule.runAt && new Date(schedule.runAt).getTime() <= now.getTime() && !schedule.lastRunAt;

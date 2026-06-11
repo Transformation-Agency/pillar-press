@@ -340,12 +340,10 @@ Stage 1 is complete only when:
   campaign/workspace scope helper plus regression tests now guard the hosted
   contract; Gather sources/items/runs and media jobs/prompt/status/export
   routes now prove campaign or media workspace scope before reads/writes.
+- Hosted Gather schedules are tenant-scoped. **Started:** schedules now persist
+  to hosted Postgres outside local-first mode, and `run-due` executes only the
+  authenticated caller's enabled schedules inside their workspace.
 - The app can still run desktop/local-first without touching hosted auth.
-
-Known Stage 1 follow-up:
-- Gather schedules still use the desktop/local scheduler store. Hosted SaaS
-  needs a Postgres-backed schedule table or the hosted schedule endpoints should
-  remain disabled until Stage 5 background jobs are introduced.
 
 ## Stage 2 Success Gate
 
@@ -367,7 +365,7 @@ Stage 3 is complete only when:
 
 ## Development Order
 
-1. Apply `0006_saas_foundation.sql` to hosted Postgres.
+1. Apply `0006_saas_foundation.sql` and `0007_gather_schedules.sql` to hosted Postgres.
 2. Stage 1: implement hosted Supabase Auth and workspace creation.
 3. Stage 1: add tenant isolation tests for campaigns, pieces, references,
    Gather, media jobs, settings, and billing tables.

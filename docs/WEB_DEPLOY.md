@@ -65,6 +65,8 @@ Postgres database before using the app:
 ```bash
 npm run db:migrate
 psql "$DATABASE_URL" -f db/migrations/0005_gather_summary.sql
+psql "$DATABASE_URL" -f db/migrations/0006_saas_foundation.sql
+psql "$DATABASE_URL" -f db/migrations/0007_gather_schedules.sql
 ```
 
 ## Hetzner Or Any VPS
@@ -78,6 +80,8 @@ npm install
 cp .env.hosted.example .env
 npm run db:migrate
 psql "$DATABASE_URL" -f db/migrations/0005_gather_summary.sql
+psql "$DATABASE_URL" -f db/migrations/0006_saas_foundation.sql
+psql "$DATABASE_URL" -f db/migrations/0007_gather_schedules.sql
 npm run web:build
 PORT=3000 npm run web:start
 ```

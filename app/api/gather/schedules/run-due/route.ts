@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
+import { and, asc, eq } from "drizzle-orm";
 import { requireUser } from "@/lib/auth";
+import { db } from "@/lib/db";
+import { gatherSchedules } from "@/db/gather-schema";
 import {
   listEnabledLocalGatherSchedules,
   markLocalGatherScheduleRun,
@@ -8,6 +11,7 @@ import { isLocalFirstMode } from "@/lib/local/mode";
 import { runGatherForCampaign } from "@/lib/gather/runCampaign";
 import { isGatherScheduleDue } from "@/lib/gather/scheduleDue";
 import { toErrorResponse } from "@/lib/errors";
+import { tenantNotFound } from "@/lib/tenant";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -16,26 +20,36 @@ let running = false;
 
 export async function POST() {
   try {
-    if (!isLocalFirstMode()) {
-      return NextResponse.json({ error: "Scheduled Gather runs are local-first only.", code: "local_first" }, { status: 400 });
-    }
-
     const user = await requireUser();
+    if (!isLocalFirstMode() && !user.workspaceId) return tenantNotFound();
     if (running) return NextResponse.json({ ran: 0, skipped: true, results: [] });
 
     running = true;
     try {
-      const due = listEnabledLocalGatherSchedules(user.id).filter((schedule) => isGatherScheduleDue(schedule));
+      const schedules = isLocalFirstMode()
+        ? listEnabledLocalGatherSchedules(user.id)
+        : await db
+          .select()
+          .from(gatherSchedules)
+          .where(
+            and(
+              eq(gatherSchedules.workspaceId, user.workspaceId!),
+              eq(gatherSchedules.userId, user.id),
+              eq(gatherSchedules.enabled, true),
+            ),
+          )
+          .orderBy(asc(gatherSchedules.createdAt));
+      const due = schedules.filter((schedule) => isGatherScheduleDue(schedule));
       const results = [];
       for (const schedule of due) {
         try {
           const result = await runGatherForCampaign(schedule.campaignId, user);
           if (!result) {
-            markLocalGatherScheduleRun(schedule.id, "not_found", user.id, schedule.cadence === "once");
+            await markScheduleRun(schedule.id, "not_found", user, schedule.cadence === "once");
             results.push({ id: schedule.id, campaignId: schedule.campaignId, status: "not_found" });
             continue;
           }
-          markLocalGatherScheduleRun(schedule.id, "ok", user.id, schedule.cadence === "once");
+          await markScheduleRun(schedule.id, "ok", user, schedule.cadence === "once");
           results.push({
             id: schedule.id,
             campaignId: schedule.campaignId,
@@ -45,7 +59,7 @@ export async function POST() {
           });
         } catch (err) {
           const message = err instanceof Error ? err.message : "failed";
-          markLocalGatherScheduleRun(schedule.id, message.slice(0, 160), user.id, schedule.cadence === "once");
+          await markScheduleRun(schedule.id, message.slice(0, 160), user, schedule.cadence === "once");
           results.push({ id: schedule.id, campaignId: schedule.campaignId, status: "failed", error: message });
         }
       }
@@ -57,4 +71,33 @@ export async function POST() {
     running = false;
     return toErrorResponse(err);
   }
+}
+
+async function markScheduleRun(
+  id: string,
+  status: string,
+  user: { id: string; workspaceId?: string | null },
+  disable: boolean,
+) {
+  if (isLocalFirstMode()) {
+    markLocalGatherScheduleRun(id, status, user.id, disable);
+    return;
+  }
+  if (!user.workspaceId) return;
+  const set: Partial<typeof gatherSchedules.$inferInsert> = {
+    lastRunAt: new Date().toISOString(),
+    lastStatus: status,
+    updatedAt: new Date(),
+  };
+  if (disable) set.enabled = false;
+  await db
+    .update(gatherSchedules)
+    .set(set)
+    .where(
+      and(
+        eq(gatherSchedules.id, id),
+        eq(gatherSchedules.userId, user.id),
+        eq(gatherSchedules.workspaceId, user.workspaceId),
+      ),
+    );
 }
