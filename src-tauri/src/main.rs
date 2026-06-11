@@ -3,24 +3,29 @@ use aes_gcm::{
     Aes256Gcm, Nonce,
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use hound::{SampleFormat as WavSampleFormat, WavSpec, WavWriter};
 use rand::RngCore;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
-    fs,
+    fs::{self, File},
+    io::BufWriter,
     path::PathBuf,
     process::{Child, Command},
-    sync::Mutex,
-    time::{SystemTime, UNIX_EPOCH},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+    thread::{self, JoinHandle},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 #[cfg(not(debug_assertions))]
 use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream},
     process::Stdio,
-    thread,
-    time::Duration,
 };
 use tauri::{
     menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu},
@@ -35,7 +40,7 @@ const MENU_START_OLLAMA: &str = "start-ollama";
 const MENU_OPEN_OLLAMA_DOWNLOAD: &str = "open-ollama-download";
 const MENU_RELOAD: &str = "reload-window";
 const SECRET_PREFIX: &str = "kpenc:v1:";
-const KEYCHAIN_SERVICE: &str = "Kings Press Desktop Settings";
+const KEYCHAIN_SERVICE: &str = "Pillar Press Desktop Settings";
 const KEYCHAIN_ACCOUNT: &str = "llm-settings";
 
 #[derive(Serialize)]
@@ -133,9 +138,15 @@ struct DesktopServer {
     child: Mutex<Option<Child>>,
     ollama_child: Mutex<Option<Child>>,
     speech_child: Mutex<Option<Child>>,
+    voice_session: Mutex<Option<VoiceSession>>,
     port: Mutex<Option<u16>>,
     #[cfg(not(debug_assertions))]
     scheduler_started: Mutex<bool>,
+}
+
+struct VoiceSession {
+    stop: Arc<AtomicBool>,
+    handle: Option<JoinHandle<()>>,
 }
 
 impl DesktopServer {
@@ -144,6 +155,7 @@ impl DesktopServer {
             child: Mutex::new(None),
             ollama_child: Mutex::new(None),
             speech_child: Mutex::new(None),
+            voice_session: Mutex::new(None),
             port: Mutex::new(None),
             #[cfg(not(debug_assertions))]
             scheduler_started: Mutex::new(false),
@@ -166,6 +178,14 @@ impl Drop for DesktopServer {
         if let Ok(child_slot) = self.speech_child.get_mut() {
             if let Some(child) = child_slot {
                 let _ = child.kill();
+            }
+        }
+        if let Ok(session_slot) = self.voice_session.get_mut() {
+            if let Some(mut session) = session_slot.take() {
+                session.stop.store(true, Ordering::SeqCst);
+                if let Some(handle) = session.handle.take() {
+                    let _ = handle.join();
+                }
             }
         }
     }
@@ -361,7 +381,7 @@ fn encrypt_setting_secret(
 }
 
 fn database_path(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(app_data_dir(app)?.join("kings-press.sqlite3"))
+    Ok(app_data_dir(app)?.join("pillar-press.sqlite3"))
 }
 
 fn backups_dir(app: &AppHandle) -> Result<PathBuf, String> {
@@ -381,7 +401,7 @@ fn disable_macos_window_restoration() {
     let _ = Command::new("defaults")
         .args([
             "write",
-            "com.kingspress.editorialdesk",
+            "com.pillar.press",
             "NSQuitAlwaysKeepsWindows",
             "-bool",
             "false",
@@ -394,7 +414,7 @@ fn disable_macos_window_restoration() {
         let saved_state = home
             .join("Library")
             .join("Saved Application State")
-            .join("com.kingspress.editorialdesk.savedState");
+            .join("com.pillar.press.savedState");
         let _ = fs::remove_dir_all(saved_state);
     }
 }
@@ -613,10 +633,10 @@ fn write_backup_manifest(
     has_storage: bool,
 ) -> Result<(), String> {
     let manifest = BackupManifest {
-        app: "King's Press Editorial Desk".into(),
+        app: "Pillar Press".into(),
         version: env!("CARGO_PKG_VERSION").into(),
         created_at_unix_ms,
-        database: "kings-press.sqlite3".into(),
+        database: "pillar-press.sqlite3".into(),
         settings: has_settings.then(|| "desktop-settings.json".into()),
         settings_secrets: if has_settings {
             "nulled"
@@ -638,12 +658,12 @@ fn write_backup_manifest(
 fn create_backup_at(app: &AppHandle) -> Result<PathBuf, String> {
     init_database_at(&database_path(app)?)?;
     let stamp = backup_stamp_ms()?;
-    let backup_dir = backups_dir(app)?.join(format!("kings-press-backup-{stamp}"));
+    let backup_dir = backups_dir(app)?.join(format!("pillar-press-backup-{stamp}"));
     fs::create_dir_all(&backup_dir).map_err(|e| e.to_string())?;
 
     let db = database_path(app)?;
     if db.exists() {
-        let backup_db = backup_dir.join("kings-press.sqlite3");
+        let backup_db = backup_dir.join("pillar-press.sqlite3");
         let conn = Connection::open(&db).map_err(|e| e.to_string())?;
         conn.execute("VACUUM INTO ?1", [backup_db.to_string_lossy().as_ref()])
             .map_err(|e| e.to_string())?;
@@ -662,9 +682,9 @@ fn create_backup_at(app: &AppHandle) -> Result<PathBuf, String> {
 
 fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let about = AboutMetadata {
-        name: Some("King's Press Editorial Desk".into()),
+        name: Some("Pillar Press".into()),
         version: Some(env!("CARGO_PKG_VERSION").into()),
-        comments: Some("Local-first editorial operations desk for King's Press.".into()),
+        comments: Some("Local-first content generation desk for Pillar Press.".into()),
         website: Some("https://ollama.com/download".into()),
         website_label: Some("Local model setup".into()),
         ..Default::default()
@@ -675,14 +695,10 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         &[
             &Submenu::with_items(
                 app,
-                "King's Press Editorial Desk",
+                "Pillar Press",
                 true,
                 &[
-                    &PredefinedMenuItem::about(
-                        app,
-                        Some("About King's Press Editorial Desk"),
-                        Some(about),
-                    )?,
+                    &PredefinedMenuItem::about(app, Some("About Pillar Press"), Some(about))?,
                     &PredefinedMenuItem::separator(app)?,
                     &MenuItem::with_id(
                         app,
@@ -785,7 +801,7 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_focus();
             }
-            let _ = app.emit("kingspress:show-model-setup", ());
+            let _ = app.emit("pillarpress:show-model-setup", ());
         }
         MENU_OPEN_DATA_DIR => {
             if let Ok(path) = app_data_dir(app) {
@@ -796,7 +812,7 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
             if let Ok(path) = create_backup_at(app) {
                 let _ = open_path(path.clone());
                 let _ = app.emit(
-                    "kingspress:backup-created",
+                    "pillarpress:backup-created",
                     BackupResult {
                         path: path.to_string_lossy().to_string(),
                     },
@@ -813,7 +829,7 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_focus();
             }
-            let _ = app.emit("kingspress:show-model-setup", ());
+            let _ = app.emit("pillarpress:show-model-setup", ());
         }
         MENU_OPEN_OLLAMA_DOWNLOAD => {
             let _ = open_url("https://ollama.com/download");
@@ -954,12 +970,12 @@ fn start_packaged_server(app: &AppHandle) -> Result<Option<String>, String> {
 
         let child = command.spawn().map_err(|e| {
             append_startup_log(&data_dir, &format!("server spawn failed: {e}"));
-            format!("Could not start local King’s Press server: {e}")
+            format!("Could not start local Pillar Press server: {e}")
         })?;
         append_startup_log(&data_dir, &format!("server spawned on port {port}"));
         if !wait_for_server(port) {
             append_startup_log(&data_dir, "server wait timed out");
-            return Err("Timed out waiting for the local King’s Press server to start.".into());
+            return Err("Timed out waiting for the local Pillar Press server to start.".into());
         }
         append_startup_log(&data_dir, "server ready");
 
@@ -1053,6 +1069,15 @@ fn open_ollama_download() -> Result<(), String> {
 }
 
 #[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+    let parsed = Url::parse(&url).map_err(|_| "Invalid URL.".to_string())?;
+    match parsed.scheme() {
+        "http" | "https" => open_url(parsed.as_str()),
+        _ => Err("Only http and https links can be opened.".to_string()),
+    }
+}
+
+#[tauri::command]
 fn list_ollama_models() -> Result<Vec<String>, String> {
     let out = ollama_command()
         .arg("list")
@@ -1121,6 +1146,7 @@ fn save_model_choice(app: AppHandle, model: String) -> Result<(), String> {
 fn save_llm_settings(app: AppHandle, settings: DesktopSettings) -> Result<(), String> {
     let provider = settings.provider.as_deref().unwrap_or("ollama").trim();
     let model = settings.model.as_deref().unwrap_or("").trim();
+    let existing = read_desktop_settings(&app).ok();
     let mut profiles = Vec::new();
     for p in settings.profiles.unwrap_or_default() {
         let id = p.id.trim().to_string();
@@ -1129,6 +1155,30 @@ fn save_llm_settings(app: AppHandle, settings: DesktopSettings) -> Result<(), St
         if id.is_empty() || provider.is_empty() || model.is_empty() {
             continue;
         }
+        let incoming_key = p
+            .api_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_string);
+        let existing_key = existing
+            .as_ref()
+            .and_then(|s| s.profiles.as_ref())
+            .and_then(|items| {
+                items
+                    .iter()
+                    .find(|item| {
+                        item.id == id
+                            || (item.provider == provider
+                                && item.model == model
+                                && item.base_url.as_deref().unwrap_or("")
+                                    == p.base_url.as_deref().unwrap_or(""))
+                            || (item.provider == provider
+                                && item.base_url.as_deref().unwrap_or("")
+                                    == p.base_url.as_deref().unwrap_or(""))
+                    })
+                    .and_then(|item| item.api_key.clone())
+            });
         profiles.push(DesktopLLMProfile {
             id,
             label: p
@@ -1145,14 +1195,10 @@ fn save_llm_settings(app: AppHandle, settings: DesktopSettings) -> Result<(), St
                 .map(str::trim)
                 .filter(|v| !v.is_empty())
                 .map(str::to_string),
-            api_key: encrypt_setting_secret(
-                &app,
-                p.api_key
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|v| !v.is_empty())
-                    .map(str::to_string),
-            )?,
+            api_key: match incoming_key {
+                Some(key) => encrypt_setting_secret(&app, Some(key))?,
+                None => existing_key,
+            },
         });
     }
     if model.is_empty() {
@@ -1180,15 +1226,19 @@ fn save_llm_settings(app: AppHandle, settings: DesktopSettings) -> Result<(), St
             .map(str::trim)
             .filter(|v| !v.is_empty())
             .map(str::to_string),
-        api_key: encrypt_setting_secret(
-            &app,
-            settings
-                .api_key
-                .as_deref()
-                .map(str::trim)
-                .filter(|v| !v.is_empty())
-                .map(str::to_string),
-        )?,
+        api_key: match settings
+            .api_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_string)
+        {
+            Some(key) => encrypt_setting_secret(&app, Some(key))?,
+            None => existing
+                .as_ref()
+                .filter(|s| s.provider.as_deref().unwrap_or("") == provider)
+                .and_then(|s| s.api_key.clone()),
+        },
         profiles: if profiles.is_empty() {
             None
         } else {
@@ -1209,9 +1259,7 @@ fn save_llm_settings(app: AppHandle, settings: DesktopSettings) -> Result<(), St
                 })
                 .collect()
         }),
-        media_providers: read_desktop_settings(&app)
-            .ok()
-            .and_then(|s| s.media_providers),
+        media_providers: existing.and_then(|s| s.media_providers),
     };
     let json = serde_json::to_string_pretty(&cleaned).map_err(|e| e.to_string())?;
     fs::write(settings_path(&app)?, json).map_err(|e| e.to_string())
@@ -1295,15 +1343,260 @@ fn desktop_runtime_status(app: AppHandle) -> Result<DesktopRuntimeStatus, String
     })
 }
 
+fn whisper_resource_path(
+    app: &AppHandle,
+    env_key: &str,
+    resource_parts: &[&str],
+) -> Result<PathBuf, String> {
+    if let Some(path) = std::env::var_os(env_key).map(PathBuf::from) {
+        if path.exists() {
+            return Ok(path);
+        }
+        return Err(format!(
+            "{env_key} points to a missing path: {}",
+            path.to_string_lossy()
+        ));
+    }
+
+    let root = resource_path(app, "whisper").ok_or_else(|| {
+        "Bundled Whisper resources were not found. Run scripts/setup-whisper-sidecar.ts or set PILLAR_PRESS_WHISPER_BIN and PILLAR_PRESS_WHISPER_MODEL.".to_string()
+    })?;
+    let path = resource_parts
+        .iter()
+        .fold(root, |current, part| current.join(part));
+    if path.exists() {
+        Ok(path)
+    } else {
+        Err(format!(
+            "Bundled Whisper resource is missing at {}.",
+            path.to_string_lossy()
+        ))
+    }
+}
+
+fn whisper_bin_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let binary = if cfg!(windows) {
+        "whisper-cli.exe"
+    } else {
+        "whisper-cli"
+    };
+    whisper_resource_path(app, "PILLAR_PRESS_WHISPER_BIN", &["bin", binary])
+}
+
+fn whisper_model_path(app: &AppHandle) -> Result<PathBuf, String> {
+    whisper_resource_path(
+        app,
+        "PILLAR_PRESS_WHISPER_MODEL",
+        &["models", "ggml-tiny.en.bin"],
+    )
+}
+
+fn voice_capture_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = app_data_dir(app)?.join("voice-captures");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_millis();
+    Ok(dir.join(format!("utterance-{now}.wav")))
+}
+
+fn emit_voice_status(app: &AppHandle, status: &str, message: Option<String>) {
+    let mut payload = serde_json::json!({ "status": status });
+    if let Some(message) = message {
+        payload["message"] = serde_json::json!(message);
+    }
+    let _ = app.emit("voice:status", payload);
+}
+
+fn write_i16_sample(writer: &Arc<Mutex<Option<WavWriter<BufWriter<File>>>>>, sample: i16) {
+    if let Ok(mut guard) = writer.lock() {
+        if let Some(wav) = guard.as_mut() {
+            let _ = wav.write_sample(sample);
+        }
+    }
+}
+
+fn record_input_wav(
+    path: PathBuf,
+    stop: Arc<AtomicBool>,
+    max_duration: Duration,
+) -> Result<(), String> {
+    let host = cpal::default_host();
+    let device = host
+        .default_input_device()
+        .ok_or_else(|| "No microphone input device was found.".to_string())?;
+    let supported = device
+        .default_input_config()
+        .map_err(|e| format!("Could not read the default microphone format: {e}"))?;
+    let sample_rate = supported.sample_rate().0;
+    let channels = supported.channels();
+    let stream_config: cpal::StreamConfig = supported.clone().into();
+    let spec = WavSpec {
+        channels,
+        sample_rate,
+        bits_per_sample: 16,
+        sample_format: WavSampleFormat::Int,
+    };
+    let writer = Arc::new(Mutex::new(Some(
+        WavWriter::create(&path, spec)
+            .map_err(|e| format!("Could not create voice recording: {e}"))?,
+    )));
+    let err_fn = |err| eprintln!("voice input stream error: {err}");
+
+    let stream = match supported.sample_format() {
+        cpal::SampleFormat::F32 => {
+            let writer = Arc::clone(&writer);
+            device.build_input_stream(
+                &stream_config,
+                move |data: &[f32], _| {
+                    for sample in data {
+                        write_i16_sample(
+                            &writer,
+                            (sample.clamp(-1.0, 1.0) * i16::MAX as f32) as i16,
+                        );
+                    }
+                },
+                err_fn,
+                None,
+            )
+        }
+        cpal::SampleFormat::I16 => {
+            let writer = Arc::clone(&writer);
+            device.build_input_stream(
+                &stream_config,
+                move |data: &[i16], _| {
+                    for sample in data {
+                        write_i16_sample(&writer, *sample);
+                    }
+                },
+                err_fn,
+                None,
+            )
+        }
+        cpal::SampleFormat::U16 => {
+            let writer = Arc::clone(&writer);
+            device.build_input_stream(
+                &stream_config,
+                move |data: &[u16], _| {
+                    for sample in data {
+                        let centered =
+                            (*sample as i32 - 32768).clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+                        write_i16_sample(&writer, centered);
+                    }
+                },
+                err_fn,
+                None,
+            )
+        }
+        other => return Err(format!("Unsupported microphone sample format: {other:?}")),
+    }
+    .map_err(|e| format!("Could not start microphone recording: {e}"))?;
+
+    stream
+        .play()
+        .map_err(|e| format!("Could not activate microphone recording: {e}"))?;
+    let start = SystemTime::now();
+    while !stop.load(Ordering::SeqCst) {
+        if start.elapsed().unwrap_or_default() >= max_duration {
+            break;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    drop(stream);
+    if let Ok(mut guard) = writer.lock() {
+        if let Some(wav) = guard.take() {
+            wav.finalize()
+                .map_err(|e| format!("Could not finalize voice recording: {e}"))?;
+        }
+    }
+    Ok(())
+}
+
+fn transcribe_with_whisper(
+    whisper_bin: PathBuf,
+    model: PathBuf,
+    wav_path: PathBuf,
+) -> Result<String, String> {
+    let output_base = wav_path.with_extension("whisper");
+    let output = Command::new(&whisper_bin)
+        .args([
+            "-m",
+            &model.to_string_lossy(),
+            "-f",
+            &wav_path.to_string_lossy(),
+            "-nt",
+            "-otxt",
+            "-of",
+            &output_base.to_string_lossy(),
+        ])
+        .output()
+        .map_err(|e| format!("Could not run Whisper transcription: {e}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            "Whisper transcription failed.".to_string()
+        } else {
+            stderr
+        });
+    }
+    let transcript_path = output_base.with_extension("txt");
+    let text = fs::read_to_string(&transcript_path)
+        .unwrap_or_else(|_| String::from_utf8_lossy(&output.stdout).to_string())
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with("whisper_"))
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim()
+        .to_string();
+    if text.is_empty() {
+        Err("Whisper did not return any speech. Try again closer to the microphone.".into())
+    } else {
+        Ok(text)
+    }
+}
+
 #[tauri::command]
 fn start_voice_session(app: AppHandle) -> Result<(), String> {
-    app.emit(
-        "voice:status",
-        serde_json::json!({
-            "status": "ready"
-        }),
-    )
-    .map_err(|e| e.to_string())?;
+    let whisper_bin = whisper_bin_path(&app)?;
+    let whisper_model = whisper_model_path(&app)?;
+    let capture_path = voice_capture_path(&app)?;
+    let server = app.state::<DesktopServer>();
+    let mut session_slot = server.voice_session.lock().map_err(|e| e.to_string())?;
+    if let Some(mut session) = session_slot.take() {
+        session.stop.store(true, Ordering::SeqCst);
+        if let Some(handle) = session.handle.take() {
+            let _ = handle.join();
+        }
+    }
+    let stop = Arc::new(AtomicBool::new(false));
+    let thread_stop = Arc::clone(&stop);
+    let thread_app = app.clone();
+    emit_voice_status(&app, "listening", None);
+    let handle = thread::spawn(move || {
+        let result = (|| {
+            record_input_wav(
+                capture_path.clone(),
+                Arc::clone(&thread_stop),
+                Duration::from_secs(6),
+            )?;
+            emit_voice_status(&thread_app, "transcribing", None);
+            transcribe_with_whisper(whisper_bin, whisper_model, capture_path)
+        })();
+        match result {
+            Ok(transcript) => {
+                let _ =
+                    thread_app.emit("stt:final", serde_json::json!({ "transcript": transcript }));
+                emit_voice_status(&thread_app, "ready", None);
+            }
+            Err(error) => emit_voice_status(&thread_app, "error", Some(error)),
+        }
+    });
+    *session_slot = Some(VoiceSession {
+        stop,
+        handle: Some(handle),
+    });
     Ok(())
 }
 
@@ -1341,8 +1634,25 @@ fn speak_text(app: AppHandle, args: SpeakTextArgs) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn stop_speaking(app: AppHandle) -> Result<(), String> {
+    let server = app.state::<DesktopServer>();
+    let mut speech_child = server.speech_child.lock().map_err(|e| e.to_string())?;
+    if let Some(child) = speech_child.as_mut() {
+        let _ = child.kill();
+    }
+    *speech_child = None;
+    Ok(())
+}
+
+#[tauri::command]
 fn stop_voice_session(app: AppHandle) -> Result<(), String> {
     let server = app.state::<DesktopServer>();
+    {
+        let mut session_slot = server.voice_session.lock().map_err(|e| e.to_string())?;
+        if let Some(session) = session_slot.take() {
+            session.stop.store(true, Ordering::SeqCst);
+        }
+    }
     let mut speech_child = server.speech_child.lock().map_err(|e| e.to_string())?;
     if let Some(child) = speech_child.as_mut() {
         let _ = child.kill();
@@ -1380,6 +1690,7 @@ fn main() {
             ollama_status,
             start_ollama_service,
             open_ollama_download,
+            open_external_url,
             list_ollama_models,
             pull_ollama_model,
             save_model_choice,
@@ -1391,10 +1702,11 @@ fn main() {
             desktop_runtime_status,
             start_voice_session,
             speak_text,
+            stop_speaking,
             stop_voice_session
         ])
         .run(tauri::generate_context!())
-        .expect("error while running King's Press Editorial Desk");
+        .expect("error while running Pillar Press");
 }
 
 #[cfg(test)]
@@ -1412,7 +1724,7 @@ mod tests {
             "apiKey": "sk-secret",
             "nested": {
                 "refreshToken": "refresh-secret",
-                "displayName": "King's Press"
+                "displayName": "Pillar Press"
             },
             "items": [
                 { "client_secret": "oauth-secret", "label": "drive" },
@@ -1427,7 +1739,7 @@ mod tests {
         assert_eq!(value["baseUrl"], "https://api.openai.com/v1");
         assert!(value["apiKey"].is_null());
         assert!(value["nested"]["refreshToken"].is_null());
-        assert_eq!(value["nested"]["displayName"], "King's Press");
+        assert_eq!(value["nested"]["displayName"], "Pillar Press");
         assert!(value["items"][0]["client_secret"].is_null());
         assert_eq!(value["items"][0]["label"], "drive");
         assert!(value["items"][1]["password"].is_null());
@@ -1437,7 +1749,7 @@ mod tests {
     #[test]
     fn writes_backup_manifest_with_redaction_metadata() {
         let dir =
-            std::env::temp_dir().join(format!("kings-press-backup-test-{}", std::process::id()));
+            std::env::temp_dir().join(format!("pillar-press-backup-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
 
@@ -1445,10 +1757,10 @@ mod tests {
         let text = fs::read_to_string(dir.join("backup-manifest.json")).unwrap();
         let manifest: serde_json::Value = serde_json::from_str(&text).unwrap();
 
-        assert_eq!(manifest["app"], "King's Press Editorial Desk");
+        assert_eq!(manifest["app"], "Pillar Press");
         assert_eq!(manifest["version"], env!("CARGO_PKG_VERSION"));
         assert_eq!(manifest["created_at_unix_ms"].as_u64(), Some(1234567890));
-        assert_eq!(manifest["database"], "kings-press.sqlite3");
+        assert_eq!(manifest["database"], "pillar-press.sqlite3");
         assert_eq!(manifest["settings"], "desktop-settings.json");
         assert_eq!(manifest["settings_secrets"], "nulled");
         assert_eq!(manifest["storage"], "storage/");

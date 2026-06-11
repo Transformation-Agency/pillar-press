@@ -1,10 +1,11 @@
 [[permission]]
 identifier = "desktop-setup"
-description = "Allows the main King’s Press window to manage local setup, model settings, backups, and desktop runtime status."
+description = "Allows the main Pillar Press window to manage local setup, model settings, backups, and desktop runtime status."
 commands.allow = [
   "ollama_status",
   "start_ollama_service",
   "open_ollama_download",
+  "open_external_url",
   "list_ollama_models",
   "pull_ollama_model",
   "save_model_choice",

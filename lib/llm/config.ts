@@ -1,5 +1,8 @@
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { createDecipheriv } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 import { LLMError } from "@/lib/llm/errors";
 import type { LLMCapabilities, LLMConfig, LLMProvider, LLMTask } from "@/lib/llm/types";
 
@@ -13,6 +16,8 @@ export const DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434";
 
 const PROVIDERS = new Set<LLMProvider>(["anthropic", "openai", "openai-compatible", "xai", "ollama", "gemini"]);
 const DESKTOP_SECRET_PREFIX = "kpenc:v1:";
+const DESKTOP_KEYCHAIN_SERVICE = "Pillar Press Desktop Settings";
+const DESKTOP_KEYCHAIN_ACCOUNT = "llm-settings";
 
 export const LLM_TASKS: readonly LLMTask[] = [
   "gather",
@@ -82,11 +87,71 @@ function trimBaseUrl(value: string | undefined): string | undefined {
   return trim(value)?.replace(/\/+$/, "");
 }
 
-function decryptDesktopSecret(value: string | undefined, env: Env): string | undefined {
+function validDesktopKey(value: string | undefined): string | undefined {
+  const clean = trim(value);
+  if (!clean) return undefined;
+  try {
+    return Buffer.from(clean, "base64").length === 32 ? clean : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function readLocalDesktopSettingsKey(settingsPath: string | undefined): string | undefined {
+  if (!settingsPath) return undefined;
+  try {
+    return validDesktopKey(readFileSync(join(dirname(settingsPath), "desktop-secrets.key"), "utf8"));
+  } catch {
+    return undefined;
+  }
+}
+
+function readMacKeychainDesktopSettingsKey(): string | undefined {
+  if (process.platform !== "darwin") return undefined;
+  try {
+    return validDesktopKey(execFileSync("security", [
+      "find-generic-password",
+      "-w",
+      "-s",
+      DESKTOP_KEYCHAIN_SERVICE,
+      "-a",
+      DESKTOP_KEYCHAIN_ACCOUNT,
+    ], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
+  } catch {
+    return undefined;
+  }
+}
+
+function desktopSettingsKey(env: Env, settingsPath: string | undefined): string | undefined {
+  return (
+    validDesktopKey(env.KINGS_PRESS_DESKTOP_SETTINGS_KEY) ||
+    readLocalDesktopSettingsKey(settingsPath) ||
+    readMacKeychainDesktopSettingsKey()
+  );
+}
+
+function desktopSettingsPath(env: Env): string | undefined {
+  const explicit = trim(env.KINGS_PRESS_LLM_SETTINGS_PATH);
+  if (explicit) return explicit;
+  if (
+    env.NODE_ENV === "test" ||
+    process.env.NODE_ENV === "test" ||
+    process.env.VITEST === "true" ||
+    env.KINGS_PRESS_DISABLE_DESKTOP_SETTINGS_DISCOVERY === "true"
+  ) {
+    return undefined;
+  }
+  if (process.platform === "darwin") {
+    return join(homedir(), "Library", "Application Support", "com.pillar.press", "desktop-settings.json");
+  }
+  return undefined;
+}
+
+function decryptDesktopSecret(value: string | undefined, env: Env, settingsPath?: string): string | undefined {
   const raw = trim(value);
   if (!raw) return undefined;
   if (!raw.startsWith(DESKTOP_SECRET_PREFIX)) return raw;
-  const keyText = trim(env.KINGS_PRESS_DESKTOP_SETTINGS_KEY);
+  const keyText = desktopSettingsKey(env, settingsPath);
   if (!keyText) return undefined;
   try {
     const payload = raw.slice(DESKTOP_SECRET_PREFIX.length);
@@ -120,7 +185,7 @@ function isLocalFirstEnv(env: Env): boolean {
 }
 
 function readDesktopLLMSettings(env: Env): DesktopLLMSettings | null {
-  const path = trim(env.KINGS_PRESS_LLM_SETTINGS_PATH);
+  const path = desktopSettingsPath(env);
   if (!path) return null;
   try {
     const parsed = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
@@ -129,7 +194,7 @@ function readDesktopLLMSettings(env: Env): DesktopLLMSettings | null {
       : undefined;
     const model = typeof parsed.model === "string" ? trim(parsed.model) : undefined;
     const baseUrl = typeof parsed.baseUrl === "string" ? trimBaseUrl(parsed.baseUrl) : undefined;
-    const apiKey = typeof parsed.apiKey === "string" ? decryptDesktopSecret(parsed.apiKey, env) : undefined;
+    const apiKey = typeof parsed.apiKey === "string" ? decryptDesktopSecret(parsed.apiKey, env, path) : undefined;
     const profiles = Array.isArray(parsed.profiles)
       ? parsed.profiles
           .map((p): DesktopLLMProfile | null => {
@@ -147,7 +212,7 @@ function readDesktopLLMSettings(env: Env): DesktopLLMSettings | null {
               provider: profileProvider,
               model: profileModel,
               baseUrl: typeof raw.baseUrl === "string" ? trimBaseUrl(raw.baseUrl) : undefined,
-              apiKey: typeof raw.apiKey === "string" ? decryptDesktopSecret(raw.apiKey, env) : undefined,
+              apiKey: typeof raw.apiKey === "string" ? decryptDesktopSecret(raw.apiKey, env, path) : undefined,
             };
           })
           .filter((p): p is DesktopLLMProfile => !!p)
@@ -223,6 +288,45 @@ function defaultBaseUrl(provider: LLMProvider): string | undefined {
   if (provider === "xai") return DEFAULT_XAI_BASE_URL;
   if (provider === "gemini") return DEFAULT_GEMINI_BASE_URL;
   return undefined;
+}
+
+export function resolveProviderConnection(
+  provider: LLMProvider,
+  input: { baseUrl?: string; apiKey?: string } = {},
+  env: Env = process.env,
+): { baseUrl?: string; apiKey?: string } {
+  const desktop = readDesktopLLMSettings(env);
+  const baseUrl = trimBaseUrl(input.baseUrl);
+  const profiles = desktopProfiles(desktop);
+  const matchingProfile =
+    profiles.find((profile) => profile.provider === provider && (!baseUrl || trimBaseUrl(profile.baseUrl) === baseUrl)) ||
+    profiles.find((profile) => profile.provider === provider);
+  const sameDesktopProvider = desktop?.provider === provider;
+
+  return {
+    baseUrl: baseUrl || matchingProfile?.baseUrl || (sameDesktopProvider ? desktop?.baseUrl : undefined) || defaultBaseUrl(provider),
+    apiKey:
+      trim(input.apiKey) ||
+      matchingProfile?.apiKey ||
+      (sameDesktopProvider ? desktop?.apiKey : undefined) ||
+      providerEnvApiKey(provider, env),
+  };
+}
+
+export function resolveInteractiveLLMConfig(
+  provider: LLMProvider,
+  input: { model?: string; baseUrl?: string; apiKey?: string; maxTokens?: string },
+  env: Env = process.env,
+): LLMConfig {
+  const connection = resolveProviderConnection(provider, input, env);
+  const desktop = readDesktopLLMSettings(env);
+  const matchingProfile = desktopProfiles(desktop).find((profile) => profile.provider === provider);
+  return finalizeConfig(provider, env, {
+    model: trim(input.model) || matchingProfile?.model,
+    baseUrl: connection.baseUrl,
+    apiKey: connection.apiKey,
+    maxTokens: input.maxTokens,
+  });
 }
 
 function finalizeConfig(
@@ -363,6 +467,7 @@ export function resolveAnthropicFileFallback(env: Env = process.env): LLMConfig 
 
 export function publicLLMStatus(env: Env = process.env) {
   const desktop = readDesktopLLMSettings(env);
+  const desktopDefault = defaultDesktopProfile(desktop);
   let main: LLMConfig | { provider: LLMProvider; model: string | null };
   try {
     main = resolveMainLLMConfig(env);
@@ -370,7 +475,6 @@ export function publicLLMStatus(env: Env = process.env) {
     if (!(err instanceof LLMError) || err.code !== "llm_config" || !isLocalFirstEnv(env)) {
       throw err;
     }
-    const desktopDefault = defaultDesktopProfile(desktop);
     const provider = env.LLM_PROVIDER
       ? asProvider(env.LLM_PROVIDER)
       : env.ANTHROPIC_API_KEY
@@ -433,6 +537,12 @@ export function publicLLMStatus(env: Env = process.env) {
   return {
     provider: main.provider,
     model: main.model,
+    hasApiKey: !!(
+      ("apiKey" in main ? main.apiKey : undefined) ||
+      (desktopDefault?.provider === main.provider ? desktopDefault.apiKey : undefined) ||
+      (desktop?.provider === main.provider ? desktop?.apiKey : undefined) ||
+      providerEnvApiKey(main.provider, env)
+    ),
     fileProvider: fileFallback?.provider ?? null,
     fileModel: fileFallback?.model ?? null,
     capabilities: {

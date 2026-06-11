@@ -172,7 +172,7 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, state: TestS
     return sendJson(res, 200, {
       profileDraft: {
         version: "browser-shell-proof",
-        brand: "kings_press",
+        brand: "pillar_press",
         sourceTranscript: voiceAnswer,
         communicationPlatforms: [
           { platform: focusName, priority: "primary", notes: "Mentioned during setup." },

@@ -55,6 +55,7 @@
     activePieceId: null,
     theme: "light",
     role: "author",
+    hydrated: false,
     weave: { sources: [], result: null },
     desk: { threads: [], activeId: null },
   };
@@ -198,6 +199,84 @@
     }, p);
   }
 
+  function setupHandoffThreadId(sessionId) {
+    const safe = String(sessionId || "setup")
+      .replace(/[^a-z0-9_-]+/gi, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 80) || "setup";
+    return "setup_handoff_" + safe;
+  }
+
+  function transcriptTurnToDeskMessage(turn, index) {
+    const role = turn && turn.role === "user" ? "user" : "assistant";
+    const content = String((turn && (turn.text || turn.content)) || "").trim();
+    if (!content) return null;
+    return {
+      id: "setup_msg_" + index,
+      role,
+      content,
+    };
+  }
+
+  function buildSetupHandoffThread(handoff, transcript) {
+    const turns = transcript && Array.isArray(transcript.turns) ? transcript.turns : [];
+    const messages = turns.map(transcriptTurnToDeskMessage).filter(Boolean);
+    const campaignName = (handoff && handoff.campaignName) || "your first focus";
+    const providerReady = !!(handoff && handoff.providerReady);
+    const at = Date.parse(handoff && handoff.createdAt) || now();
+    messages.push({
+      id: "setup_msg_ready",
+      role: "assistant",
+      content: providerReady
+        ? "Setup is ready for " + campaignName + ". I kept our setup transcript here, so you can continue by telling me what you want to draft, gather, or refine first."
+        : "Setup is saved for " + campaignName + ". Model setup is still deferred, but I kept our setup transcript here so the desk can continue once a provider is ready.",
+    });
+    return {
+      id: (handoff && handoff.deskThreadId) || setupHandoffThreadId(handoff && handoff.sessionId),
+      title: "Setup handoff",
+      titleSet: true,
+      source: "pillar_press_setup",
+      sessionId: handoff && handoff.sessionId,
+      campaignId: handoff && handoff.campaignId,
+      messages,
+      memory: {
+        note: "Onboarding captured the first focus, provider/voice decision, and essential writing preferences. Continue from this setup context.",
+        covered: turns.length,
+      },
+      createdAt: at,
+      updatedAt: at,
+    };
+  }
+
+  function repairDeskHandoffFromPrefs() {
+    const prefs = (state.settings && state.settings.prefs) || {};
+    const handoff = prefs.onboardingAssistantHandoffV1;
+    const transcriptKey = (handoff && handoff.transcriptPref) || "onboardingSetupTranscriptV1";
+    const transcript = prefs[transcriptKey] || prefs.onboardingSetupTranscriptV1;
+    const turns = transcript && Array.isArray(transcript.turns) ? transcript.turns : [];
+    if (!handoff || !turns.length) return false;
+
+    const desk = Object.assign({ threads: [], activeId: null }, state.desk || {});
+    const threads = Array.isArray(desk.threads) ? desk.threads.slice() : [];
+    const handoffId = handoff.deskThreadId || setupHandoffThreadId(handoff.sessionId);
+    if (threads.some((t) => t && (t.id === handoffId || t.source === "pillar_press_setup"))) return false;
+
+    const hasMeaningfulMessages = threads.some((t) => Array.isArray(t && t.messages) && t.messages.length > 0);
+    if (hasMeaningfulMessages) return false;
+
+    const handoffThread = buildSetupHandoffThread(Object.assign({}, handoff, { deskThreadId: handoffId }), transcript);
+    const nonBlankThreads = threads.filter((t) => {
+      const messages = Array.isArray(t && t.messages) ? t.messages : [];
+      const blankNewThread = !messages.length && !t.titleSet && (!t.title || t.title === "New thread");
+      return !blankNewThread;
+    });
+    state.desk = Object.assign({}, desk, {
+      threads: [handoffThread].concat(nonBlankThreads),
+      activeId: handoffThread.id,
+    });
+    return true;
+  }
+
   /* ---- top-level hydration ---- */
   async function hydrate() {
     try {
@@ -225,9 +304,16 @@
       if (deskState && typeof deskState === "object") {
         state.desk = Object.assign({ threads: [], activeId: null }, deskState);
       }
+      if (repairDeskHandoffFromPrefs()) {
+        bg(apiSend("PUT", "/desk/session", {
+          activeId: state.desk.activeId || null,
+          state: state.desk,
+        }), "repair /desk/session");
+      }
     } catch (e) {
       console.warn("[Store] hydrate failed:", e && e.message);
     }
+    state.hydrated = true;
     document.documentElement.setAttribute("data-theme", state.theme || "light");
     emit();
   }

@@ -96,6 +96,7 @@
 
   function normModel(m) {
     if (!m || !m.id) return null;
+    if (String(m.id).startsWith("fallback-")) return null;
     const ar = m.aspect_ratios || m.aspectRatios;
     const res = m.resolutions;
     const dur = m.durations;

@@ -1,5 +1,5 @@
 /**
- * Minimal starter data for King’s Press.
+ * Minimal starter data for Pillar Press.
  *
  * The desktop app should open lean: no preloaded campaign list and no bulky
  * author-specific reference document. A user-created campaign gets this blank

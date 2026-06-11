@@ -25,10 +25,11 @@ export interface AIMessage {
 
 export interface AIOptions {
   system?: string;
+  webSearch?: boolean;
 }
 
 export interface AI {
-  complete(messages: AIMessage[], system?: string): Promise<string>;
+  complete(messages: AIMessage[], system?: string, opts?: AIOptions): Promise<string>;
   json<T = unknown>(prompt: string, opts?: AIOptions): Promise<T>;
   text(prompt: string, opts?: AIOptions): Promise<string>;
   extractJSON<T = unknown>(text: string): T | null;
@@ -61,6 +62,6 @@ export interface LLMAdapter {
   provider: LLMProvider;
   model: string;
   capabilities: LLMCapabilities;
-  complete(messages: AIMessage[]): Promise<string>;
+  complete(messages: AIMessage[], opts?: AIOptions): Promise<string>;
   completeBlocks?(content: MultimodalContentBlock[], system?: string): Promise<string>;
 }

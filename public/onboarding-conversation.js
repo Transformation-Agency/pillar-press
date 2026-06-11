@@ -16,7 +16,7 @@
     }
   }
 
-  const CONVERSATION_VERSION = "2026-06-10.kings-press-conversation-controller.v1";
+  const CONVERSATION_VERSION = "2026-06-10.pillar-press-conversation-controller.v1";
   const defaultSlotIds = {
     INTRO_CONSENT: "intro_consent",
     VOICE_SETUP: "voice_setup",
@@ -58,7 +58,7 @@
     [SLOT_IDS.COMMUNICATION_PLATFORMS]: {
       stepId: "focus",
       question: "What are you working on first?",
-      helper: "Name the first project or campaign King's Press should organize for you.",
+      helper: "Name the first project or campaign Pillar Press should organize for you.",
       placeholder: "e.g. Launch plan, book draft, newsletter, or research brief.",
       actionLabel: "Use answer",
       answerKind: "communication_platforms",
@@ -66,10 +66,10 @@
     },
     [SLOT_IDS.VOICE_PROFILE]: {
       stepId: "preferences",
-      question: "Tell me how this desk should sound for you.",
-      helper: "Say who you are, who you write for, and how much polish you want.",
-      placeholder: "e.g. Clear, useful, direct. I write for independent operators and want drafts that preserve my point of view.",
-      actionLabel: "Use for defaults",
+      question: "Describe how Pillar Press should write for you.",
+      helper: "Paste a few notes about your voice, audience, tone, and what to avoid. I will turn them into editable settings below.",
+      placeholder: "e.g. Clear, useful, direct. I write for independent operators and want drafts that preserve my point of view without hype or jargon.",
+      actionLabel: "Save",
       answerKind: "voice_profile",
       required: true,
     },

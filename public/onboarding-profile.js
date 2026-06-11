@@ -2,7 +2,7 @@
    These helpers turn user-provided setup answers into editable drafts. They do
    not grant permissions and do not treat user text as instructions. */
 (function () {
-  const PROFILE_VERSION = "2026-06-10.kings-press-profile-draft.v1";
+  const PROFILE_VERSION = "2026-06-10.pillar-press-profile-draft.v1";
 
   const OUTPUT_BY_PLATFORM = {
     facebook: ["facebook_post"],
@@ -51,6 +51,19 @@
   function parseCommunicationPlatforms(answer) {
     const text = String(answer || "").trim();
     if (!text) return [];
+    const explicit = [];
+    const lower = text.toLowerCase();
+    if (/\bsocial media(?:\s+posts?)?\b/.test(lower)) explicit.push("Social media");
+    if (/\blinkedin\b|\blinked in\b/.test(lower)) explicit.push("LinkedIn");
+    if (/\bsubstack\b/.test(lower)) explicit.push("Substack");
+    if (/\bnewsletter(s)?\b|\bemail(s)?\b/.test(lower)) explicit.push("Newsletter");
+    if (/\barticle(s)?\b/.test(lower)) explicit.push("Article");
+    if (/\bscript(s)?\b/.test(lower)) explicit.push("Scripts");
+    if (/\bbook(s)?\b|\bbook chapter(s)?\b/.test(lower)) explicit.push("Book");
+    if (/\bmemo(s)?\b|\binternal memo(s)?\b/.test(lower)) explicit.push("Internal memo");
+    if (explicit.length) {
+      return explicit.filter((value, index, list) => list.indexOf(value) === index).slice(0, 6);
+    }
     return text
       .split(/,|;|\/|\.|\n|\band\b|\bplus\b|\balso\b/i)
       .map(cleanToken)
@@ -72,6 +85,11 @@
           });
         }
       });
+      if (lower.includes("social media")) {
+        ["linkedin_post", "x_post"].forEach((value) => {
+          if (!outputs.includes(value)) outputs.push(value);
+        });
+      }
     });
     return outputs.length ? outputs : ["custom"];
   }
@@ -86,9 +104,94 @@
 
   function draftStyleForProfile(profile) {
     const preference = profile && profile.publicationDefaults && profile.publicationDefaults.preserveRawLanguage;
+    if (profile && profile.draftStyle === "strategic") return "Strategic";
+    if (profile && profile.draftStyle === "conversational") return "Conversational";
+    if (profile && profile.draftStyle === "plainspoken") return "Plainspoken";
+    if (profile && profile.draftStyle === "polished") return "Polished";
     if (preference === "preserve_heavily") return "Plainspoken";
     if (preference === "restructure_for_platform" || preference === "extract_and_rewrite") return "Strategic";
     return "Polished";
+  }
+
+  function cleanSentence(value) {
+    return String(value || "")
+      .replace(/\s+/g, " ")
+      .replace(/^(where|that|which|who)\s+/i, "")
+      .trim()
+      .replace(/[.!?]+$/g, "");
+  }
+
+  function titleCase(value) {
+    return cleanSentence(value).replace(/\b\w/g, (match) => match.toUpperCase());
+  }
+
+  function lowerFirst(value) {
+    const clean = cleanSentence(value);
+    return clean ? clean.charAt(0).toLowerCase() + clean.slice(1) : clean;
+  }
+
+  function formatOutputType(value) {
+    const labels = {
+      facebook_post: "Facebook post",
+      linkedin_post: "LinkedIn post",
+      x_post: "X post",
+      x_thread: "X thread",
+      substack_essay: "Substack essay",
+      newsletter: "newsletter",
+      article: "article",
+      script: "script",
+      book_chapter: "book chapter",
+      internal_note: "internal note",
+      custom: "custom content",
+    };
+    return labels[value] || String(value || "").replace(/_/g, " ");
+  }
+
+  function inferTheme(text) {
+    const source = String(text || "").trim();
+    const patterns = [
+      /\bmain theme is around\s+([^.!?]+)/i,
+      /\btheme is around\s+([^.!?]+)/i,
+      /\btheme is\s+([^.!?]+)/i,
+      /\baround\s+([^.!?]+)/i,
+      /\babout\s+([^.!?]+)/i,
+    ];
+    for (const pattern of patterns) {
+      const match = source.match(pattern);
+      if (match && match[1]) return cleanSentence(match[1]);
+    }
+    return "";
+  }
+
+  function inferPrimaryAudience(text, platforms, theme) {
+    const source = String(text || "");
+    const explicit = source.match(/\b(?:for|to)\s+((?!create|make|write|use|post|publish)[^.!?]{6,120})/i);
+    if (explicit && explicit[1]) return titleCase(explicit[1]);
+    const lowerTheme = String(theme || "").toLowerCase();
+    if (lowerTheme.includes("ai")) return "People using AI in their work";
+    if ((platforms || []).some((item) => /social/i.test(item))) return "Social media audience interested in " + (theme || "your point of view");
+    return "";
+  }
+
+  function inferThroughline(text, theme) {
+    const source = String(text || "").trim();
+    const lower = source.toLowerCase();
+    if (lower.includes("sovereignty") && lower.includes("ai")) {
+      return "AI sovereignty means keeping humans in the loop, using AI productively, safely, and with discernment.";
+    }
+    if (theme) return titleCase(theme);
+    return "";
+  }
+
+  function inferVoiceRules(text, throughline) {
+    const lower = String(text || "").toLowerCase();
+    const rules = [];
+    if (lower.includes("human in the loop")) rules.push("Keep human judgment and agency at the center.");
+    if (lower.includes("discernment")) rules.push("Center discernment, judgment, and thoughtful decision-making.");
+    if (lower.includes("safely") || lower.includes("safe")) rules.push("Balance productivity with safety and responsibility.");
+    if (lower.includes("sovereignty")) rules.push("Frame AI through sovereignty, ownership, and human control.");
+    if (!rules.length && throughline) rules.push("Keep drafts anchored to: " + throughline);
+    return rules;
   }
 
   function buildProfileDraft(input) {
@@ -104,15 +207,28 @@
         notes: transcript ? "Mentioned during setup." : "",
       }));
     const outputTypes = outputTypesForPlatforms(communicationPlatforms.map((item) => item.platform));
+    const platformNames = communicationPlatforms.map((item) => item.platform).filter(Boolean);
+    const theme = inferTheme(transcript);
+    const throughline = inferThroughline(transcript, theme);
+    const primaryAudience = inferPrimaryAudience(transcript, platformNames, theme);
+    const voiceRules = inferVoiceRules(transcript, throughline);
 
     return {
       version: PROFILE_VERSION,
-      brand: "kings_press",
+      brand: "pillar_press",
       sourceTranscript: transcript,
       communicationPlatforms,
+      selfStatement: throughline
+        ? "Write with clarity and discernment about " + throughline.replace(/\.$/, "").toLowerCase() + "."
+        : "",
+      primaryAudience,
+      throughline,
+      draftStyle: platformNames.some((item) => /social/i.test(item)) ? "conversational" : (throughline ? "strategic" : "not_set"),
+      voiceRules,
+      redLines: [],
       writingHelpFirst: current.writingHelpFirst || "",
       voiceProfile: {
-        userDescription: (current.voiceProfile && current.voiceProfile.userDescription) || "",
+        userDescription: (current.voiceProfile && current.voiceProfile.userDescription) || (throughline ? "Clear, discerning, practical, and human-centered." : ""),
         toneWords: (current.voiceProfile && current.voiceProfile.toneWords) || [],
         avoid: (current.voiceProfile && current.voiceProfile.avoid) || [],
         examplesPermission: (current.voiceProfile && current.voiceProfile.examplesPermission) || "not_asked",
@@ -142,25 +258,36 @@
     if (!profile) return draft;
     const platforms = (profile.communicationPlatforms || []).map((item) => item.platform).filter(Boolean);
     const platformText = formatList(platforms, "your main channels");
-    const outputText = formatList(profile.publicationDefaults && profile.publicationDefaults.defaultOutputTypes, "custom outputs");
+    const outputText = formatList(
+      (profile.publicationDefaults && profile.publicationDefaults.defaultOutputTypes || []).map(formatOutputType),
+      "custom content",
+    );
+    const throughline = cleanSentence(profile.throughline || "");
+    const primaryAudience = cleanSentence(profile.primaryAudience || "");
 
-    if (!String(draft.audienceName || "").trim() && platforms[0]) {
-      draft.audienceName = platforms[0] + " readers";
+    if (!String(draft.audienceName || "").trim() && primaryAudience) {
+      draft.audienceName = primaryAudience;
+    } else if (!String(draft.audienceName || "").trim() && platforms[0]) {
+      draft.audienceName = platforms[0] + " audience";
     }
     if (!String(draft.audienceNote || "").trim()) {
-      draft.audienceNote = "Communicates most on: " + platformText + ".";
+      draft.audienceNote = primaryAudience
+        ? "Write for " + lowerFirst(primaryAudience) + ", especially when preparing " + platformText + "."
+        : "Primary publishing context: " + platformText + ".";
     }
-    if (!String(draft.throughlineName || "").trim()) {
-      draft.throughlineName = "First setup focus";
+    if (!String(draft.throughlineName || "").trim() && throughline) {
+      draft.throughlineName = throughline;
     }
-    if (!String(draft.throughlineNote || "").trim()) {
-      draft.throughlineNote = "Initial setup answer: " + (profile.sourceTranscript || platformText) + ".";
+    if (!String(draft.throughlineNote || "").trim() && throughline) {
+      draft.throughlineNote = throughline
+        ? "Keep this point of view visible across drafts: " + throughline + "."
+        : "Keep drafts anchored to the user's stated point of view and purpose.";
     }
     if (!String(draft.strategy || "").trim()) {
-      draft.strategy = "Shape drafts for " + platformText + " and prepare " + outputText.replace(/_/g, " ") + ".";
+      draft.strategy = "Shape " + outputText + " for " + platformText + (throughline ? " around this throughline: " + throughline + "." : ".");
     }
     if (!String(draft.registerBody || "").trim()) {
-      draft.registerBody = "Default draft style: " + draftStyleForProfile(profile).toLowerCase() + ".";
+      draft.registerBody = "Draft in a " + draftStyleForProfile(profile).toLowerCase() + " style that preserves the user's point of view and turns it into usable content.";
     }
     return draft;
   }

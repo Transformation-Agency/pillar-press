@@ -1,6 +1,6 @@
 export const metadata = {
-  title: "King's Press Editorial Desk",
-  description: "Local-first editorial workstation",
+  title: "Pillar Press",
+  description: "Local-first content generation workstation",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

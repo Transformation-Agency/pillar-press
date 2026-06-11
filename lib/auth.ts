@@ -1,7 +1,7 @@
 /**
  * Auth — local-first session resolution with hosted compatibility.
  *
- * In the King’s Press desktop runtime, every request resolves to a single local
+ * In the Pillar Press desktop runtime, every request resolves to a single local
  * owner/workspace stored in embedded SQLite. No cloud auth, Supabase session,
  * or Postgres round-trip is required.
  *

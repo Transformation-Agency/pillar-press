@@ -1,10 +1,10 @@
-/* King's Press conversational bootstrap manifest.
+/* Pillar Press conversational bootstrap manifest.
    This file is app-owned product data. It should be safe to swap for another
-   KingPress app without rewriting the shared onboarding runtime. */
+   Pillar app without rewriting the shared onboarding runtime. */
 (function () {
   const copy = window.KP_ONBOARDING_COPY || {};
 
-  const MANIFEST_VERSION = "2026-06-10.kings-press-bootstrap-manifest.v1";
+  const MANIFEST_VERSION = "2026-06-10.pillar-press-bootstrap-manifest.v1";
 
   const ACTIONS = {
     OPEN_PROVIDER_SETUP: "open_provider_setup",
@@ -33,7 +33,7 @@
     {
       id: "intro",
       label: "Intro",
-      title: "I'm King's Press",
+      title: "I'm Pillar Press",
       subtitle: "I help you articulate your thoughts and turn them into clear, publishable work.",
       hostMessages: [
         "I can guide you through setup, including voice, models, and the first focus.",
@@ -48,7 +48,7 @@
       id: "voice",
       label: "Voice",
       title: "Set up voice",
-      subtitle: "Add voice now if you want King's Press to read and respond aloud.",
+      subtitle: "Add voice now if you want Pillar Press to read and respond aloud.",
       hostMessages: [
         "Voice is optional.",
         "OpenAI is the simplest first key because it can also power the rest of setup.",
@@ -62,7 +62,7 @@
       id: "connect",
       label: "Connect",
       title: "Let's set up your desk",
-      subtitle: "Choose the model and integrations King's Press can use. You can skip anything and change it later.",
+      subtitle: "Choose the model and integrations Pillar Press can use. You can skip anything and change it later.",
       hostMessages: [
         "Now choose the model and any outside tools you want connected.",
         "Anything you skip stays available later.",
@@ -126,7 +126,7 @@
     [SLOT_IDS.COMMUNICATION_PLATFORMS]: {
       stepId: "focus",
       question: "What are you working on first?",
-      helper: "Name the first project or campaign King's Press should organize for you.",
+      helper: "Name the first project or campaign Pillar Press should organize for you.",
       placeholder: "e.g. Launch plan, book draft, newsletter, or research brief.",
       actionLabel: "Use answer",
       answerKind: "communication_platforms",
@@ -135,10 +135,10 @@
     },
     [SLOT_IDS.VOICE_PROFILE]: {
       stepId: "preferences",
-      question: "Tell me how this desk should sound for you.",
-      helper: "Say who you are, who you write for, and how much polish you want.",
-      placeholder: "e.g. Clear, useful, direct. I write for independent operators and want drafts that preserve my point of view.",
-      actionLabel: "Use for defaults",
+      question: "Describe how Pillar Press should write for you.",
+      helper: "Paste a few notes about your voice, audience, tone, and what to avoid. I will turn them into editable settings below.",
+      placeholder: "e.g. Clear, useful, direct. I write for independent operators and want drafts that preserve my point of view without hype or jargon.",
+      actionLabel: "Save",
       answerKind: "voice_profile",
       expectedIntents: ["typed_answer", "spoken_answer", "correction", "skip", "unclear"],
       required: true,
@@ -146,16 +146,16 @@
   };
 
   const manifest = {
-    id: "kings_press",
-    appName: "King's Press",
+    id: "pillar_press",
+    appName: "Pillar Press",
     version: MANIFEST_VERSION,
-    runtimeVersion: "2026-06-10.kings-press-conversational-runtime.v1",
-    packVersion: "2026-06-10.kings-press-pack.v1",
+    runtimeVersion: "2026-06-10.pillar-press-conversational-runtime.v1",
+    packVersion: "2026-06-10.pillar-press-pack.v1",
     persona: {
       role: "warm editorial setup host",
       tone: ["warm", "direct", "plainspoken", "premium"],
       boundaries: [
-        "Do not imply King's Press replaces the writer.",
+        "Do not imply Pillar Press replaces the writer.",
         "Do not infer permission to use memory, web research, external services, publishing, or sending.",
         "Ask one thing at a time and keep typing available.",
       ],
@@ -169,7 +169,7 @@
     },
     flags: {
       onboardingCompletePref: "setupHelperCompleteV1",
-      computeSetupLocalStorageKey: "kingspress.desktopSetupComplete",
+      computeSetupLocalStorageKey: "pillarpress.desktopSetupComplete",
       firstValuePref: "onboardingFirstValueEventV1",
       transcriptPref: "onboardingSetupTranscriptV1",
       handoffPref: "onboardingAssistantHandoffV1",
@@ -179,12 +179,12 @@
     },
     trust: {
       reassurance: "You're in control. Nothing connects without your approval.",
-      footer: "King's Press · Your desk for ideas that matter.",
+      footer: "Pillar Press · Your desk for ideas that matter.",
       permissions: {
         microphone: "Voice setup starts only after you choose it.",
         memory: "Saved memory is off until you approve it.",
         web: "Web research is off until you approve it.",
-        publish: "King's Press will not publish, send, or connect outside services without approval.",
+        publish: "Pillar Press will not publish, send, or connect outside services without approval.",
       },
     },
     activation: {
@@ -228,7 +228,7 @@
         action: ACTIONS.OPEN_PROVIDER_SETUP,
         icon: "db",
         title: "AI & models",
-        description: "Choose the models King's Press can use to think and create.",
+        description: "Choose the models Pillar Press can use to think and create.",
         disconnectedStatus: "Not connected",
         connectedStatus: "Connected",
         label: "Set up",
@@ -281,7 +281,7 @@
         externalServices: ["gather_sources", "drive", "media_providers", "plugins"],
       },
       [ACTIONS.PLAY_INTRO]: {
-        label: "Introduce King's Press",
+        label: "Introduce Pillar Press",
         requiresApproval: true,
         persistentEffect: "none",
       },

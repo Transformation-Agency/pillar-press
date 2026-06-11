@@ -3,7 +3,7 @@ import { fetchJSON, stripHtml, GatherError, type GatherItem } from "./index";
 
 export async function runWebSearch(query: string, count = 5): Promise<GatherItem[]> {
   // Keep legacy env names as compatibility fallbacks for existing hosted
-  // installs, but prefer provider-neutral / King’s Press names.
+  // installs, but prefer provider-neutral / Pillar Press names.
   const key = process.env.BRAVE_SEARCH_API_KEY || process.env.Brave_Kings_Press || process.env.Brave_Pillar_Press;
   if (!key) throw new GatherError(500, "config", "Missing BRAVE_SEARCH_API_KEY (or wire a different search provider).");
   const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=${count}`;

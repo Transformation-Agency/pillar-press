@@ -10,7 +10,7 @@ import {
 } from "@/lib/onboarding/setupProfile";
 
 const requestSchema = z.object({
-  brand: setupBrandSchema.default("kings_press"),
+  brand: setupBrandSchema.default("pillar_press"),
   transcript: z.string().trim().min(1).max(30000),
   fileText: z.string().trim().max(80000).optional(),
   currentDraft: z.unknown().optional(),

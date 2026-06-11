@@ -22,7 +22,7 @@ export const generateBodySchema = z.object({
   aspectRatio: z.string().optional(),
   resolution: z.string().optional(),
   duration: z.number().int().positive().max(600).optional(),
-  // link to a King's Press content item
+  // link to a Pillar Press content item
   pieceId: z.string().optional(),
   // campaign scope (drives per-campaign style profile + media scoping)
   campaignId: z.string().optional(),

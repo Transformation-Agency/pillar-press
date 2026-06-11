@@ -10,7 +10,7 @@ import {
 } from "@/lib/llm/config";
 import { anthropicProvider } from "@/lib/llm/providers/anthropic";
 import { geminiProvider } from "@/lib/llm/providers/gemini";
-import { openAICompatibleProvider } from "@/lib/llm/providers/openaiCompatible";
+import { openAICompatibleProvider, openAIProvider } from "@/lib/llm/providers/openaiCompatible";
 import { ollamaProvider } from "@/lib/llm/providers/ollama";
 import type { AI, AIMessage, AIOptions, LLMAdapter, LLMConfig, LLMTask, MultimodalContentBlock } from "@/lib/llm/types";
 
@@ -32,7 +32,8 @@ export { LLM_TASK_LABELS, LLM_TASKS, publicLLMStatus, resolveMainLLMConfig, reso
 function createAdapter(config: LLMConfig): LLMAdapter {
   if (config.provider === "anthropic") return anthropicProvider(config);
   if (config.provider === "gemini") return geminiProvider(config);
-  if (config.provider === "openai" || config.provider === "openai-compatible" || config.provider === "xai") {
+  if (config.provider === "openai") return openAIProvider(config);
+  if (config.provider === "openai-compatible" || config.provider === "xai") {
     return openAICompatibleProvider(config);
   }
   return ollamaProvider(config);
@@ -49,8 +50,8 @@ function withSystemPreamble(messages: AIMessage[], system?: string): AIMessage[]
 }
 
 export function createAI(adapter: LLMAdapter): AI {
-  async function complete(messages: AIMessage[], system?: string): Promise<string> {
-    return adapter.complete(withSystemPreamble(messages, system));
+  async function complete(messages: AIMessage[], system?: string, opts: AIOptions = {}): Promise<string> {
+    return adapter.complete(withSystemPreamble(messages, system), opts);
   }
 
   async function json<T = unknown>(prompt: string, { system }: AIOptions = {}): Promise<T> {
@@ -155,8 +156,8 @@ export function resetLLMForTests() {
 }
 
 export const ai: AI = {
-  complete(messages, system) {
-    return getAI().complete(messages, system);
+  complete(messages, system, opts) {
+    return getAI().complete(messages, system, opts);
   },
   json(prompt, opts) {
     return getAI().json(prompt, opts);

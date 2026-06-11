@@ -1,5 +1,5 @@
 /**
- * Workspace bootstrap for King's Press.
+ * Workspace bootstrap for Pillar Press.
  *
  * The desktop app intentionally starts lean: no default campaigns are inserted.
  * User-created campaigns receive a blank references skeleton from

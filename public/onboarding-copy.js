@@ -1,11 +1,11 @@
 /* Deterministic first-run onboarding copy. This is app-owned product language,
    not model output. Keep copy versioned so future changes are intentional. */
 (function () {
-  const AUDIO_INTRO_COPY_VERSION = "2026-06-10.kings-press-orientation.v2";
+  const AUDIO_INTRO_COPY_VERSION = "2026-06-10.pillar-press-orientation.v1";
 
   const PRESS_BRAND_LABEL = {
     pillar_press: "Pillar Press",
-    kings_press: "King’s Press",
+    kings_press: "Pillar Press",
   };
 
   function getAudioReadyPrompt() {
@@ -16,7 +16,7 @@
   }
 
   function getPressIntroScript(brand) {
-    const name = PRESS_BRAND_LABEL[brand] || PRESS_BRAND_LABEL.kings_press;
+    const name = PRESS_BRAND_LABEL[brand] || PRESS_BRAND_LABEL.pillar_press;
     return [
       "I’m " + name + ".",
       "I’m here to help you articulate your thoughts and format them for the places where you communicate most — posts, essays, newsletters, articles, scripts, book drafts, or internal notes.",

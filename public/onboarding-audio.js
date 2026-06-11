@@ -43,6 +43,16 @@
     return browserSpeakText(body, options);
   }
 
+  function stopSpeaking() {
+    const desktop = window.KINGS_DESKTOP;
+    if (desktop && desktop.isDesktop && desktop.isDesktop() && desktop.stopSpeaking) {
+      desktop.stopSpeaking().catch(() => {});
+    }
+    try {
+      if (window.speechSynthesis) window.speechSynthesis.cancel();
+    } catch (_err) {}
+  }
+
   function browserSpeakText(text, options) {
     return new Promise((resolve) => {
       if (!window.speechSynthesis || !window.SpeechSynthesisUtterance) {
@@ -110,6 +120,7 @@
     classifyIntroConsent,
     getSpeechRecognitionCtor,
     speakText,
+    stopSpeaking,
     listenOnce,
   };
 })();

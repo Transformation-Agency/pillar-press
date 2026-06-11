@@ -135,7 +135,7 @@ function SchedulePanel({ campaignId }) {
           ))}
         </div>
       )}
-      <p className="muted" style={{ fontSize: 13, marginTop: 10 }}>Schedules run while King’s Press is open. In the desktop app, the local scheduler runs in the background.</p>
+      <p className="muted" style={{ fontSize: 13, marginTop: 10 }}>Schedules run while Pillar Press is open. In the desktop app, the local scheduler runs in the background.</p>
     </div>
   );
 }

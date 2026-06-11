@@ -29,6 +29,8 @@ describe("media provider status", () => {
     expect(status.hedra).toMatchObject({ id: "hedra", configured: true, capabilities: ["image", "video", "avatar"] });
     expect(status.elevenlabs).toMatchObject({ id: "elevenlabs", configured: true, capabilities: ["audio"] });
     expect(status.openai).toMatchObject({ id: "openai", configured: true, capabilities: ["image", "audio"] });
+    expect(status.openai.models.map((model) => model.id)).toEqual(expect.arrayContaining(["gpt-image-1.5", "gpt-image-1-mini"]));
+    expect(status.openai.models[0]).toMatchObject({ id: "gpt-image-1.5", type: "image" });
     expect(status.xai).toMatchObject({ id: "xai", configured: true, capabilities: ["image"] });
     expect(status.providers).toHaveLength(5);
     expect(JSON.stringify(status)).not.toContain("secret");

@@ -41,7 +41,7 @@
     return ct.indexOf("application/json") >= 0 ? r.json() : null;
   }
 
-  const SCHEDULE_KEY = "kingspress.gatherSchedules.v1";
+  const SCHEDULE_KEY = "pillarpress.gatherSchedules.v1";
   let schedulerStarted = false;
 
   function uid() {

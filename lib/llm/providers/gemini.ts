@@ -1,6 +1,6 @@
 import { LLMError } from "@/lib/llm/errors";
 import { PROVIDER_CAPABILITIES } from "@/lib/llm/config";
-import type { AIMessage, LLMAdapter, LLMConfig, MultimodalContentBlock } from "@/lib/llm/types";
+import type { AIMessage, AIOptions, LLMAdapter, LLMConfig, MultimodalContentBlock } from "@/lib/llm/types";
 
 type GeminiPart =
   | { text: string }
@@ -11,6 +11,14 @@ type GeminiResponse = {
     content?: {
       parts?: Array<{ text?: string }>;
     };
+    groundingMetadata?: {
+      groundingChunks?: Array<{
+        web?: {
+          uri?: string;
+          title?: string;
+        };
+      }>;
+    };
   }>;
 };
 
@@ -19,10 +27,24 @@ function toGeminiRole(role: AIMessage["role"]): "user" | "model" {
 }
 
 function textFromResponse(json: GeminiResponse): string {
-  return (json.candidates?.[0]?.content?.parts || [])
+  const text = (json.candidates?.[0]?.content?.parts || [])
     .map((part) => part.text || "")
     .join("")
     .trim();
+  const sources = (json.candidates?.[0]?.groundingMetadata?.groundingChunks || [])
+    .map((chunk) => ({ title: chunk.web?.title, url: chunk.web?.uri || "" }))
+    .filter((source) => source.url);
+  if (!sources.length) return text;
+  const seen = new Set<string>();
+  const lines = sources
+    .filter((source) => {
+      if (seen.has(source.url)) return false;
+      seen.add(source.url);
+      return true;
+    })
+    .slice(0, 8)
+    .map((source) => `- [${source.title || source.url}](${source.url})`);
+  return `${text}\n\nSources:\n${lines.join("\n")}`.trim();
 }
 
 function blockToPart(block: MultimodalContentBlock): GeminiPart {
@@ -79,12 +101,13 @@ export function geminiProvider(config: LLMConfig): LLMAdapter {
     provider: "gemini",
     model: config.model,
     capabilities: PROVIDER_CAPABILITIES.gemini,
-    complete(messages: AIMessage[]) {
+    complete(messages: AIMessage[], opts?: AIOptions) {
       return request({
         contents: messages.map((message) => ({
           role: toGeminiRole(message.role),
           parts: [{ text: message.content }],
         })),
+        ...(opts?.webSearch ? { tools: [{ google_search: {} }] } : {}),
       });
     },
     completeBlocks(content: MultimodalContentBlock[], system?: string) {

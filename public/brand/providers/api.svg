@@ -1,0 +1,5 @@
+<svg fill="none" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title">
+  <title id="title">API</title>
+  <rect x="10" y="14" width="44" height="36" rx="9" stroke="#0D0D0D" stroke-width="4"/>
+  <path d="M21 32h22M24 24h16M24 40h12" stroke="#0D0D0D" stroke-width="4" stroke-linecap="round"/>
+</svg>

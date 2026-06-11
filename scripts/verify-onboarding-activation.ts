@@ -30,7 +30,7 @@ function createWindow(options?: { voiceReady?: boolean }) {
       AUDIO_INTRO_COPY_VERSION: "release-proof-copy",
       FIRST_PLATFORM_QUESTION: "Where do you communicate most?",
       getAudioReadyPrompt: () => "Audio is connected.",
-      getPressIntroScript: () => "I'm King's Press.",
+      getPressIntroScript: () => "I'm Pillar Press.",
     },
     KINGS_DESKTOP: {
       isDesktop: () => true,
@@ -181,11 +181,11 @@ async function loadRuntime(context: ProofContext) {
 }
 
 function assertManifestContract(runtime: any, scenarioId: string) {
-  assert(runtime.manifestValidation?.valid === true, scenarioId + ": King’s Press onboarding manifest is invalid.");
+  assert(runtime.manifestValidation?.valid === true, scenarioId + ": Pillar Press onboarding manifest is invalid.");
   assert(runtime.manifestValidation.errors.length === 0, scenarioId + ": manifest validation reported errors.");
   assert(runtime.manifestValidation.summary.steps >= 5, scenarioId + ": manifest did not expose the expected setup steps.");
   assert(runtime.manifestValidation.summary.requiredSlots >= 2, scenarioId + ": manifest did not expose required setup slots.");
-  assert(runtime.pack?.id === "kings_press", scenarioId + ": runtime pack is not scoped to King’s Press.");
+  assert(runtime.pack?.id === "pillar_press", scenarioId + ": runtime pack is not scoped to Pillar Press.");
   assert(runtime.pack?.graph?.length >= 5, scenarioId + ": runtime pack does not expose deterministic graph nodes.");
 
   const broken = runtime.validateManifest({
@@ -390,7 +390,7 @@ async function runActivationProof(input: {
   assert(context.prefs.onboardingSetupTranscriptV1?.turns?.length >= 6, input.id + ": setup transcript was not persisted.");
   assert(context.prefs.onboardingAssistantHandoffV1?.deskThreadId, input.id + ": Desk handoff was not persisted.");
   assert(context.deskState.activeId === context.prefs.onboardingAssistantHandoffV1.deskThreadId, input.id + ": Desk handoff thread is not active.");
-  assert(context.deskState.threads[0]?.source === "kings_press_setup", input.id + ": Desk handoff thread has the wrong source.");
+  assert(context.deskState.threads[0]?.source === "pillar_press_setup", input.id + ": Desk handoff thread has the wrong source.");
   if (input.providerReady) {
     assert(context.prefs.onboardingAssistantHandoffV1.providerReady === true, input.id + ": provider-ready flag was not persisted.");
     assert(

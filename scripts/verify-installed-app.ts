@@ -6,9 +6,9 @@ import puppeteer from "puppeteer";
 import { driveOnboardingUiProof } from "./onboarding-ui-proof";
 
 const root = process.cwd();
-const dmgPath = join(root, "src-tauri", "target", "release", "bundle", "dmg", "King's Press Editorial Desk_0.1.0_aarch64.dmg");
-const appName = "King's Press Editorial Desk.app";
-const executableName = "kings-press-editorial-desk";
+const dmgPath = join(root, "src-tauri", "target", "release", "bundle", "dmg", "Pillar Press_0.1.0_aarch64.dmg");
+const appName = "Pillar Press.app";
+const executableName = "pillar-press";
 
 async function exists(path: string) {
   try {
@@ -72,7 +72,7 @@ async function waitForServerUrl(appPid: number, appDataDir: string): Promise<str
     .join("\n")
     .trim();
   throw new Error([
-    "Installed app did not expose a reachable local King’s Press server.",
+    "Installed app did not expose a reachable local Pillar Press server.",
     related ? `related processes:\n${related}` : "related processes: <none>",
   ].join("\n\n"));
 }
@@ -124,7 +124,7 @@ async function fetchCandidatePorts(appPid: number, appDataDir: string): Promise<
       const status = await res.json();
       const campaigns = await fetch(`http://127.0.0.1:${port}/api/campaigns`).then((r) => r.json());
       if (status?.provider === "ollama" && Array.isArray(campaigns?.campaigns)) {
-        const dbPath = join(appDataDir, "kings-press.sqlite3");
+        const dbPath = join(appDataDir, "pillar-press.sqlite3");
         if (!(await exists(dbPath))) continue;
         return `http://127.0.0.1:${port}`;
       }
@@ -181,12 +181,12 @@ if (!(await exists(dmgPath))) {
   throw new Error(`Missing release DMG: ${dmgPath}`);
 }
 
-const tmpRoot = await mkdtemp(join(tmpdir(), "kings-press-install-smoke-"));
+const tmpRoot = await mkdtemp(join(tmpdir(), "pillar-press-install-smoke-"));
 const mountDir = join(tmpRoot, "mnt");
 const installDir = join(tmpRoot, "Applications");
 const homeDir = join(tmpRoot, "home");
 const installedApp = join(installDir, appName);
-const appDataDir = join(homeDir, "Library", "Application Support", "com.kingspress.editorialdesk");
+const appDataDir = join(homeDir, "Library", "Application Support", "com.pillar.press");
 let mounted = false;
 let appPid: number | null = null;
 
@@ -266,7 +266,7 @@ try {
   } finally {
     await browser.close();
   }
-  for (const file of ["kings-press.sqlite3"]) {
+  for (const file of ["pillar-press.sqlite3"]) {
     const path = join(appDataDir, file);
     if (!(await exists(path))) throw new Error(`Expected installed app to create ${path}`);
   }

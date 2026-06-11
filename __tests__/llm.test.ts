@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAI, createAIFromConfig, LLMError, type LLMAdapter } from "@/lib/llm";
 import { resolveMainLLMConfig, resolveTaskLLMConfig, publicLLMStatus } from "@/lib/llm/config";
 import { geminiProvider } from "@/lib/llm/providers/gemini";
-import { openAICompatibleProvider } from "@/lib/llm/providers/openaiCompatible";
+import { openAICompatibleProvider, openAIProvider } from "@/lib/llm/providers/openaiCompatible";
 import { ollamaProvider } from "@/lib/llm/providers/ollama";
 import { toErrorResponse } from "@/lib/errors";
 
@@ -355,22 +355,75 @@ describe("provider adapters", () => {
     );
   });
 
-  it("sends OpenAI and xAI through the chat completions transport", async () => {
+  it("sends OpenAI through the Responses API", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ output_text: "openai hello" }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const openai = openAIProvider({
+      provider: "openai",
+      model: "gpt-5.2",
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: "openai-key",
+      maxTokens: 100,
+    });
+    await expect(openai.complete([{ role: "user", content: "hi" }])).resolves.toBe("openai hello");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.openai.com/v1/responses",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({ Authorization: "Bearer openai-key" }),
+        body: JSON.stringify({
+          model: "gpt-5.2",
+          input: [{ role: "user", content: "hi" }],
+          max_output_tokens: 100,
+        }),
+      }),
+    );
+  });
+
+  it("opts OpenAI Desk calls into hosted web search", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ output_text: "searched" }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const openai = openAIProvider({
+      provider: "openai",
+      model: "gpt-5.2",
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: "openai-key",
+      maxTokens: 100,
+    });
+    await expect(openai.complete([{ role: "user", content: "fact check this" }], { webSearch: true })).resolves.toBe("searched");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.openai.com/v1/responses",
+      expect.objectContaining({
+        body: JSON.stringify({
+          model: "gpt-5.2",
+          input: [{ role: "user", content: "fact check this" }],
+          max_output_tokens: 100,
+          tools: [{ type: "web_search", search_context_size: "low" }],
+          tool_choice: "auto",
+        }),
+      }),
+    );
+  });
+
+  it("keeps xAI on the chat completions transport", async () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,
       status: 200,
       json: async () => ({ choices: [{ message: { content: "cloud hello" } }] }),
     }));
     vi.stubGlobal("fetch", fetchMock);
-
-    const openai = openAICompatibleProvider({
-      provider: "openai",
-      model: "gpt-4o-mini",
-      baseUrl: "https://api.openai.com/v1",
-      apiKey: "openai-key",
-      maxTokens: 100,
-    });
-    await expect(openai.complete([{ role: "user", content: "hi" }])).resolves.toBe("cloud hello");
 
     const xai = openAICompatibleProvider({
       provider: "xai",
@@ -381,18 +434,42 @@ describe("provider adapters", () => {
     });
     await expect(xai.complete([{ role: "user", content: "hi" }])).resolves.toBe("cloud hello");
 
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      1,
-      "https://api.openai.com/v1/chat/completions",
-      expect.objectContaining({
-        headers: expect.objectContaining({ Authorization: "Bearer openai-key" }),
-      }),
-    );
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
+    expect(fetchMock).toHaveBeenCalledWith(
       "https://api.x.ai/v1/chat/completions",
       expect.objectContaining({
         headers: expect.objectContaining({ Authorization: "Bearer xai-key" }),
+      }),
+    );
+  });
+
+  it("uses xAI Responses web search when requested", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ output_text: "grok searched" }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const xai = openAICompatibleProvider({
+      provider: "xai",
+      model: "grok-4.3",
+      baseUrl: "https://api.x.ai/v1",
+      apiKey: "xai-key",
+      maxTokens: 200,
+    });
+    await expect(xai.complete([{ role: "user", content: "search this" }], { webSearch: true })).resolves.toBe("grok searched");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.x.ai/v1/responses",
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: "Bearer xai-key" }),
+        body: JSON.stringify({
+          model: "grok-4.3",
+          input: [{ role: "user", content: "search this" }],
+          max_output_tokens: 200,
+          tools: [{ type: "web_search" }],
+          tool_choice: "auto",
+        }),
       }),
     );
   });
@@ -453,6 +530,36 @@ describe("provider adapters", () => {
     );
   });
 
+  it("opts Gemini chat calls into Google Search grounding", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: "grounded" }] } }] }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = geminiProvider({
+      provider: "gemini",
+      model: "gemini-2.5-flash",
+      baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+      apiKey: "gem-key",
+      maxTokens: 321,
+    });
+    await expect(adapter.complete([{ role: "user", content: "what happened today?" }], { webSearch: true }))
+      .resolves.toBe("grounded");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+      expect.objectContaining({
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: "what happened today?" }] }],
+          tools: [{ google_search: {} }],
+          generationConfig: { maxOutputTokens: 321 },
+        }),
+      }),
+    );
+  });
+
   it("sends Ollama native chat with stream disabled and num_predict", async () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,
@@ -489,13 +596,13 @@ describe("provider-neutral AI wrapper", () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,
       status: 200,
-      json: async () => ({ choices: [{ message: { content: "OK" } }] }),
+      json: async () => ({ output_text: "OK" }),
     }));
     vi.stubGlobal("fetch", fetchMock);
 
     const ai = createAIFromConfig({
       provider: "openai",
-      model: "gpt-4o-mini",
+      model: "gpt-5.2",
       baseUrl: "https://api.openai.com/v1",
       apiKey: "setup-key",
       maxTokens: 32,
@@ -503,7 +610,7 @@ describe("provider-neutral AI wrapper", () => {
 
     await expect(ai.text("Reply OK")).resolves.toBe("OK");
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://api.openai.com/v1/chat/completions",
+      "https://api.openai.com/v1/responses",
       expect.objectContaining({
         headers: expect.objectContaining({ Authorization: "Bearer setup-key" }),
       }),

@@ -320,7 +320,7 @@ export async function driveOnboardingUiProof(page: Page, options?: OnboardingUiP
   );
   assert(result.handoff?.deskThreadId, "Assistant handoff did not persist a Desk thread id.");
   assert(result.desk?.activeId === result.handoff.deskThreadId, "Handoff Desk thread is not active.");
-  assert(result.desk?.threads?.[0]?.source === "kings_press_setup", "Handoff thread source is not King's Press setup.");
+  assert(result.desk?.threads?.[0]?.source === "pillar_press_setup", "Handoff thread source is not Pillar Press setup.");
   if (expectProviderReady) {
     assert(result.handoff.providerReady === true, "Provider-ready handoff was not persisted.");
     assert(result.handoff.nextAssistantMode === "live_assistant_ready", "Provider-ready setup did not hand off to live assistant mode.");

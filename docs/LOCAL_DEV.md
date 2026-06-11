@@ -1,6 +1,6 @@
 # Local Development
 
-King's Press Editorial Desk is local-first by default. You do not need Docker,
+Pillar Press is local-first by default. You do not need Docker,
 Supabase, or Postgres for normal desktop development.
 
 ## Prerequisites
@@ -21,7 +21,7 @@ npm run dev
 ```
 
 Open http://localhost:3000. With the default `.env.example`, the app uses:
-- SQLite in `.local-data/kings-press.sqlite3`.
+- SQLite in `.local-data/pillar-press.sqlite3`.
 - Local app-data storage under `.local-data/storage`.
 - Ollama native chat at `http://127.0.0.1:11434`.
 - A single embedded local owner/workspace with no default campaigns. Create the

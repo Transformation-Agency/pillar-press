@@ -6,7 +6,7 @@
  * for the same references document (THROUGHLINES / Strategy note / AUDIENCES /
  * REGISTERS / CLARITY RULES / RED LINES / SELF-VISION / GATE PREFERENCES blocks, in this exact
  * order, with the same punctuation, prefixes, and leading "\n" separators).
- * King's Press may append an APPROVED SETUP PROFILE block when onboarding has
+ * Pillar Press may append an APPROVED SETUP PROFILE block when onboarding has
  * saved one; ordinary reference documents remain byte-identical to the
  * prototype output.
  *

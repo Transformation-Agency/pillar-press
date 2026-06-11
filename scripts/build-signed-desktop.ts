@@ -4,8 +4,8 @@ import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 
 const root = process.cwd();
-const appPath = join(root, "src-tauri", "target", "release", "bundle", "macos", "King's Press Editorial Desk.app");
-const dmgPath = join(root, "src-tauri", "target", "release", "bundle", "dmg", "King's Press Editorial Desk_0.1.0_aarch64.dmg");
+const appPath = join(root, "src-tauri", "target", "release", "bundle", "macos", "Pillar Press.app");
+const dmgPath = join(root, "src-tauri", "target", "release", "bundle", "dmg", "Pillar Press_0.1.0_aarch64.dmg");
 
 function required(name: string) {
   const value = process.env[name]?.trim();
@@ -76,19 +76,19 @@ function notarySubmitArgs(path: string) {
 }
 
 async function notarizeApp(tempDir: string) {
-  const zipPath = join(tempDir, "KingsPressEditorialDesk.app.zip");
-  console.log("Zipping King’s Press app for notarization...");
+  const zipPath = join(tempDir, "PillarPress.app.zip");
+  console.log("Zipping Pillar Press app for notarization...");
   await run("ditto", ["-c", "-k", "--keepParent", appPath, zipPath]);
-  console.log("Notarizing King’s Press app...");
+  console.log("Notarizing Pillar Press app...");
   await run("xcrun", notarySubmitArgs(zipPath));
-  console.log("Stapling King’s Press app...");
+  console.log("Stapling Pillar Press app...");
   await run("xcrun", ["stapler", "staple", appPath]);
 }
 
 async function notarizeDmg() {
-  console.log("Notarizing King’s Press DMG...");
+  console.log("Notarizing Pillar Press DMG...");
   await run("xcrun", notarySubmitArgs(dmgPath));
-  console.log("Stapling King’s Press DMG...");
+  console.log("Stapling Pillar Press DMG...");
   await run("xcrun", ["stapler", "staple", dmgPath]);
 }
 
@@ -128,7 +128,7 @@ const providerShortName =
   required("KINGS_PRESS_PROVIDER_SHORT_NAME") ||
   required("APPLE_PROVIDER_SHORT_NAME") ||
   required("APPLE_TEAM_ID");
-const tempDir = join(tmpdir(), `kings-press-signed-${Date.now()}`);
+const tempDir = join(tmpdir(), `pillar-press-signed-${Date.now()}`);
 const configPath = join(tempDir, "tauri.signed.conf.json");
 
 await mkdir(tempDir, { recursive: true });
@@ -155,7 +155,7 @@ try {
     )
   );
 
-  console.log("Building Developer ID signed King’s Press desktop release...");
+  console.log("Building Developer ID signed Pillar Press desktop release...");
   await run(tauriBin(), ["build", "--ci", "--config", configPath]);
   if (hasKeychainProfileCredentials() && !hasApiKeyNotaryCredentials() && !hasAppleIdNotaryCredentials()) {
     await notarizeApp(tempDir);

@@ -1,7 +1,7 @@
 /**
  * Hosted compatibility Supabase client helpers.
  *
- * The King’s Press desktop runtime does not call this module. Local-first auth,
+ * The Pillar Press desktop runtime does not call this module. Local-first auth,
  * database, and storage are handled by embedded SQLite and app-data files.
  *
  * SERVER ONLY. These read service-role / JWT secrets from the environment and

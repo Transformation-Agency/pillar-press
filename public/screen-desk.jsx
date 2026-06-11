@@ -26,14 +26,46 @@ function estimateTokens(text) {
 }
 
 function contextWindowFor(status) {
-  const provider = status && status.provider;
-  const model = ((status && status.model) || "").toLowerCase();
+  const profile = effectiveLLMProfile(status);
+  const provider = profile && profile.provider;
+  const model = ((profile && profile.model) || "").toLowerCase();
   if (provider === "anthropic") return 200000;
   if (provider === "gemini") return model.includes("pro") ? 1000000 : 128000;
   if (provider === "openai" || provider === "xai") return 128000;
   if (model.includes("70b") || model.includes("128k")) return 128000;
   if (model.includes("32k")) return 32000;
   return 8192;
+}
+
+function effectiveLLMProfile(status) {
+  if (!status) return null;
+  const profiles = Array.isArray(status.profiles) ? status.profiles : [];
+  const taskProfileId =
+    status.tasks && status.tasks.utility && status.tasks.utility.profileId
+      ? status.tasks.utility.profileId
+      : null;
+  const taskProfile = taskProfileId ? profiles.find((profile) => profile && profile.id === taskProfileId) : null;
+  if (taskProfile) return taskProfile;
+  const defaultProfile = status.defaultProfileId
+    ? profiles.find((profile) => profile && profile.id === status.defaultProfileId)
+    : null;
+  if (defaultProfile) return defaultProfile;
+  if (profiles.length) return profiles[0];
+  return status.provider && status.model ? { provider: status.provider, model: status.model } : null;
+}
+
+function modelLabelFor(status) {
+  const profile = effectiveLLMProfile(status);
+  if (!profile || !profile.model) return "Model setup";
+  const provider = {
+    anthropic: "Anthropic",
+    gemini: "Gemini",
+    openai: "OpenAI",
+    "openai-compatible": "Compatible",
+    xai: "xAI",
+    ollama: "Ollama",
+  }[profile.provider] || "";
+  return provider ? provider + " · " + profile.model : profile.model;
 }
 
 function deskUsedTokens(thread) {
@@ -92,13 +124,114 @@ async function compressDeskThread(thread, windowSize) {
   });
 }
 
+function safeHref(href) {
+  const value = String(href || "").trim();
+  return /^https?:\/\//i.test(value) || /^mailto:/i.test(value) ? value : "";
+}
+
+function renderInlineMarkdown(text, keyPrefix) {
+  const source = String(text || "");
+  const parts = [];
+  const pattern = /(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`|\[[^\]]+\]\([^)]+\))/g;
+  let last = 0;
+  let match;
+  while ((match = pattern.exec(source))) {
+    if (match.index > last) parts.push(source.slice(last, match.index));
+    const token = match[0];
+    const key = keyPrefix + "-" + parts.length;
+    if (token.startsWith("**")) {
+      parts.push(<strong key={key}>{token.slice(2, -2)}</strong>);
+    } else if (token.startsWith("*")) {
+      parts.push(<em key={key}>{token.slice(1, -1)}</em>);
+    } else if (token.startsWith("`")) {
+      parts.push(<code key={key}>{token.slice(1, -1)}</code>);
+    } else {
+      const link = token.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+      const href = link ? safeHref(link[2]) : "";
+      parts.push(href
+        ? <a key={key} href={href} target="_blank" rel="noreferrer">{link[1]}</a>
+        : token);
+    }
+    last = pattern.lastIndex;
+  }
+  if (last < source.length) parts.push(source.slice(last));
+  return parts;
+}
+
+function MarkdownText({ text }) {
+  const lines = String(text || "").split(/\r?\n/);
+  const blocks = [];
+  let paragraph = [];
+  let list = null;
+
+  function flushParagraph() {
+    if (!paragraph.length) return;
+    const content = paragraph.join(" ").trim();
+    if (content) blocks.push({ type: "p", text: content });
+    paragraph = [];
+  }
+
+  function flushList() {
+    if (!list) return;
+    blocks.push(list);
+    list = null;
+  }
+
+  lines.forEach((line) => {
+    const clean = line.trim();
+    if (!clean) {
+      flushParagraph();
+      flushList();
+      return;
+    }
+    const heading = clean.match(/^(#{1,3})\s+(.+)$/);
+    if (heading) {
+      flushParagraph();
+      flushList();
+      blocks.push({ type: "heading", level: heading[1].length, text: heading[2] });
+      return;
+    }
+    const bullet = clean.match(/^[-*]\s+(.+)$/);
+    const numbered = clean.match(/^\d+[.)]\s+(.+)$/);
+    if (bullet || numbered) {
+      flushParagraph();
+      const type = numbered ? "ol" : "ul";
+      if (!list || list.type !== type) {
+        flushList();
+        list = { type, items: [] };
+      }
+      list.items.push((bullet || numbered)[1]);
+      return;
+    }
+    flushList();
+    paragraph.push(clean);
+  });
+  flushParagraph();
+  flushList();
+
+  return (
+    <div className="desk-markdown">
+      {blocks.map((block, index) => {
+        if (block.type === "heading") {
+          const Tag = block.level === 1 ? "h3" : block.level === 2 ? "h4" : "h5";
+          return <Tag key={index}>{renderInlineMarkdown(block.text, "h" + index)}</Tag>;
+        }
+        if (block.type === "ul" || block.type === "ol") {
+          const Tag = block.type;
+          return <Tag key={index}>{block.items.map((item, i) => <li key={i}>{renderInlineMarkdown(item, "li" + index + "-" + i)}</li>)}</Tag>;
+        }
+        return <p key={index}>{renderInlineMarkdown(block.text, "p" + index)}</p>;
+      })}
+    </div>
+  );
+}
+
 function DeskBubble({ msg }) {
   const mine = msg.role === "user";
   return (
     <div style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start" }}>
       <div style={{
         maxWidth: "min(760px, 86%)",
-        whiteSpace: "pre-wrap",
         lineHeight: 1.6,
         fontSize: 16,
         padding: "11px 14px",
@@ -108,13 +241,13 @@ function DeskBubble({ msg }) {
         background: mine ? "var(--accent-soft)" : "var(--paper-2)",
         border: "1px solid " + (mine ? "color-mix(in oklab, var(--accent) 26%, transparent)" : "var(--hair)"),
       }}>
-        {msg.content}
+        {mine ? msg.content : <MarkdownText text={msg.content} />}
       </div>
     </div>
   );
 }
 
-function Desk({ campaignId, onOpenPiece }) {
+function Desk({ campaignId, onOpenPiece, hydrated }) {
   const desk = window.Store.getDesk();
   const isMobile = window.useIsMobile();
   const [text, setText] = React.useState("");
@@ -134,10 +267,11 @@ function Desk({ campaignId, onOpenPiece }) {
   }, []);
 
   React.useEffect(() => {
+    if (!hydrated) return;
     if ((desk.threads || []).length) return;
     const t = newDeskThread();
     window.Store.setDesk({ threads: [t], activeId: t.id });
-  }, [desk.threads && desk.threads.length]);
+  }, [hydrated, desk.threads && desk.threads.length]);
 
   React.useEffect(() => {
     const el = streamRef.current;
@@ -146,7 +280,7 @@ function Desk({ campaignId, onOpenPiece }) {
 
   const threads = desk.threads || [];
   const active = threads.find((t) => t.id === desk.activeId) || threads[0];
-  const isSetupHandoff = !!(active && active.source === "kings_press_setup");
+  const isSetupHandoff = !!(active && active.source === "pillar_press_setup");
   const win = contextWindowFor(status);
   const used = active ? deskUsedTokens(active) : 0;
   const pct = Math.min(1, used / win);
@@ -222,7 +356,7 @@ function Desk({ campaignId, onOpenPiece }) {
                 <span style={{ minWidth: 0 }}>
                   <span style={{ display: "block", fontFamily: "var(--font-display)", fontSize: 15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.title || "New thread"}</span>
                   <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)" }}>
-                    {t.source === "kings_press_setup" ? "setup handoff · " : ""}{(t.messages || []).length} turns
+                    {t.source === "pillar_press_setup" ? "setup handoff · " : ""}{(t.messages || []).length} turns
                   </span>
                 </span>
                 <span onClick={(e) => { e.stopPropagation(); deleteThread(t.id); }} title="Delete thread" style={{ color: "var(--ink-3)", padding: 2 }}><Icon name="trash" size={13} /></span>
@@ -241,7 +375,7 @@ function Desk({ campaignId, onOpenPiece }) {
             </div>
           </div>
           <span className="mono" style={{ fontSize: 11, color: "var(--ink-3)" }}>{Math.round(used / 1000 * 10) / 10}k / {Math.round(win / 1000)}k</span>
-          <button className="btn sm" onClick={() => window.dispatchEvent(new Event("kingspress:open-model-setup"))}><Icon name="key" size={13} /> {(status && status.model) || "Model setup"}</button>
+          <button className="btn sm" onClick={() => window.dispatchEvent(new Event("pillarpress:open-model-setup"))}><Icon name="key" size={13} /> {modelLabelFor(status)}</button>
           <button className="btn sm" onClick={promote} disabled={!active || !(active.messages || []).length}><Icon name="doc" size={13} /> Send to Library</button>
         </div>
 

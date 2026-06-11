@@ -1,10 +1,10 @@
-# King’s Press Editorial Desk — local-first desktop architecture
+# Pillar Press — local-first desktop architecture
 
-This repo contains the local-first Tauri desktop build of **King’s Press
+This repo contains the local-first Tauri desktop build of **Pillar Press
 Editorial Desk**.
 
 ## Desktop runtime
-- App name: **King’s Press Editorial Desk**.
+- App name: **Pillar Press**.
 - Tauri package: `src-tauri/`.
 - Desktop scripts:
   - `npm run desktop:dev`
@@ -111,8 +111,8 @@ Editorial Desk**.
   skeleton.
 - Override paths for development or backup testing:
   - `KINGS_PRESS_DATA_DIR=/path/to/app-data`
-  - `KINGS_PRESS_DB_PATH=/path/to/kings-press.sqlite3`
-- Backups are local folders named `kings-press-backup-<unix-ms>`. The SQLite
+  - `KINGS_PRESS_DB_PATH=/path/to/pillar-press.sqlite3`
+- Backups are local folders named `pillar-press-backup-<unix-ms>`. The SQLite
   copy is created with SQLite `VACUUM INTO` so the backup is consistent while
   the app is running. Desktop settings are included with API keys, tokens,
   secrets, and passwords nulled out; cloud provider keys should be re-entered
@@ -166,7 +166,7 @@ npm run desktop:verify-installed
 ```
 
 The verifier checks that the macOS app and DMG exist, the bundle metadata uses
-the King’s Press name/id/version, the packaged Next server and bundled Node
+the Pillar Press name/id/version, the packaged Next server and bundled Node
 runtime are present at paths the Tauri launcher can resolve, no `.env` files are
 bundled, startup browser assets are local rather than CDN-backed, macOS
 codesigning verifies, the DMG passes `hdiutil imageinfo`, the DMG mounts with
@@ -180,7 +180,7 @@ temporary Applications folder, launches that copied app through macOS
 LaunchServices with a fresh app-data directory, and verifies that the copied app
 starts its bundled server, defaults to local-first model settings, exposes media
 provider status, creates SQLite locally, and starts with no campaigns. It then
-drives the packaged King’s Press UI through the conversational setup path with a
+drives the packaged Pillar Press UI through the conversational setup path with a
 mocked speech-recognition answer, creates the first focus, saves writing
 preferences, persists the setup transcript with `inputMethod: voice`, records
 first value and sentiment, closes setup, and lands on the active Desk handoff

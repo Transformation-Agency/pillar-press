@@ -6,8 +6,10 @@ const root = process.cwd();
 const resourceRoots = [
   join(root, "src-tauri", "resources", "desktop-server"),
   join(root, "src-tauri", "resources", "node"),
+  join(root, "src-tauri", "resources", "whisper"),
 ];
 const nodeRuntimePath = join(root, "src-tauri", "resources", "node", "bin", "node");
+const whisperRuntimePath = join(root, "src-tauri", "resources", "whisper", "bin", "whisper-cli");
 const nodeEntitlementsPath = join(root, "src-tauri", "macos-node-entitlements.plist");
 
 function required(name: string) {
@@ -53,7 +55,7 @@ async function walk(dir: string): Promise<string[]> {
 
 function shouldSign(path: string) {
   if (path.endsWith(".node") || path.endsWith(".dylib")) return true;
-  return path === nodeRuntimePath;
+  return path === nodeRuntimePath || path === whisperRuntimePath;
 }
 
 async function codesign(path: string) {

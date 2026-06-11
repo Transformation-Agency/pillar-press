@@ -7,7 +7,7 @@ import {
 /**
  * Public media storage (server-side).
  *
- * Desktop/local-first mode writes generated media into the King’s Press app-data
+ * Desktop/local-first mode writes generated media into the Pillar Press app-data
  * folder and serves it through /api/local-files. Supabase Storage remains only
  * as a compatibility path for legacy hosted/web setups.
  */

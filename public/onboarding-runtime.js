@@ -1,5 +1,5 @@
 /* Reusable conversational onboarding runtime.
-   This is deterministic app code, not model output. It defines the King's Press
+   This is deterministic app code, not model output. It defines the Pillar Press
    app pack plus a small state/action contract that the setup UI can render. */
 (function () {
   const copy = window.KP_ONBOARDING_COPY || {};
@@ -18,8 +18,8 @@
     return Array.isArray(value) && value.length ? clonePlain(value) : clonePlain(fallback);
   }
 
-  const RUNTIME_VERSION = manifest.runtimeVersion || "2026-06-10.kings-press-conversational-runtime.v1";
-  const PACK_VERSION = manifest.packVersion || "2026-06-10.kings-press-pack.v1";
+  const RUNTIME_VERSION = manifest.runtimeVersion || "2026-06-10.pillar-press-conversational-runtime.v1";
+  const PACK_VERSION = manifest.packVersion || "2026-06-10.pillar-press-pack.v1";
   const METRICS_VERSION = 1;
   const MAX_METRICS_EVENTS = 120;
 
@@ -27,7 +27,7 @@
     {
       id: "intro",
       label: "Intro",
-      title: "I'm King's Press",
+      title: "I'm Pillar Press",
       subtitle: "I help you articulate your thoughts and turn them into clear, publishable work.",
       hostMessages: [
         "I can guide you through setup, including voice, models, and the first focus.",
@@ -42,7 +42,7 @@
       id: "voice",
       label: "Voice",
       title: "Set up voice",
-      subtitle: "Add voice now if you want King's Press to read and respond aloud.",
+      subtitle: "Add voice now if you want Pillar Press to read and respond aloud.",
       hostMessages: [
         "Voice is optional.",
         "OpenAI is the simplest first key because it can also power the rest of setup.",
@@ -56,7 +56,7 @@
       id: "connect",
       label: "Connect",
       title: "Let's set up your desk",
-      subtitle: "Choose the model and integrations King's Press can use. You can skip anything and change it later.",
+      subtitle: "Choose the model and integrations Pillar Press can use. You can skip anything and change it later.",
       hostMessages: [
         "Now choose the model and any outside tools you want connected.",
         "Anything you skip stays available later.",
@@ -125,7 +125,7 @@
 
   const defaultFlags = {
     onboardingCompletePref: "setupHelperCompleteV1",
-    computeSetupLocalStorageKey: "kingspress.desktopSetupComplete",
+    computeSetupLocalStorageKey: "pillarpress.desktopSetupComplete",
     firstValuePref: "onboardingFirstValueEventV1",
     transcriptPref: "onboardingSetupTranscriptV1",
     handoffPref: "onboardingAssistantHandoffV1",
@@ -151,12 +151,12 @@
 
   const defaultTrust = {
     reassurance: "You're in control. Nothing connects without your approval.",
-    footer: "King's Press · Your desk for ideas that matter.",
+    footer: "Pillar Press · Your desk for ideas that matter.",
     permissions: {
       microphone: "Voice setup starts only after you choose it.",
       memory: "Saved memory is off until you approve it.",
       web: "Web research is off until you approve it.",
-      publish: "King's Press will not publish, send, or connect outside services without approval.",
+      publish: "Pillar Press will not publish, send, or connect outside services without approval.",
     },
   };
   const trust = Object.assign({}, defaultTrust, manifest.trust || {}, {
@@ -179,7 +179,7 @@
       action: ACTION_INTENTS.OPEN_PROVIDER_SETUP,
       icon: "db",
       title: "AI & models",
-      description: "Choose the models King's Press can use to think and create.",
+      description: "Choose the models Pillar Press can use to think and create.",
       disconnectedStatus: "Not connected",
       connectedStatus: "Connected",
       label: "Set up",
@@ -234,7 +234,7 @@
       externalServices: ["gather_sources", "drive", "media_providers", "plugins"],
     },
     [ACTION_INTENTS.PLAY_INTRO]: {
-      label: "Introduce King's Press",
+      label: "Introduce Pillar Press",
       requiresApproval: true,
       persistentEffect: "none",
     },
@@ -277,8 +277,8 @@
   const actionMetadata = Object.assign({}, defaultActionMetadata, manifest.actionMetadata || {});
 
   const pack = {
-    id: manifest.id || "kings_press",
-    brand: manifest.appName || manifest.brand || "King's Press",
+    id: manifest.id || "pillar_press",
+    brand: manifest.appName || manifest.brand || "Pillar Press",
     version: PACK_VERSION,
     manifestVersion: manifest.version || null,
     capabilities: manifest.capabilities || null,
@@ -286,7 +286,7 @@
       role: "warm editorial setup host",
       tone: "warm, direct, plainspoken, premium",
       boundaries: [
-        "Do not imply King's Press replaces the writer.",
+        "Do not imply Pillar Press replaces the writer.",
         "Do not infer permission to use memory, web research, external services, publishing, or sending.",
         "Ask one thing at a time and keep typing available.",
       ],
@@ -298,7 +298,7 @@
     trust,
     copy: {
       audioReady: typeof copy.getAudioReadyPrompt === "function" ? copy.getAudioReadyPrompt() : "",
-      introScript: typeof copy.getPressIntroScript === "function" ? copy.getPressIntroScript("kings_press") : "",
+      introScript: typeof copy.getPressIntroScript === "function" ? copy.getPressIntroScript("pillar_press") : "",
       firstPlatformQuestion: copy.FIRST_PLATFORM_QUESTION || "",
       introCopyVersion: copy.AUDIO_INTRO_COPY_VERSION || null,
     },

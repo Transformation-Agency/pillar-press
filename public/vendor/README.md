@@ -1,6 +1,6 @@
 # Browser Runtime Vendor Files
 
-King's Press bundles these browser startup files so the desktop app can launch
+Pillar Press bundles these browser startup files so the desktop app can launch
 offline without fetching React, ReactDOM, or Babel from a CDN.
 
 - `react.production.min.js`: React 18.3.1 UMD production build from unpkg.

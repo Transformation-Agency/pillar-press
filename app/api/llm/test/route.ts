@@ -8,6 +8,7 @@ import {
   DEFAULT_OPENAI_BASE_URL,
   DEFAULT_XAI_BASE_URL,
   DEFAULT_MAX_TOKENS,
+  resolveInteractiveLLMConfig,
 } from "@/lib/llm/config";
 import { createAIFromConfig, LLMError } from "@/lib/llm";
 import type { LLMProvider } from "@/lib/llm";
@@ -30,22 +31,17 @@ function defaultBaseUrl(provider: LLMProvider): string | undefined {
 function normalizeConfig(body: z.infer<typeof Body>) {
   const provider = body.provider;
   const baseUrl = body.baseUrl?.trim().replace(/\/+$/, "") || defaultBaseUrl(provider);
-  const apiKey = body.apiKey?.trim() || undefined;
 
   if (provider === "openai-compatible" && !baseUrl) {
     throw new LLMError(422, "validation", "Add a base URL before testing this provider.", provider);
   }
-  if (["anthropic", "openai", "xai", "gemini"].includes(provider) && !apiKey) {
-    throw new LLMError(422, "validation", "Add an API key before testing this provider.", provider);
-  }
 
-  return {
-    provider,
-    model: body.model.trim(),
+  return resolveInteractiveLLMConfig(provider, {
+    apiKey: body.apiKey,
     baseUrl,
-    apiKey,
-    maxTokens: Math.min(DEFAULT_MAX_TOKENS, 32),
-  };
+    model: body.model,
+    maxTokens: String(Math.min(DEFAULT_MAX_TOKENS, 32)),
+  });
 }
 
 export async function POST(req: Request) {

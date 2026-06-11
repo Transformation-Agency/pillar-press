@@ -1,5 +1,5 @@
 {
-  "name": "kings-press-editorial-desk",
+  "name": "pillar-press",
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
@@ -9,6 +9,7 @@
     "desktop:web": "tsx scripts/run-desktop-web.ts dev",
     "desktop:web:build": "tsx scripts/run-desktop-web.ts build",
     "desktop:prepare-sidecar": "tsx scripts/prepare-tauri-sidecar.ts",
+    "desktop:prepare-whisper": "tsx scripts/setup-whisper-sidecar.ts",
     "desktop:sign-macos-resources": "tsx scripts/sign-macos-desktop-resources.ts",
     "desktop:icon": "tsx scripts/generate-desktop-icon.ts && tauri icon src-tauri/icons/source-1024.png",
     "desktop:dev": "tauri dev",

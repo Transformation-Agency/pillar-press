@@ -26,9 +26,9 @@
   };
 
   const EVENTS = {
-    PROVIDER_SETUP_OPENED: "kingspress:onboarding-provider-setup-opened",
-    PROVIDER_SETUP_SAVED: "kingspress:onboarding-provider-setup-saved",
-    PROVIDER_SETUP_CLOSED: "kingspress:onboarding-provider-setup-closed",
+    PROVIDER_SETUP_OPENED: "pillarpress:onboarding-provider-setup-opened",
+    PROVIDER_SETUP_SAVED: "pillarpress:onboarding-provider-setup-saved",
+    PROVIDER_SETUP_CLOSED: "pillarpress:onboarding-provider-setup-closed",
   };
 
   function cleanError(error, fallback) {
@@ -60,7 +60,7 @@
 
   function markDesktopSetupComplete() {
     try {
-      const key = flags.computeSetupLocalStorageKey || "kingspress.desktopSetupComplete";
+      const key = flags.computeSetupLocalStorageKey || "pillarpress.desktopSetupComplete";
       if (window.localStorage && key) window.localStorage.setItem(key, "true");
     } catch (_error) {}
   }
@@ -114,7 +114,7 @@
       id: threadId,
       title: "Setup handoff",
       titleSet: true,
-      source: "kings_press_setup",
+      source: "pillar_press_setup",
       sessionId: handoff && handoff.sessionId,
       campaignId: handoff && handoff.campaignId,
       messages,
@@ -157,11 +157,26 @@
   function providerSafeDetail(settings) {
     const profile = settings && settings.profile ? settings.profile : settings;
     if (!profile || typeof profile !== "object") return {};
+    const rawBaseUrl = profile.baseUrl || settings.baseUrl || null;
+    let safeBaseUrl = rawBaseUrl;
+    if (rawBaseUrl) {
+      try {
+        const URLCtor = typeof URL !== "undefined" ? URL : window && window.URL;
+        const parsed = new URLCtor(rawBaseUrl);
+        parsed.username = "";
+        parsed.password = "";
+        safeBaseUrl = parsed.toString().replace(/\/$/, rawBaseUrl.endsWith("/") ? "/" : "");
+      } catch (_error) {
+        safeBaseUrl = String(rawBaseUrl).replace(/^(https?:\/\/)[^/@]+@/i, "$1");
+      }
+    }
     return {
       id: profile.id || settings.defaultProfileId || null,
       label: profile.label || null,
       provider: profile.provider || settings.provider || null,
       model: profile.model || settings.model || null,
+      baseUrl: safeBaseUrl,
+      hasApiKey: !!(profile.hasApiKey || settings.hasApiKey || profile.apiKey || settings.apiKey),
     };
   }
 
@@ -206,16 +221,16 @@
   async function requestVoice() {
     const intent = INTENTS.REQUEST_VOICE || "request_voice";
     try {
+      const desktop = window.KINGS_DESKTOP;
+      if (desktop && desktop.isDesktop && desktop.isDesktop() && desktop.startVoiceSession) {
+        return succeeded(intent, { voiceConnected: true, transcription: "local-whisper" });
+      }
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         throw new Error("Microphone access is not available here.");
       }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       stream.getTracks().forEach((track) => track.stop());
-      const desktop = window.KINGS_DESKTOP;
-      if (desktop && desktop.isDesktop && desktop.isDesktop() && desktop.startVoiceSession) {
-        await desktop.startVoiceSession();
-      }
-      return succeeded(intent, { voiceConnected: true });
+      return succeeded(intent, { voiceConnected: true, transcription: "browser" });
     } catch (error) {
       return failed(intent, error, "Audio setup failed. You can continue by typing.");
     }
@@ -371,7 +386,7 @@
       const transcript = options && options.transcript && typeof options.transcript === "object"
         ? Object.assign({}, options.transcript, {
           persistedAt: new Date().toISOString(),
-          source: "kings_press_setup",
+          source: "pillar_press_setup",
         })
         : null;
       if (transcript) {
@@ -397,7 +412,7 @@
       const handoff = {
         version: 1,
         createdAt: new Date().toISOString(),
-        source: "kings_press_setup",
+        source: "pillar_press_setup",
         sessionId: options && options.sessionId,
         activation: firstValueEvent,
         routeTarget: (firstValueEvent && firstValueEvent.routeTarget) || (options && options.routeTarget) || "desk",
@@ -485,6 +500,19 @@
     });
   }
 
+  function onVoiceStatus(handler) {
+    const desktop = window.KINGS_DESKTOP;
+    if (!desktop || !desktop.isDesktop || !desktop.isDesktop() || !desktop.onVoiceStatus) {
+      return Promise.resolve(function () {});
+    }
+    return desktop.onVoiceStatus((event) => {
+      const payload = event && event.payload ? event.payload : event;
+      handler(payload || {});
+    }).catch(function () {
+      return function () {};
+    });
+  }
+
   function notifyProviderSetupSaved(settings) {
     markDesktopSetupComplete();
     emit(EVENTS.PROVIDER_SETUP_SAVED, providerSafeDetail(settings));
@@ -515,6 +543,7 @@
     skipOnboarding,
     onProviderSetupSaved,
     onSttFinal,
+    onVoiceStatus,
     notifyProviderSetupSaved,
     notifyProviderSetupClosed,
   };

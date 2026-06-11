@@ -1,8 +1,8 @@
 [package]
-name = "kings-press-editorial-desk"
+name = "pillar-press"
 version = "0.1.0"
-description = "King's Press Editorial Desk"
-authors = ["King's Press"]
+description = "Pillar Press"
+authors = ["Pillar"]
 edition = "2021"
 build = "build.rs"
 license = "MIT"
@@ -13,6 +13,8 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 aes-gcm = "0.10"
 base64 = "0.22"
+cpal = "0.15"
+hound = "3.5"
 rand = "0.8"
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }

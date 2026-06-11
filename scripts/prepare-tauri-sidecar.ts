@@ -201,5 +201,12 @@ for (const name of await readdir(resourceDir)) {
 
 await copyNodeRuntime();
 
+try {
+  await run("npm", ["run", "desktop:prepare-whisper"]);
+} catch (error) {
+  console.warn("Whisper sidecar was not prepared. Voice transcription can still be configured later.");
+  console.warn(error instanceof Error ? error.message : String(error));
+}
+
 console.log(`Prepared Tauri desktop server resources at ${resourceDir}`);
 console.log(`Prepared bundled Node runtime at ${nodeResourceDir}`);

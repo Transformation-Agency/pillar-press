@@ -6,6 +6,7 @@ import {
   DEFAULT_OLLAMA_BASE_URL,
   DEFAULT_OPENAI_BASE_URL,
   DEFAULT_XAI_BASE_URL,
+  resolveProviderConnection,
 } from "@/lib/llm/config";
 import { LLMError } from "@/lib/llm";
 
@@ -81,8 +82,12 @@ function normalizeGeminiModels(payload: GeminiModelsResponse): string[] {
 export async function POST(req: Request) {
   try {
     const body = Body.parse(await req.json());
-    const url = modelsUrl(body.provider, body.baseUrl);
-    const headers = headersFor(body.provider, body.apiKey);
+    const connection = resolveProviderConnection(body.provider, {
+      baseUrl: body.baseUrl,
+      apiKey: body.apiKey,
+    });
+    const url = modelsUrl(body.provider, connection.baseUrl);
+    const headers = headersFor(body.provider, connection.apiKey);
 
     const res = await fetch(url, { headers });
     if (!res.ok) {

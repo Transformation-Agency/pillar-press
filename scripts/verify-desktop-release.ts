@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { spawn } from "node:child_process";
 
 const root = process.cwd();
-const appPath = join(root, "src-tauri", "target", "release", "bundle", "macos", "King's Press Editorial Desk.app");
-const dmgPath = join(root, "src-tauri", "target", "release", "bundle", "dmg", "King's Press Editorial Desk_0.1.0_aarch64.dmg");
+const appPath = join(root, "src-tauri", "target", "release", "bundle", "macos", "Pillar Press.app");
+const dmgPath = join(root, "src-tauri", "target", "release", "bundle", "dmg", "Pillar Press_0.1.0_aarch64.dmg");
 const appResources = join(appPath, "Contents", "Resources");
 const requireDeveloperId =
   process.argv.includes("--require-developer-id") || process.env.KINGS_PRESS_REQUIRE_DEVELOPER_ID === "true";
@@ -98,9 +98,9 @@ async function verifyAppBundleMetadata(bundlePath: string) {
   await assertExists(plist, "app Info.plist");
   await assertExists(join(resources, "icon.icns"), "app icon resource");
   await Promise.all([
-    assertPlistValue(plist, "CFBundleDisplayName", "King's Press Editorial Desk"),
-    assertPlistValue(plist, "CFBundleName", "King's Press Editorial Desk"),
-    assertPlistValue(plist, "CFBundleIdentifier", "com.kingspress.editorialdesk"),
+    assertPlistValue(plist, "CFBundleDisplayName", "Pillar Press"),
+    assertPlistValue(plist, "CFBundleName", "Pillar Press"),
+    assertPlistValue(plist, "CFBundleIdentifier", "com.pillar.press"),
     assertPlistValue(plist, "CFBundleShortVersionString", "0.1.0"),
     assertPlistValue(plist, "CFBundleIconFile", "icon.icns"),
     assertPlistBool(plist, "NSQuitAlwaysKeepsWindows", false),
@@ -109,12 +109,12 @@ async function verifyAppBundleMetadata(bundlePath: string) {
 }
 
 async function verifyDmgPayload() {
-  const mountDir = await mkdtemp(join(tmpdir(), "kings-press-dmg-mount-"));
+  const mountDir = await mkdtemp(join(tmpdir(), "pillar-press-dmg-mount-"));
   let attached = false;
   try {
     await run("hdiutil", ["attach", "-readonly", "-nobrowse", "-mountpoint", mountDir, dmgPath], "DMG mount");
     attached = true;
-    const mountedApp = join(mountDir, "King's Press Editorial Desk.app");
+    const mountedApp = join(mountDir, "Pillar Press.app");
     const applicationsLink = join(mountDir, "Applications");
     await assertExists(mountedApp, "DMG app payload");
 
@@ -184,7 +184,7 @@ async function waitForReady(port: number) {
 }
 
 async function smokePackagedServer(bundledNode: string, bundledServer: string, bundledServerRoot: string) {
-  const dataDir = await mkdtemp(join(tmpdir(), "kings-press-release-smoke-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "pillar-press-release-smoke-"));
   const port = 3219;
   const child = spawn(bundledNode, [bundledServer], {
     cwd: bundledServerRoot,

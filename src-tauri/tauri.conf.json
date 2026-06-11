@@ -1,8 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "King's Press Editorial Desk",
+  "productName": "Pillar Press",
   "version": "0.1.0",
-  "identifier": "com.kingspress.editorialdesk",
+  "identifier": "com.pillar.press",
   "build": {
     "beforeDevCommand": "npm run desktop:web",
     "devUrl": "http://localhost:3000",
@@ -14,7 +14,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "King's Press Editorial Desk",
+        "title": "Pillar Press",
         "width": 1280,
         "height": 840,
         "minWidth": 1024,
@@ -37,14 +37,15 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "shortDescription": "Local-first editorial desk for King's Press",
-    "longDescription": "King's Press Editorial Desk is a local-first AI-assisted publishing and editorial operations workstation.",
+    "shortDescription": "Local-first content generation desk for Pillar Press",
+    "longDescription": "Pillar Press is a local-first AI-assisted content generation and editorial operations workstation.",
     "macOS": {
       "signingIdentity": "-"
     },
     "resources": [
       "resources/desktop-server",
-      "resources/node"
+      "resources/node",
+      "resources/whisper"
     ]
   }
 }

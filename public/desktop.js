@@ -1,4 +1,4 @@
-/* King’s Press desktop bridge.
+/* Pillar Press desktop bridge.
    In a browser this is inert. In Tauri it exposes local-first setup commands. */
 (function () {
   const core = window.__TAURI__ && window.__TAURI__.core;
@@ -35,6 +35,7 @@
     ollamaStatus: () => invoke("ollama_status"),
     startOllama: () => invoke("start_ollama_service"),
     openOllamaDownload: () => invoke("open_ollama_download"),
+    openExternalUrl: (url) => invoke("open_external_url", { url }),
     listOllamaModels: () => invoke("list_ollama_models"),
     pullOllamaModel: (model) => invoke("pull_ollama_model", { model }),
     saveModelChoice: (model) => invoke("save_model_choice", { model }),
@@ -46,9 +47,11 @@
     runtimeStatus: () => invoke("desktop_runtime_status"),
     startVoiceSession: () => invoke("start_voice_session"),
     speakText: (text, options) => invoke("speak_text", { args: { text, interrupt: !!(options && options.interrupt) } }),
+    stopSpeaking: () => invoke("stop_speaking"),
     stopVoiceSession: () => invoke("stop_voice_session"),
     onSttFinal: (handler) => listen("stt:final", handler),
-    onShowModelSetup: (handler) => listen("kingspress:show-model-setup", handler),
-    onBackupCreated: (handler) => listen("kingspress:backup-created", handler),
+    onVoiceStatus: (handler) => listen("voice:status", handler),
+    onShowModelSetup: (handler) => listen("pillarpress:show-model-setup", handler),
+    onBackupCreated: (handler) => listen("pillarpress:backup-created", handler),
   };
 })();
