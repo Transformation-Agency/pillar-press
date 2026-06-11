@@ -30,12 +30,59 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=...
 SUPABASE_SERVICE_ROLE_KEY=...
 
 AUTH_DISABLED=false
+
+APP_URL=https://your-domain.example
+STRIPE_SECRET_KEY=...
+STRIPE_WEBHOOK_SECRET=...
+STRIPE_PRICE_STARTER=price_...
+STRIPE_PRICE_PRO=price_...
 ```
 
 With `AUTH_DISABLED=false`, the static browser app shows a King's Press
 sign-in/create-account screen, signs users in through Supabase Auth, attaches
 the Supabase bearer token to same-origin `/api/*` calls, and auto-creates the
 first workspace on the first authenticated request.
+
+## Billing
+
+Hosted billing uses Stripe Checkout, Stripe Customer Portal, and signed Stripe
+webhooks. Configure these server-only values:
+
+```bash
+APP_URL=https://your-domain.example
+STRIPE_SECRET_KEY=sk_live_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+STRIPE_PRICE_STARTER=price_...
+STRIPE_PRICE_PRO=price_...
+```
+
+The `plans` table can also store Stripe price ids in `stripe_price_id`; the env
+values above are fallbacks so the seeded plan catalog does not need to contain
+production Stripe ids.
+
+Routes:
+
+- `GET /api/billing/status` returns public plans and starts the workspace's
+  seven-day trial subscription row if none exists yet.
+- `POST /api/billing/checkout` with `{ "planId": "starter" | "pro" }` creates a
+  Stripe Checkout Session in subscription mode and returns `{ url }`.
+- `POST /api/billing/portal` returns a Stripe Customer Portal URL for the
+  workspace billing customer.
+- `POST /api/billing/webhook` verifies the raw Stripe webhook payload using
+  `STRIPE_WEBHOOK_SECRET` and syncs subscription state back into Postgres.
+
+In Stripe, point the webhook endpoint at:
+
+```text
+https://your-domain.example/api/billing/webhook
+```
+
+Subscribe at least to:
+
+- `checkout.session.completed`
+- `customer.subscription.created`
+- `customer.subscription.updated`
+- `customer.subscription.deleted`
 
 For a temporary private preview without user accounts, set `AUTH_DISABLED=true`
 and add:

@@ -12,7 +12,8 @@ Do this as a staged migration, not a rewrite.
 
 1. Stage 0: product contract, schema, and migration.
 2. Stage 1: real hosted auth and tenant isolation.
-3. Stage 2: Stripe billing foundation.
+3. Stage 2: Stripe billing foundation. **Implemented:** trial status,
+   Checkout, Customer Portal, and signed webhook sync routes are in place.
 4. Stage 3: entitlement checks, usage reservations, and quota enforcement.
 5. Stage 4: trial onboarding and upgrade UI.
 6. Stage 5: workers/jobs for long-running Gather, Weave, media, and batch work.
@@ -348,11 +349,20 @@ Stage 1 is complete only when:
 ## Stage 2 Success Gate
 
 Stage 2 is complete only when:
-- Stripe Checkout creates or updates a workspace subscription.
+- Stripe Checkout creates or updates a workspace subscription. **Implemented:**
+  `POST /api/billing/checkout` creates subscription-mode Checkout Sessions and
+  stores workspace/user/plan metadata for reconciliation.
 - Stripe Customer Portal opens for the workspace billing customer.
-- Webhooks verify signatures and sync DB state.
-- Subscription state survives browser redirects and refreshes.
+  **Implemented:** `POST /api/billing/portal` returns a hosted portal URL.
+- Webhooks verify signatures and sync DB state. **Implemented:**
+  `POST /api/billing/webhook` verifies the raw Stripe payload and syncs
+  subscription created/updated/deleted plus Checkout completion events.
+- Subscription state survives browser redirects and refreshes. **Implemented:**
+  subscription rows are stored in Postgres; `GET /api/billing/status` returns
+  the current workspace subscription and public plan catalog.
 - Failed payment/past-due/canceled states are represented in the DB.
+  **Implemented:** Stripe statuses map into the subscription status enum,
+  including `past_due`, `canceled`, `unpaid`, `incomplete`, and `paused`.
 
 ## Stage 3 Success Gate
 
