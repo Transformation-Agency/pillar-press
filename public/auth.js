@@ -139,6 +139,7 @@
       "subscription_inactive",
       "trial_expired",
       "campaign_limit_exceeded",
+      "drive_not_enabled",
     ];
     if (data && billingCodes.includes(data.code)) {
       window.dispatchEvent(new CustomEvent("kingspress:billing-action-required", {

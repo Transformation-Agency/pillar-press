@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { requireUser, type SessionUser } from "@/lib/auth";
+import { getOrCreateWorkspace, requireUser, type SessionUser } from "@/lib/auth";
 import { db, mediaJobs, settings } from "@/lib/db";
 import { uploadBinaryFile, DriveError } from "@/lib/drive";
 import { safeName } from "@/lib/exporters";
@@ -9,6 +9,7 @@ import { toErrorResponse } from "@/lib/errors";
 import { getLocalMediaJob } from "@/lib/local/database";
 import { isLocalFirstMode } from "@/lib/local/mode";
 import { isLocalStoredUrl, writeLocalPublicFile } from "@/lib/local/storage";
+import { requireDriveEnabled } from "@/lib/billing/entitlements";
 
 const bodySchema = z.object({ mediaId: z.string().uuid() });
 
@@ -44,12 +45,19 @@ export async function POST(req: Request) {
   try {
     const user = await requireUser();
     const { mediaId } = bodySchema.parse(await req.json());
+    let userWithWorkspace = user;
+    if (!isLocalFirstMode()) {
+      const workspaceId = user.workspaceId ?? (await getOrCreateWorkspace(user.id));
+      const hostedUser = { ...user, workspaceId };
+      await requireDriveEnabled(hostedUser);
+      userWithWorkspace = hostedUser;
+    }
 
     const media = isLocalFirstMode()
       ? getLocalMediaJob(mediaId, user.id)
       : await db.query.mediaJobs.findFirst({
-          where: user.workspaceId
-            ? and(eq(mediaJobs.id, mediaId), eq(mediaJobs.userId, user.id), eq(mediaJobs.workspaceId, user.workspaceId))
+          where: userWithWorkspace.workspaceId
+            ? and(eq(mediaJobs.id, mediaId), eq(mediaJobs.userId, user.id), eq(mediaJobs.workspaceId, userWithWorkspace.workspaceId))
             : and(eq(mediaJobs.id, mediaId), eq(mediaJobs.userId, user.id)),
         });
     if (!media) return NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
@@ -66,7 +74,7 @@ export async function POST(req: Request) {
 
     const [setting] = isLocalFirstMode()
       ? []
-      : await db.select().from(settings).where(settingsScope(user)).limit(1);
+      : await db.select().from(settings).where(settingsScope(userWithWorkspace)).limit(1);
     const driveRefreshToken = setting?.driveRefreshToken;
     if (!isLocalFirstMode() && !driveRefreshToken) {
       throw new DriveError("Google Drive is not linked.", 400, "drive_not_linked");

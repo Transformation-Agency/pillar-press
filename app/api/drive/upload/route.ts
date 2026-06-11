@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
-import { requireUser, type SessionUser } from "@/lib/auth";
+import { getOrCreateWorkspace, requireUser, type SessionUser } from "@/lib/auth";
 import { db, campaigns, pieces, settings, type Piece } from "@/lib/db";
 import {
   outputMarkdown,
@@ -15,6 +15,7 @@ import { toErrorResponse } from "@/lib/errors";
 import { getLocalPiece } from "@/lib/local/database";
 import { isLocalFirstMode } from "@/lib/local/mode";
 import { writeLocalPublicFile } from "@/lib/local/storage";
+import { requireDriveEnabled } from "@/lib/billing/entitlements";
 
 /**
  * POST /api/drive/upload — build platform-output markdown for a piece and upload
@@ -80,10 +81,18 @@ export async function POST(req: Request) {
       }
     }
 
+    let userWithWorkspace = user;
+    if (!isLocalFirstMode()) {
+      const workspaceId = user.workspaceId ?? (await getOrCreateWorkspace(user.id));
+      const hostedUser = { ...user, workspaceId };
+      await requireDriveEnabled(hostedUser);
+      userWithWorkspace = hostedUser;
+    }
+
     // 1) Ensure Drive is linked for this caller. (Shared by both modes.)
     const [setting] = isLocalFirstMode()
       ? []
-      : await db.select().from(settings).where(settingsScope(user)).limit(1);
+      : await db.select().from(settings).where(settingsScope(userWithWorkspace)).limit(1);
     const driveRefreshToken = setting?.driveRefreshToken;
     if (!isLocalFirstMode() && !driveRefreshToken) {
       throw new DriveError("Google Drive is not linked.", 400, "drive_not_linked");
@@ -104,7 +113,7 @@ export async function POST(req: Request) {
     const body = driveUploadSchema.parse(raw);
 
     // 2) Load the piece (ownership-scoped → 404 on miss).
-    const piece = await resolvePiece(body.pieceId, user);
+    const piece = await resolvePiece(body.pieceId, userWithWorkspace);
     if (!piece) return notFound();
 
     const outputs = (piece.outputs as Record<string, OutputObject> | null) ?? {};

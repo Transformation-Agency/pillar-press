@@ -58,6 +58,51 @@ describe("hosted campaign entitlement limits", () => {
     });
   });
 
+  it("blocks Drive features when the current plan does not include Drive", async () => {
+    class MockBillingError extends Error {
+      status: number;
+      code: string;
+      constructor(status: number, code: string, message: string) {
+        super(message);
+        this.status = status;
+        this.code = code;
+      }
+    }
+    const subscription = { workspaceId: "workspace_1", planId: "trial", status: "trialing", trialEnd: null };
+    const entitlement = { planId: "trial", maxCampaigns: 2, driveEnabled: false };
+    const select = vi.fn().mockReturnValue({
+      from: () => ({
+        where: () => ({
+          limit: vi.fn(async () => [entitlement]),
+        }),
+      }),
+    });
+
+    vi.doMock("@/lib/billing/stripe", () => ({
+      BillingError: MockBillingError,
+      getLatestSubscription: vi.fn(async () => subscription),
+      getOrCreateTrialSubscription: vi.fn(),
+    }));
+    vi.doMock("@/lib/billing/usage", () => ({
+      billingAccessForSubscription: vi.fn(() => ({ allowed: true })),
+    }));
+    vi.doMock("@/lib/db", async () => {
+      const actual = await vi.importActual<any>("@/lib/db");
+      return { ...actual, db: { select } };
+    });
+
+    const { requireDriveEnabled } = await import("@/lib/billing/entitlements");
+
+    await expect(requireDriveEnabled({
+      id: "user_1",
+      workspaceId: "workspace_1",
+      role: "author",
+    })).rejects.toMatchObject({
+      status: 402,
+      code: "drive_not_enabled",
+    });
+  });
+
   it("checks hosted campaign capacity before inserting a new campaign", async () => {
     const { BillingError } = await import("@/lib/billing/stripe");
     const error = new BillingError(
@@ -134,5 +179,54 @@ describe("hosted campaign entitlement limits", () => {
       },
     });
     expect(requireCampaignCapacity).not.toHaveBeenCalled();
+  });
+
+  it("checks hosted Drive entitlement before uploading files", async () => {
+    const { BillingError } = await import("@/lib/billing/stripe");
+    const error = new BillingError(
+      402,
+      "drive_not_enabled",
+      "Google Drive export is not included in your current plan. Upgrade to save files to Drive.",
+    );
+    const requireDriveEnabled = vi.fn(async () => {
+      throw error;
+    });
+    const uploadMany = vi.fn();
+
+    vi.doMock("@/lib/auth", () => ({
+      requireUser: vi.fn(async () => ({ id: "user_1", workspaceId: "workspace_1", role: "author" })),
+      getOrCreateWorkspace: vi.fn(),
+    }));
+    vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => false }));
+    vi.doMock("@/lib/billing/entitlements", () => ({ requireDriveEnabled }));
+    vi.doMock("@/lib/drive", async () => {
+      const actual = await vi.importActual<any>("@/lib/drive");
+      return { ...actual, uploadMany };
+    });
+    vi.doMock("@/lib/db", async () => {
+      const actual = await vi.importActual<any>("@/lib/db");
+      return { ...actual, db: { select: vi.fn() } };
+    });
+
+    const { POST } = await import("../app/api/drive/upload/route");
+    const res = await POST(new Request("http://test.local/api/drive/upload", {
+      method: "POST",
+      body: JSON.stringify({
+        files: [{ name: "draft.md", content: "# Draft", mime: "text/markdown" }],
+      }),
+    }));
+    const body = await res.json();
+
+    expect(res.status).toBe(402);
+    expect(body).toEqual({
+      error: "Google Drive export is not included in your current plan. Upgrade to save files to Drive.",
+      code: "drive_not_enabled",
+    });
+    expect(requireDriveEnabled).toHaveBeenCalledWith({
+      id: "user_1",
+      workspaceId: "workspace_1",
+      role: "author",
+    });
+    expect(uploadMany).not.toHaveBeenCalled();
   });
 });

@@ -1073,6 +1073,7 @@ function BillingPanel({ open, onClose, billing, notice }) {
     accessNotice && accessNotice.code === "trial_expired" ? "Trial ended" :
     accessNotice && accessNotice.code === "subscription_inactive" ? "Billing needs attention" :
     accessNotice && accessNotice.code === "campaign_limit_exceeded" ? "Campaign limit reached" :
+    accessNotice && accessNotice.code === "drive_not_enabled" ? "Drive requires an upgrade" :
     "Usage limit reached";
 
   const refresh = async () => {

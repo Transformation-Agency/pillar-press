@@ -7,8 +7,8 @@
    Plain JS. Exposes window.DRIVE.
    ============================================================ */
 (function () {
-  // Cached server status: { linked, folderId, folderName, localExportAvailable }.
-  let status = { linked: false, folderId: "", folderName: "", localExportAvailable: false };
+  // Cached server status: { linked, folderId, folderName, localExportAvailable, driveEnabled }.
+  let status = { linked: false, folderId: "", folderName: "", localExportAvailable: false, driveEnabled: true };
   let refreshing = null;
 
   async function refresh() {
@@ -21,10 +21,11 @@
         folderId: data.folderId || "",
         folderName: data.folderName || (data.localExportAvailable ? "Local exports" : ""),
         localExportAvailable: !!data.localExportAvailable,
+        driveEnabled: data.driveEnabled !== false,
       };
     } catch (e) {
       // Leave the last known status in place; treat failures as "not linked".
-      if (!status.linked) status = { linked: false, folderId: "", folderName: "", localExportAvailable: false };
+      if (!status.linked) status = { linked: false, folderId: "", folderName: "", localExportAvailable: false, driveEnabled: true };
     }
     return status;
   }
@@ -33,14 +34,14 @@
   refreshing = refresh().finally(() => { refreshing = null; });
 
   function config() {
-    return { folderId: status.folderId, folderName: status.folderName, localExportAvailable: status.localExportAvailable };
+    return { folderId: status.folderId, folderName: status.folderName, localExportAvailable: status.localExportAvailable, driveEnabled: status.driveEnabled };
   }
 
   function isConfigured() {
     // Return the cached boolean immediately; trigger a background refresh so the
     // value becomes accurate on subsequent renders.
     if (!refreshing) { refreshing = refresh().finally(() => { refreshing = null; }); }
-    return !!(status.linked || status.localExportAvailable);
+    return !!((status.linked && status.driveEnabled !== false) || status.localExportAvailable);
   }
 
   async function uploadMany(files, onProgress) {

@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
-import { requireUser } from "@/lib/auth";
+import { getOrCreateWorkspace, requireUser } from "@/lib/auth";
 import { db, settings } from "@/lib/db";
 import { folderName } from "@/lib/drive";
 import { toErrorResponse } from "@/lib/errors";
 import { getOrCreateLocalSettings } from "@/lib/local/database";
 import { isLocalFirstMode } from "@/lib/local/mode";
+import { driveAccessForUser } from "@/lib/billing/entitlements";
 
 /**
  * GET /api/drive/status — report whether the caller has linked Google Drive and,
@@ -38,17 +39,20 @@ export async function GET() {
       });
     }
 
-    const [row] = await db.select().from(settings).where(scope(user)).limit(1);
+    const workspaceId = user.workspaceId ?? (await getOrCreateWorkspace(user.id));
+    const driveAccess = await driveAccessForUser({ ...user, workspaceId });
+    const userWithWorkspace = { ...user, workspaceId };
+    const [row] = await db.select().from(settings).where(scope(userWithWorkspace)).limit(1);
 
     const linked = Boolean(row?.driveRefreshToken);
     const folderId = row?.driveFolderId ?? null;
 
     let name: string | null = null;
-    if (linked && folderId) {
+    if (driveAccess.enabled && linked && folderId) {
       name = await folderName(row!.driveRefreshToken!, folderId);
     }
 
-    return NextResponse.json({ linked, folderId, folderName: name });
+    return NextResponse.json({ linked: linked && driveAccess.enabled, folderId, folderName: name, driveEnabled: driveAccess.enabled });
   } catch (err) {
     return toErrorResponse(err);
   }
