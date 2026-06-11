@@ -1044,6 +1044,11 @@ function BillingPanel({ open, onClose, billing, notice }) {
   const planId = subscription && subscription.planId;
   const status = subscription && subscription.status ? subscription.status : "trialing";
   const planLabel = (plans.find((p) => p.id === planId) || { name: planId === "trial" ? "Free Trial" : "Current plan" }).name;
+  const accessNotice =
+    notice ||
+    (billing && billing.access && billing.access.allowed === false
+      ? { code: billing.access.code, error: billing.access.message }
+      : null);
 
   const money = (cents, currency) => {
     if (!cents) return "Free";
@@ -1064,8 +1069,9 @@ function BillingPanel({ open, onClose, billing, notice }) {
   const pct = (used, limit) => !limit ? 0 : Math.min(100, Math.round((used / limit) * 100));
   const dimensionLabel = { llm: "AI credits", gather: "Gather runs", media: "Media generations" };
   const noticeTitle =
-    notice && notice.code === "subscription_required" ? "Subscription required" :
-    notice && notice.code === "subscription_inactive" ? "Billing needs attention" :
+    accessNotice && accessNotice.code === "subscription_required" ? "Subscription required" :
+    accessNotice && accessNotice.code === "trial_expired" ? "Trial ended" :
+    accessNotice && accessNotice.code === "subscription_inactive" ? "Billing needs attention" :
     "Usage limit reached";
 
   const refresh = async () => {
@@ -1111,7 +1117,7 @@ function BillingPanel({ open, onClose, billing, notice }) {
         </div>
 
         <div style={{ padding: 22, display: "grid", gap: 18 }}>
-          {notice && (
+          {accessNotice && (
             <div role="status" style={{
               border: "1px solid var(--accent)",
               borderRadius: 12,
@@ -1120,7 +1126,7 @@ function BillingPanel({ open, onClose, billing, notice }) {
             }}>
               <strong>{noticeTitle}</strong>
               <p style={{ margin: "6px 0 0", color: "var(--muted)", lineHeight: 1.45 }}>
-                {notice.error || "Upgrade or manage billing to continue this workflow."}
+                {accessNotice.error || "Upgrade or manage billing to continue this workflow."}
               </p>
             </div>
           )}

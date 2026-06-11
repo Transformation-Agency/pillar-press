@@ -170,7 +170,13 @@ describe("hosted billing helpers", () => {
 describe("hosted billing status API", () => {
   it("returns plans, subscription, entitlement, and usage summary", async () => {
     const user = { id: "user_1", workspaceId: "workspace_1", role: "author" };
-    const subscription = { id: "sub_1", workspaceId: "workspace_1", planId: "trial", status: "trialing" };
+    const subscription = {
+      id: "sub_1",
+      workspaceId: "workspace_1",
+      planId: "trial",
+      status: "trialing",
+      trialEnd: "2099-06-08T00:00:00.000Z",
+    };
     const entitlement = { planId: "trial", monthlyLlmCredits: 250 };
     const usage = {
       periodStart: "2026-06-01T00:00:00.000Z",
@@ -189,6 +195,7 @@ describe("hosted billing status API", () => {
       getOrCreateTrialSubscription: vi.fn(async () => subscription),
     }));
     vi.doMock("@/lib/billing/usage", () => ({
+      billingAccessForSubscription: vi.fn(() => ({ allowed: true })),
       getEntitlementForPlan: vi.fn(async () => entitlement),
       usageSummaryForSubscription: vi.fn(async () => usage),
     }));
@@ -203,6 +210,7 @@ describe("hosted billing status API", () => {
       subscription,
       entitlement,
       usage,
+      access: { allowed: true },
     });
   });
 });

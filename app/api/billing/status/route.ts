@@ -5,7 +5,11 @@ import {
   listPublicPlans,
   requireBillingUser,
 } from "@/lib/billing/stripe";
-import { getEntitlementForPlan, usageSummaryForSubscription } from "@/lib/billing/usage";
+import {
+  billingAccessForSubscription,
+  getEntitlementForPlan,
+  usageSummaryForSubscription,
+} from "@/lib/billing/usage";
 
 export const runtime = "nodejs";
 
@@ -22,12 +26,14 @@ export async function GET() {
       subscription,
       entitlement,
     });
+    const access = billingAccessForSubscription(subscription);
 
     return NextResponse.json({
       plans,
       subscription,
       entitlement,
       usage,
+      access,
     });
   } catch (err) {
     return toErrorResponse(err);

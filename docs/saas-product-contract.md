@@ -17,13 +17,14 @@ Do this as a staged migration, not a rewrite.
    webhook audit events are in place.
 4. Stage 3: entitlement checks, usage reservations, and quota enforcement.
    **Started:** hosted-only usage reservation helpers now enforce active/trial
-   subscription status and plan limits for the core writing, research, file
-   extraction, chat, and media surfaces while desktop/local-first bypasses them.
+   subscription status, expired trial dates, and plan limits for the core
+   writing, research, file extraction, chat, and media surfaces while
+   desktop/local-first bypasses them.
 5. Stage 4: trial onboarding and upgrade UI. **Started:** hosted users now
    have a Billing panel showing trial/subscription status, period usage, paid
    plan upgrades, the Stripe customer portal, and an automatic upgrade prompt
-   when an API route returns `quota_exceeded`, `subscription_required`, or
-   `subscription_inactive`.
+   when an API route returns `quota_exceeded`, `subscription_required`,
+   `subscription_inactive`, or `trial_expired`.
 6. Stage 5: workers/jobs for long-running Gather, Weave, media, and batch work.
 7. Stage 6: production ops, admin, support, observability, and launch gates.
 

@@ -38,6 +38,10 @@ export type UsageReservation = {
   idempotencyKey: string;
 } | null;
 
+export type BillingAccess =
+  | { allowed: true }
+  | { allowed: false; code: "subscription_required" | "subscription_inactive" | "trial_expired"; message: string };
+
 function startOfUtcMonth(now: Date) {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 }
@@ -146,6 +150,34 @@ export function subscriptionAllowsUsage(status: Subscription["status"] | string 
   return status === "trialing" || status === "active";
 }
 
+export function billingAccessForSubscription(
+  subscription: Pick<Subscription, "status" | "trialEnd"> | null | undefined,
+  now = new Date(),
+): BillingAccess {
+  if (!subscription) {
+    return { allowed: false, code: "subscription_required", message: "A subscription is required." };
+  }
+  if (
+    subscription.status === "trialing" &&
+    subscription.trialEnd &&
+    subscription.trialEnd.getTime() <= now.getTime()
+  ) {
+    return {
+      allowed: false,
+      code: "trial_expired",
+      message: "Your free trial has ended. Choose a plan to continue.",
+    };
+  }
+  if (!subscriptionAllowsUsage(subscription.status)) {
+    return {
+      allowed: false,
+      code: "subscription_inactive",
+      message: "Your subscription is not active. Manage billing or choose a plan to continue.",
+    };
+  }
+  return { allowed: true };
+}
+
 export async function usageSummaryForSubscription(input: {
   workspaceId: string;
   subscription: Subscription | null;
@@ -180,15 +212,12 @@ export async function reserveUsage(input: UsageReservationInput): Promise<UsageR
 
   const user = await billingUserFromSession(input.user);
   const subscription = await activeSubscriptionForWorkspace(user);
+  const access = billingAccessForSubscription(subscription);
+  if (!access.allowed) {
+    throw new BillingError(402, access.code, access.message);
+  }
   if (!subscription) {
     throw new BillingError(402, "subscription_required", "A subscription is required.");
-  }
-  if (!subscriptionAllowsUsage(subscription.status)) {
-    throw new BillingError(
-      402,
-      "subscription_inactive",
-      "Your subscription is not active. Manage billing or choose a plan to continue.",
-    );
   }
 
   const entitlement = await entitlementForPlan(subscription.planId);
