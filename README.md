@@ -74,6 +74,12 @@ For local release work, the safest path is a saved `notarytool` keychain
 profile exposed as `APPLE_NOTARY_KEYCHAIN_PROFILE`, so app-specific passwords do
 not need to be stored in shell history or committed scripts.
 
+## Changelog
+
+Per-release updates are tracked in [CHANGELOG.md](CHANGELOG.md). Add notable
+changes under the `Unreleased` section as you work, then promote them to a new
+version heading when you tag a release.
+
 ## Documentation
 
 - [Desktop architecture](docs/DESKTOP_LOCAL_FIRST.md)
