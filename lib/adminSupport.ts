@@ -1,7 +1,9 @@
 import { eq, sql } from "drizzle-orm";
 import { safeRecordAuditEvent } from "@/lib/audit";
+import { isAuthDisabled } from "@/lib/auth";
 import { BillingError, getLatestSubscription } from "@/lib/billing/stripe";
 import { db, subscriptions, trialEvents } from "@/lib/db";
+import { isHostedWebMode, isLocalFirstMode } from "@/lib/local/mode";
 
 type QueryResult = { rows?: unknown[] } | unknown[];
 
@@ -55,6 +57,192 @@ export function requireAdminMutationAccess(req: Request) {
     throw new BillingError(403, "admin_required", "Admin access is required.");
   }
   throw new BillingError(401, "unauthorized", "Unauthorized.");
+}
+
+type ReadinessSeverity = "required" | "recommended" | "optional";
+
+type ReadinessCheck = {
+  id: string;
+  label: string;
+  severity: ReadinessSeverity;
+  ok: boolean;
+  missing: string[];
+  notes?: string[];
+};
+
+function envValue(name: string) {
+  return process.env[name]?.trim() || "";
+}
+
+function present(names: string[]) {
+  return names.filter((name) => Boolean(envValue(name)));
+}
+
+function missing(names: string[]) {
+  return names.filter((name) => !envValue(name));
+}
+
+function checkAll(input: {
+  id: string;
+  label: string;
+  severity: ReadinessSeverity;
+  names: string[];
+  notes?: string[];
+}): ReadinessCheck {
+  const miss = missing(input.names);
+  return {
+    id: input.id,
+    label: input.label,
+    severity: input.severity,
+    ok: miss.length === 0,
+    missing: miss,
+    ...(input.notes?.length ? { notes: input.notes } : {}),
+  };
+}
+
+function hostedFlagCheck(): ReadinessCheck {
+  const hosted = isHostedWebMode();
+  const localFirst = isLocalFirstMode();
+  const notes: string[] = [];
+  if (!hosted) notes.push("Hosted mode is not active.");
+  if (localFirst) notes.push("Local-first mode is still active.");
+  return {
+    id: "runtime",
+    label: "Hosted runtime flags",
+    severity: "required",
+    ok: hosted && !localFirst,
+    missing: [
+      ...(!hosted ? ["KINGS_PRESS_RUNTIME=hosted or KINGS_PRESS_HOSTED_WEB=true"] : []),
+      ...(localFirst ? ["KINGS_PRESS_LOCAL_FIRST=false"] : []),
+    ],
+    ...(notes.length ? { notes } : {}),
+  };
+}
+
+function authModeCheck(): ReadinessCheck {
+  const authDisabled = isAuthDisabled();
+  return {
+    id: "auth-mode",
+    label: "Hosted account auth",
+    severity: "required",
+    ok: !authDisabled,
+    missing: authDisabled ? ["AUTH_DISABLED=false"] : [],
+    notes: authDisabled ? ["Hosted SaaS should use Supabase Auth, not shared disabled-auth sessions."] : undefined,
+  };
+}
+
+function supportSecretCheck(): ReadinessCheck {
+  const hasAdmin = Boolean(adminSecret());
+  const hasSupport = Boolean(supportSecret());
+  const notes = hasSupport ? [] : ["KINGS_PRESS_SUPPORT_SECRET is optional read-only support access; admin access is configured separately."];
+  return {
+    id: "support-secrets",
+    label: "Support/admin secrets",
+    severity: "required",
+    ok: hasAdmin,
+    missing: hasAdmin ? [] : ["KINGS_PRESS_ADMIN_SECRET"],
+    ...(notes.length ? { notes } : {}),
+  };
+}
+
+function managedLlmCheck(): ReadinessCheck {
+  const providerKeys = [
+    "LLM_API_KEY",
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "XAI_API_KEY",
+    "GROK_API_KEY",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+  ];
+  const keys = present(providerKeys);
+  return {
+    id: "managed-llm",
+    label: "Managed LLM fallback",
+    severity: "recommended",
+    ok: keys.length > 0,
+    missing: keys.length ? [] : [providerKeys.join(" or ")],
+    notes: keys.length
+      ? [`${keys.length} managed LLM key source${keys.length === 1 ? "" : "s"} configured.`]
+      : ["Free-trial users may need to add BYOK providers before AI workflows can run."],
+  };
+}
+
+function summaryForChecks(checks: ReadinessCheck[]) {
+  const requiredMissing = checks.filter((check) => check.severity === "required" && !check.ok).length;
+  const recommendedMissing = checks.filter((check) => check.severity === "recommended" && !check.ok).length;
+  const optionalMissing = checks.filter((check) => check.severity === "optional" && !check.ok).length;
+  return {
+    ready: requiredMissing === 0,
+    requiredMissing,
+    recommendedMissing,
+    optionalMissing,
+  };
+}
+
+export async function getHostedReadiness(req: Request) {
+  requireAdminSupportAccess(req);
+  const checks: ReadinessCheck[] = [
+    hostedFlagCheck(),
+    authModeCheck(),
+    checkAll({
+      id: "database",
+      label: "Hosted Postgres",
+      severity: "required",
+      names: ["DATABASE_URL"],
+    }),
+    checkAll({
+      id: "supabase-auth",
+      label: "Supabase Auth",
+      severity: "required",
+      names: ["SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL", "SUPABASE_ANON_KEY", "NEXT_PUBLIC_SUPABASE_ANON_KEY", "SUPABASE_SERVICE_ROLE_KEY"],
+    }),
+    checkAll({
+      id: "supabase-storage",
+      label: "Supabase public media storage",
+      severity: "required",
+      names: ["STORAGE_PROVIDER", "KINGS_PRESS_STORAGE", "SUPABASE_URL", "SUPABASE_ANON_KEY"],
+      notes: ["Generated media persistence expects the public Supabase Storage bucket used by King's Press."],
+    }),
+    checkAll({
+      id: "stripe",
+      label: "Stripe billing",
+      severity: "required",
+      names: ["APP_URL", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_STARTER", "STRIPE_PRICE_PRO"],
+    }),
+    checkAll({
+      id: "hosted-secret-encryption",
+      label: "Hosted BYOK encryption",
+      severity: "required",
+      names: ["KINGS_PRESS_HOSTED_SECRET_KEY"],
+    }),
+    checkAll({
+      id: "background-jobs",
+      label: "Background worker secret",
+      severity: "required",
+      names: ["KINGS_PRESS_JOB_SECRET"],
+    }),
+    supportSecretCheck(),
+    managedLlmCheck(),
+  ];
+
+  await safeRecordAuditEvent({
+    actorType: "admin",
+    action: "admin.hosted_readiness.checked",
+    targetType: "deployment",
+    metadata: summaryForChecks(checks),
+  });
+
+  return {
+    product: "kings_press",
+    mode: {
+      hosted: isHostedWebMode(),
+      localFirst: isLocalFirstMode(),
+      authDisabled: isAuthDisabled(),
+    },
+    ...summaryForChecks(checks),
+    checks,
+  };
 }
 
 function redactString(value: string) {

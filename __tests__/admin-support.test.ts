@@ -4,8 +4,168 @@ beforeEach(() => {
   vi.useRealTimers();
   vi.resetModules();
   vi.clearAllMocks();
-  delete process.env.KINGS_PRESS_ADMIN_SECRET;
-  delete process.env.KINGS_PRESS_SUPPORT_SECRET;
+  [
+    "KINGS_PRESS_ADMIN_SECRET",
+    "KINGS_PRESS_SUPPORT_SECRET",
+    "KINGS_PRESS_RUNTIME",
+    "KINGS_PRESS_HOSTED_WEB",
+    "KINGS_PRESS_LOCAL_FIRST",
+    "DATA_BACKEND",
+    "AUTH_DISABLED",
+    "DATABASE_URL",
+    "SUPABASE_URL",
+    "NEXT_PUBLIC_SUPABASE_URL",
+    "SUPABASE_ANON_KEY",
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "STORAGE_PROVIDER",
+    "KINGS_PRESS_STORAGE",
+    "APP_URL",
+    "STRIPE_SECRET_KEY",
+    "STRIPE_WEBHOOK_SECRET",
+    "STRIPE_PRICE_STARTER",
+    "STRIPE_PRICE_PRO",
+    "KINGS_PRESS_HOSTED_SECRET_KEY",
+    "KINGS_PRESS_JOB_SECRET",
+    "LLM_API_KEY",
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "XAI_API_KEY",
+    "GROK_API_KEY",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+  ].forEach((name) => {
+    delete process.env[name];
+  });
+});
+
+describe("GET /api/admin/support/readiness", () => {
+  it("requires a configured admin support secret", async () => {
+    const safeRecordAuditEvent = vi.fn();
+    vi.doMock("@/lib/audit", () => ({ safeRecordAuditEvent }));
+
+    const { GET } = await import("../app/api/admin/support/readiness/route");
+    const res = await GET(new Request("http://test.local/api/admin/support/readiness"));
+    const body = await res.json();
+
+    expect(res.status).toBe(503);
+    expect(body).toEqual({
+      error: "Admin support tools are not configured.",
+      code: "admin_not_configured",
+    });
+    expect(safeRecordAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("reports missing hosted SaaS configuration without leaking secret values", async () => {
+    process.env.KINGS_PRESS_ADMIN_SECRET = "admin-secret";
+    const safeRecordAuditEvent = vi.fn();
+    vi.doMock("@/lib/audit", () => ({ safeRecordAuditEvent }));
+
+    const { GET } = await import("../app/api/admin/support/readiness/route");
+    const res = await GET(new Request("http://test.local/api/admin/support/readiness", {
+      headers: { Authorization: "Bearer admin-secret" },
+    }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.product).toBe("kings_press");
+    expect(body.ready).toBe(false);
+    expect(body.requiredMissing).toBeGreaterThan(0);
+    expect(body.checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: "database",
+        ok: false,
+        missing: ["DATABASE_URL"],
+      }),
+      expect.objectContaining({
+        id: "runtime",
+        ok: false,
+        missing: expect.arrayContaining(["KINGS_PRESS_RUNTIME=hosted or KINGS_PRESS_HOSTED_WEB=true"]),
+      }),
+    ]));
+    expect(JSON.stringify(body)).not.toContain("admin-secret");
+    expect(safeRecordAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      actorType: "admin",
+      action: "admin.hosted_readiness.checked",
+      targetType: "deployment",
+      metadata: expect.objectContaining({
+        ready: false,
+        requiredMissing: expect.any(Number),
+      }),
+    }));
+  });
+
+  it("returns ready when required hosted SaaS configuration is present", async () => {
+    process.env.KINGS_PRESS_ADMIN_SECRET = "admin-secret";
+    process.env.KINGS_PRESS_RUNTIME = "hosted";
+    process.env.KINGS_PRESS_HOSTED_WEB = "true";
+    process.env.KINGS_PRESS_LOCAL_FIRST = "false";
+    process.env.DATA_BACKEND = "postgres";
+    process.env.AUTH_DISABLED = "false";
+    process.env.DATABASE_URL = "postgres://postgres:secret@db.example.com/kings_press";
+    process.env.SUPABASE_URL = "https://project.supabase.co";
+    process.env.NEXT_PUBLIC_SUPABASE_URL = "https://project.supabase.co";
+    process.env.SUPABASE_ANON_KEY = "anon-secret";
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "anon-secret";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-secret";
+    process.env.STORAGE_PROVIDER = "supabase";
+    process.env.KINGS_PRESS_STORAGE = "supabase";
+    process.env.APP_URL = "https://kingspress.test";
+    process.env.STRIPE_SECRET_KEY = "sk_live_secret";
+    process.env.STRIPE_WEBHOOK_SECRET = "whsec_secret";
+    process.env.STRIPE_PRICE_STARTER = "price_starter";
+    process.env.STRIPE_PRICE_PRO = "price_pro";
+    process.env.KINGS_PRESS_HOSTED_SECRET_KEY = "encryption-key-value";
+    process.env.KINGS_PRESS_JOB_SECRET = "job-secret";
+    const safeRecordAuditEvent = vi.fn();
+    vi.doMock("@/lib/audit", () => ({ safeRecordAuditEvent }));
+
+    const { GET } = await import("../app/api/admin/support/readiness/route");
+    const res = await GET(new Request("http://test.local/api/admin/support/readiness", {
+      headers: { "x-kings-press-admin-secret": "admin-secret" },
+    }));
+    const body = await res.json();
+    const serialized = JSON.stringify(body);
+
+    expect(res.status).toBe(200);
+    expect(body.ready).toBe(true);
+    expect(body.requiredMissing).toBe(0);
+    expect(body.recommendedMissing).toBe(1);
+    expect(body.mode).toEqual({
+      hosted: true,
+      localFirst: false,
+      authDisabled: false,
+    });
+    expect(body.checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "stripe", ok: true }),
+      expect.objectContaining({ id: "hosted-secret-encryption", ok: true }),
+      expect.objectContaining({
+        id: "managed-llm",
+        severity: "recommended",
+        ok: false,
+      }),
+    ]));
+    [
+      "postgres://postgres:secret",
+      "anon-secret",
+      "service-secret",
+      "sk_live_secret",
+      "whsec_secret",
+      "encryption-key-value",
+      "job-secret",
+      "admin-secret",
+    ].forEach((secret) => {
+      expect(serialized).not.toContain(secret);
+    });
+    expect(safeRecordAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      metadata: {
+        ready: true,
+        requiredMissing: 0,
+        recommendedMissing: 1,
+        optionalMissing: 0,
+      },
+    }));
+  });
 });
 
 describe("GET /api/admin/support/workspaces", () => {

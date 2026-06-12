@@ -122,6 +122,7 @@ Do not rotate this value unless you also re-encrypt existing provider keys.
 Optional read-only support diagnostics are available at:
 
 ```text
+GET /api/admin/support/readiness
 GET /api/admin/support/workspaces
 GET /api/admin/support/workspaces?workspaceId=<workspace-id>
 ```
@@ -133,6 +134,11 @@ workspace subscription state, usage rollups, recent usage/audit/trial events,
 30-day usage failure/quota-block summaries, background job status, and provider
 profile counts. They do not return raw provider keys, billing emails, or Stripe
 customer email fields, and metadata is scrubbed again on read.
+
+`GET /api/admin/support/readiness` is the pre-launch SaaS configuration check.
+It returns only booleans, missing environment variable names, and non-secret
+notes for hosted runtime, Supabase Auth/Storage, Stripe billing, BYOK
+encryption, worker secrets, support/admin secrets, and managed LLM availability.
 
 Trial extension is intentionally narrow admin tooling and requires
 `KINGS_PRESS_ADMIN_SECRET`; `KINGS_PRESS_SUPPORT_SECRET` is read-only and cannot

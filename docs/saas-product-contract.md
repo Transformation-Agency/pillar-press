@@ -39,7 +39,8 @@ Do this as a staged migration, not a rewrite.
    exposes workspace subscription, usage, trial/audit, background-job, and
    provider-profile diagnostics, plus 30-day usage failure/quota-block
    summaries, without returning raw provider keys, billing emails, or
-   unsanitized metadata.
+   unsanitized metadata. A secret-protected hosted readiness endpoint now checks
+   required SaaS deployment configuration without returning secret values.
 
 No stage should weaken the desktop path. Desktop/local-first stays SQLite and
 does not read or write the SaaS billing tables.
@@ -607,4 +608,7 @@ Stage 3 is complete only when:
     is intentionally read-only. `POST /api/admin/support/trials/extend` requires
     `KINGS_PRESS_ADMIN_SECRET`, extends trial subscriptions by 1-90 days, records
     `trial_events.extended`, refuses paid subscriptions, and scrubs support
-    reasons before persistence.
+    reasons before persistence. `GET /api/admin/support/readiness` verifies
+    hosted runtime, Supabase, Stripe, BYOK encryption, worker, support, and
+    managed-LLM configuration using secret-free booleans and missing variable
+    names.
