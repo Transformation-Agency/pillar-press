@@ -400,9 +400,10 @@ Rules:
 - Desktop keys remain in the encrypted desktop settings path.
 - Hosted BYOK keys must be encrypted at rest before Stage 3 quota enforcement
   opens broad managed-key usage. **Started:** hosted web now writes LLM provider
-  profiles to `provider_secrets` with encrypted API keys, returns only
-  secret-free metadata, and lets the model setup/test/list flow reuse a saved
-  profile without sending the stored key back to the browser. Desk chat,
+  profiles to `provider_secrets` with encrypted API keys after verifying the
+  workspace plan includes BYOK provider access, returns only secret-free
+  metadata, and lets the model setup/test/list flow reuse a saved profile
+  without sending the stored key back to the browser. Desk chat,
   `/api/llm/util`, onboarding setup extraction, review, revision, outputs,
   output condense, title generation, Weave, manual Gather summaries,
   references AI edit, style feedback, and Studio image/voice prompt helpers now
@@ -412,7 +413,8 @@ Rules:
 - Hosted media BYOK uses the same encrypted secret-store contract. **Started:**
   hosted web now writes media provider profiles to `provider_secrets` with
   `kind = "media"` for Hedra, ElevenLabs, OpenAI media, xAI media, and custom
-  image endpoints through `GET/PUT /api/media/provider-settings`; Studio media
+  image endpoints through `GET/PUT /api/media/provider-settings` after verifying
+  BYOK provider access; Studio media
   generation, provider status, Hedra model/status/asset calls, OpenAI-compatible
   media calls, and ElevenLabs TTS now resolve those hosted BYOK profiles
   server-side before falling back to managed keys. Queued Hedra jobs persist the

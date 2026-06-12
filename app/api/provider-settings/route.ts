@@ -9,6 +9,7 @@ import {
   saveHostedProviderSettings,
 } from "@/lib/providerSettings";
 import { LLM_TASKS } from "@/lib/llm/config";
+import { requireByokProviderAccess } from "@/lib/billing/entitlements";
 
 const providerSchema = z.enum(["anthropic", "openai", "openai-compatible", "xai", "ollama", "gemini"]);
 
@@ -56,6 +57,10 @@ export async function PUT(req: Request) {
       return NextResponse.json({ error: "Desktop provider settings are stored by the desktop app.", code: "local_first" }, { status: 409 });
     }
     const body = bodySchema.parse(await req.json());
+    if (!user.workspaceId) {
+      return NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
+    }
+    await requireByokProviderAccess({ ...user, workspaceId: user.workspaceId });
     const settings = await saveHostedProviderSettings(user, body.settings);
     await safeRecordAuditEvent({
       workspaceId: user.workspaceId,
