@@ -48,7 +48,8 @@ KINGS_PRESS_JOB_SECRET=<long random worker secret>
 With hosted auth enabled, the static browser app shows a King's Press
 sign-in/create-account screen, signs users in through Supabase Auth, attaches
 the Supabase bearer token to same-origin `/api/*` calls, and auto-creates the
-first workspace on the first authenticated request.
+first workspace plus a trial subscription row on the first authenticated
+session request.
 
 ## Billing
 

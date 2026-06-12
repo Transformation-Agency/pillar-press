@@ -176,7 +176,10 @@ export async function getLatestSubscription(workspaceId: string) {
   return selectCurrentSubscription(rows);
 }
 
-export async function getOrCreateTrialSubscription(user: BillingSessionUser) {
+export async function getOrCreateTrialSubscription(
+  user: BillingSessionUser,
+  source = "billing_status",
+) {
   const existing = await getLatestSubscription(user.workspaceId);
   if (existing) return existing;
 
@@ -198,7 +201,7 @@ export async function getOrCreateTrialSubscription(user: BillingSessionUser) {
       status: "trialing",
       trialStart: now,
       trialEnd,
-      metadata: { source: "hosted_signup_trial" },
+      metadata: { source: "hosted_signup_trial", trigger: source },
     })
     .returning();
 
@@ -209,7 +212,7 @@ export async function getOrCreateTrialSubscription(user: BillingSessionUser) {
     planId: trialPlan.id,
     trialStart: now,
     trialEnd,
-    metadata: { source: "billing_status" },
+    metadata: { source },
   });
 
   return subscription;

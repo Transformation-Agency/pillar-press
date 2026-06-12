@@ -96,13 +96,25 @@ describe("hosted auth API contract", () => {
 
   it("bootstraps a workspace for an authenticated hosted user without membership", async () => {
     const getOrCreateWorkspace = vi.fn(async () => "workspace_1");
+    const getOrCreateTrialSubscription = vi.fn(async () => ({
+      id: "sub_trial_1",
+      planId: "trial",
+      status: "trialing",
+      trialStart: new Date("2026-06-11T00:00:00.000Z"),
+      trialEnd: new Date("2026-06-18T00:00:00.000Z"),
+      currentPeriodEnd: null,
+    }));
     vi.doMock("@/lib/local/mode", () => ({
+      isHostedWebMode: () => true,
       isLocalFirstMode: () => false,
     }));
     vi.doMock("@/lib/auth", () => ({
       getCurrentUser: vi.fn(async () => ({ id: "user_1" })),
       getOrCreateWorkspace,
       isAuthDisabled: () => false,
+    }));
+    vi.doMock("@/lib/billing/stripe", () => ({
+      getOrCreateTrialSubscription,
     }));
 
     const { GET } = await import("../app/api/auth/session/route");
@@ -111,6 +123,10 @@ describe("hosted auth API contract", () => {
 
     expect(res.status).toBe(200);
     expect(getOrCreateWorkspace).toHaveBeenCalledWith("user_1");
+    expect(getOrCreateTrialSubscription).toHaveBeenCalledWith(
+      { id: "user_1", workspaceId: "workspace_1" },
+      "auth_session",
+    );
     expect(body).toEqual({
       authenticated: true,
       authDisabled: false,
@@ -119,17 +135,29 @@ describe("hosted auth API contract", () => {
         workspaceId: "workspace_1",
         role: "author",
       },
+      subscription: {
+        id: "sub_trial_1",
+        planId: "trial",
+        status: "trialing",
+        trialStart: "2026-06-11T00:00:00.000Z",
+        trialEnd: "2026-06-18T00:00:00.000Z",
+        currentPeriodEnd: null,
+      },
     });
   });
 
   it("returns 401 without a hosted user session", async () => {
     vi.doMock("@/lib/local/mode", () => ({
+      isHostedWebMode: () => true,
       isLocalFirstMode: () => false,
     }));
     vi.doMock("@/lib/auth", () => ({
       getCurrentUser: vi.fn(async () => null),
       getOrCreateWorkspace: vi.fn(),
       isAuthDisabled: () => false,
+    }));
+    vi.doMock("@/lib/billing/stripe", () => ({
+      getOrCreateTrialSubscription: vi.fn(),
     }));
 
     const { GET } = await import("../app/api/auth/session/route");

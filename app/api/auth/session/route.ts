@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser, getOrCreateWorkspace, isAuthDisabled } from "@/lib/auth";
-import { isLocalFirstMode } from "@/lib/local/mode";
+import { getOrCreateTrialSubscription } from "@/lib/billing/stripe";
+import { isHostedWebMode, isLocalFirstMode } from "@/lib/local/mode";
 import { toErrorResponse } from "@/lib/errors";
 
 export async function GET() {
@@ -15,6 +16,11 @@ export async function GET() {
       workspaceId = await getOrCreateWorkspace(user.id);
     }
 
+    const subscription =
+      workspaceId && isHostedWebMode() && !isAuthDisabled()
+        ? await getOrCreateTrialSubscription({ ...user, workspaceId }, "auth_session")
+        : null;
+
     return NextResponse.json({
       authenticated: true,
       authDisabled: isAuthDisabled(),
@@ -23,6 +29,16 @@ export async function GET() {
         workspaceId,
         role: user.role ?? "author",
       },
+      subscription: subscription
+        ? {
+          id: subscription.id,
+          planId: subscription.planId,
+          status: subscription.status,
+          trialStart: subscription.trialStart,
+          trialEnd: subscription.trialEnd,
+          currentPeriodEnd: subscription.currentPeriodEnd,
+        }
+        : null,
     });
   } catch (err) {
     return toErrorResponse(err);

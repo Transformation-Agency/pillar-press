@@ -420,9 +420,10 @@ Stage 1 is complete only when:
 - Basic Auth is no longer the product auth path. **Implemented:** Basic Auth is
   ignored in hosted SaaS mode when account auth is active, and remains available
   only as a temporary private-preview gate while `AUTH_DISABLED=true`.
-- A new user can sign up and get a workspace. **Started:** the static web app now
+- A new user can sign up and get a workspace. **Implemented:** the static web app
   has a hosted sign-in/sign-up gate, and `/api/auth/session` bootstraps a
-  workspace for authenticated Supabase users with no membership.
+  workspace plus the initial trial subscription row for authenticated Supabase
+  users with no membership.
 - `requireUser()` resolves a Supabase user and workspace membership. **Started:**
   browser API calls attach the Supabase bearer token; the existing server auth
   layer validates it and resolves membership.
