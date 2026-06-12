@@ -515,9 +515,10 @@ Stage 3 is complete only when:
   media jobs before calling any media provider.
 - Feature gates block plan-restricted integrations. **Started:** hosted book
   export requires `export_enabled`, browser-only output downloads open the
-  billing prompt when exports are disabled, and hosted Google Drive OAuth and
-  upload routes require `drive_enabled` before linking or exporting to Drive;
-  desktop/local-first continues to use local exports.
+  billing prompt when exports are disabled, and hosted Google Drive OAuth start,
+  callback token persistence, and upload routes require `drive_enabled` before
+  linking or exporting to Drive; desktop/local-first continues to use local
+  exports.
 - Managed provider access honors plan entitlements. **Started:** hosted usage
   reservations require `can_use_managed_keys` and `"managed"` in
   `allowed_providers` before server-managed AI/media/research work begins;

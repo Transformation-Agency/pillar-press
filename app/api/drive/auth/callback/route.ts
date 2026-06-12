@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
-import { requireUser } from "@/lib/auth";
+import { getOrCreateWorkspace, requireUser } from "@/lib/auth";
 import { db, settings, type Setting } from "@/lib/db";
 import { exchangeCode, DriveError } from "@/lib/drive";
 import { toErrorResponse } from "@/lib/errors";
 import { isLocalFirstMode } from "@/lib/local/mode";
+import { requireDriveEnabled } from "@/lib/billing/entitlements";
 
 /**
  * GET /api/drive/auth/callback — Google redirects here after consent.
@@ -36,6 +37,9 @@ export async function GET(req: Request) {
         { status: 400 },
       );
     }
+    const workspaceId = user.workspaceId ?? (await getOrCreateWorkspace(user.id));
+    const hostedUser = { ...user, workspaceId };
+    await requireDriveEnabled(hostedUser);
 
     const url = new URL(req.url);
     const error = url.searchParams.get("error");
@@ -80,13 +84,13 @@ export async function GET(req: Request) {
     const [updated] = await db
       .update(settings)
       .set(patch)
-      .where(scopeFor(user))
+      .where(scopeFor(hostedUser))
       .returning();
 
     if (!updated) {
       await db.insert(settings).values({
         userId: user.id,
-        workspaceId: user.workspaceId,
+        workspaceId,
         driveRefreshToken: refreshToken,
         driveFolderId: folderId || null,
         prefs: {},

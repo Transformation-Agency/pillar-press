@@ -327,6 +327,54 @@ describe("hosted campaign entitlement limits", () => {
     expect(uploadMany).not.toHaveBeenCalled();
   });
 
+  it("checks hosted Drive entitlement before saving OAuth callback tokens", async () => {
+    const { BillingError } = await import("@/lib/billing/stripe");
+    const error = new BillingError(
+      402,
+      "drive_not_enabled",
+      "Google Drive export is not included in your current plan. Upgrade to save files to Drive.",
+    );
+    const requireDriveEnabled = vi.fn(async () => {
+      throw error;
+    });
+    const exchangeCode = vi.fn();
+    const update = vi.fn();
+    const insert = vi.fn();
+
+    vi.doMock("@/lib/auth", () => ({
+      requireUser: vi.fn(async () => ({ id: "user_1", workspaceId: "workspace_1", role: "author" })),
+      getOrCreateWorkspace: vi.fn(),
+    }));
+    vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => false }));
+    vi.doMock("@/lib/billing/entitlements", () => ({ requireDriveEnabled }));
+    vi.doMock("@/lib/drive", async () => {
+      const actual = await vi.importActual<any>("@/lib/drive");
+      return { ...actual, exchangeCode };
+    });
+    vi.doMock("@/lib/db", async () => {
+      const actual = await vi.importActual<any>("@/lib/db");
+      return { ...actual, db: { update, insert } };
+    });
+
+    const { GET } = await import("../app/api/drive/auth/callback/route");
+    const res = await GET(new Request("http://test.local/api/drive/auth/callback?code=oauth-code&state=%7B%7D"));
+    const body = await res.json();
+
+    expect(res.status).toBe(402);
+    expect(body).toEqual({
+      error: "Google Drive export is not included in your current plan. Upgrade to save files to Drive.",
+      code: "drive_not_enabled",
+    });
+    expect(requireDriveEnabled).toHaveBeenCalledWith({
+      id: "user_1",
+      workspaceId: "workspace_1",
+      role: "author",
+    });
+    expect(exchangeCode).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+    expect(insert).not.toHaveBeenCalled();
+  });
+
   it("checks hosted export entitlement before assembling a book export", async () => {
     const { BillingError } = await import("@/lib/billing/stripe");
     const error = new BillingError(
