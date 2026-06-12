@@ -553,8 +553,8 @@ Stage 3 is complete only when:
    and `/api/billing/portal`; `/api/billing/status` returns a normalized
    `lifecycle` object for trial ending/expired/upgrade actions; hosted API
    billing-blocked responses open the same panel with context; Checkout is
-   server-guarded against duplicate paid subscriptions and directs changes to
-   Customer Portal.
+   server-guarded against duplicate paid subscriptions, and both server and UI
+   direct existing paid subscribers to Customer Portal for plan changes.
 9. Stage 5: introduce a worker/job runner for long operations. **Started:**
    `db/migrations/0009_background_jobs.sql`, `db/schema.ts`,
    `lib/jobs/background.ts`, `lib/jobs/runner.ts`, and `POST /api/jobs/run`

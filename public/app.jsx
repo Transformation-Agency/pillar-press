@@ -1155,6 +1155,8 @@ function BillingPanel({ open, onClose, billing, notice }) {
   const dims = usage && usage.dimensions ? usage.dimensions : {};
   const planId = (lifecycle && lifecycle.planId) || (subscription && subscription.planId);
   const status = (lifecycle && lifecycle.status) || (subscription && subscription.status) || "trialing";
+  const portalManagedStatuses = new Set(["active", "trialing", "past_due", "unpaid", "paused"]);
+  const hasPortalManagedPaidSubscription = Boolean(planId && planId !== "trial" && portalManagedStatuses.has(status));
   const planLabel = (plans.find((p) => p.id === planId) || { name: planId === "trial" ? "Free Trial" : "Current plan" }).name;
   const accessNotice =
     notice ||
@@ -1315,26 +1317,43 @@ function BillingPanel({ open, onClose, billing, notice }) {
           )}
 
           <section>
-            <h3 style={{ margin: "0 0 12px", fontSize: 19 }}>Upgrade</h3>
+            <h3 style={{ margin: "0 0 12px", fontSize: 19 }}>{hasPortalManagedPaidSubscription ? "Plans" : "Upgrade"}</h3>
+            {hasPortalManagedPaidSubscription && (
+              <p className="muted" style={{ margin: "-4px 0 12px", fontSize: 13.5, lineHeight: 1.4 }}>
+                Use Stripe Customer Portal to change or cancel your current plan.
+              </p>
+            )}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 10 }}>
-              {plans.map((plan) => (
-                <div key={plan.id} style={{ border: "1px solid var(--hair)", borderRadius: 12, padding: 14, background: "var(--paper)" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline" }}>
-                    <strong>{plan.name}</strong>
-                    <span>{money(plan.monthlyPriceCents, plan.currency)}</span>
+              {plans.map((plan) => {
+                const isCurrent = plan.id === planId;
+                const actionBusy = busy === "checkout-" + plan.id || busy === "portal";
+                const label = actionBusy
+                  ? null
+                  : isCurrent
+                    ? "Current plan"
+                    : hasPortalManagedPaidSubscription
+                      ? "Manage plan"
+                      : "Upgrade";
+                const action = hasPortalManagedPaidSubscription && !isCurrent ? portal : () => checkout(plan);
+                return (
+                  <div key={plan.id} style={{ border: "1px solid var(--hair)", borderRadius: 12, padding: 14, background: "var(--paper)" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline" }}>
+                      <strong>{plan.name}</strong>
+                      <span>{money(plan.monthlyPriceCents, plan.currency)}</span>
+                    </div>
+                    <p className="muted" style={{ minHeight: 40, margin: "8px 0 14px", fontSize: 13.5, lineHeight: 1.4 }}>{plan.description}</p>
+                    <button
+                      className={"btn " + (plan.id === "pro" ? "primary" : "")}
+                      disabled={busy || isCurrent || !plan.stripeConfigured}
+                      onClick={action}
+                      style={{ width: "100%", justifyContent: "center" }}
+                    >
+                      {actionBusy ? <Spinner size={14} /> : label}
+                    </button>
+                    {!plan.stripeConfigured && <p className="muted" style={{ margin: "8px 0 0", fontSize: 12.5 }}>Stripe price not configured yet.</p>}
                   </div>
-                  <p className="muted" style={{ minHeight: 40, margin: "8px 0 14px", fontSize: 13.5, lineHeight: 1.4 }}>{plan.description}</p>
-                  <button
-                    className={"btn " + (plan.id === "pro" ? "primary" : "")}
-                    disabled={busy || plan.id === planId || !plan.stripeConfigured}
-                    onClick={() => checkout(plan)}
-                    style={{ width: "100%", justifyContent: "center" }}
-                  >
-                    {busy === "checkout-" + plan.id ? <Spinner size={14} /> : plan.id === planId ? "Current plan" : "Upgrade"}
-                  </button>
-                  {!plan.stripeConfigured && <p className="muted" style={{ margin: "8px 0 0", fontSize: 12.5 }}>Stripe price not configured yet.</p>}
-                </div>
-              ))}
+                );
+              })}
             </div>
           </section>
 
