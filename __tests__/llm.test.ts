@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAI, createAIFromConfig, LLMError, type LLMAdapter } from "@/lib/llm";
 import { resolveMainLLMConfig, resolveTaskLLMConfig, publicLLMStatus } from "@/lib/llm/config";
 import { geminiProvider } from "@/lib/llm/providers/gemini";
+import { estimatedModelContextWindow, fallbackContextWindow } from "@/lib/llm/context";
 import { openAICompatibleProvider, openAIProvider } from "@/lib/llm/providers/openaiCompatible";
 import { ollamaProvider } from "@/lib/llm/providers/ollama";
 import { toErrorResponse } from "@/lib/errors";
@@ -27,6 +28,17 @@ afterEach(() => {
 });
 
 describe("LLM config", () => {
+  it("estimates context windows from the selected model, not only the provider", () => {
+    expect(estimatedModelContextWindow({ provider: "openai", model: "gpt-5.2" })).toBe(128000);
+    expect(estimatedModelContextWindow({ provider: "openai", model: "gpt-4" })).toBe(8192);
+    expect(estimatedModelContextWindow({ provider: "anthropic", model: "claude-haiku-4-5" })).toBe(200000);
+    expect(estimatedModelContextWindow({ provider: "gemini", model: "gemini-2.5-flash" })).toBe(1000000);
+    expect(estimatedModelContextWindow({ provider: "xai", model: "grok-4.3" })).toBe(256000);
+    expect(estimatedModelContextWindow({ provider: "ollama", model: "qwen2.5:7b" })).toBeNull();
+    expect(estimatedModelContextWindow({ provider: "ollama", model: "qwen2.5-32k:7b" })).toBe(32000);
+    expect(fallbackContextWindow({ provider: "ollama", model: "qwen2.5:7b" })).toBe(8192);
+  });
+
   it("keeps Anthropic backward compatibility when only ANTHROPIC_API_KEY is set", () => {
     const cfg = resolveMainLLMConfig({ ANTHROPIC_API_KEY: "sk-ant" });
     expect(cfg).toMatchObject({
@@ -289,7 +301,7 @@ describe("LLM config", () => {
         defaultProfileId: "local",
       });
       expect(status.profiles).toEqual(expect.arrayContaining([
-        expect.objectContaining({ id: "anthropic-review", hasApiKey: true }),
+        expect.objectContaining({ id: "anthropic-review", hasApiKey: true, contextWindow: 200000 }),
       ]));
       expect(status.tasks.review).toMatchObject({
         profileId: "anthropic-review",

@@ -29,16 +29,32 @@ function estimateTokens(text) {
 
 function contextWindowFor(status, thread) {
   const profile = effectiveLLMProfile(status, thread && thread.llmProfileId);
-  // Prefer the real loaded context reported by the server's provider probe
-  // (LM Studio); the name-based guesses below are a fallback.
+  // Prefer the server-provided model-specific context. It is exact for probed
+  // local providers when available and otherwise comes from the server's
+  // conservative model-family table.
   if (profile && profile.contextWindow > 0) return profile.contextWindow;
   const provider = profile && profile.provider;
   const model = ((profile && profile.model) || "").toLowerCase();
-  if (provider === "anthropic") return 200000;
-  if (provider === "gemini") return model.includes("pro") ? 1000000 : 128000;
-  if (provider === "openai" || provider === "xai") return 128000;
-  if (model.includes("70b") || model.includes("128k")) return 128000;
-  if (model.includes("32k")) return 32000;
+  const explicit = model.match(/(?:^|[^0-9])(\d{1,4})k(?:[^a-z0-9]|$)/i);
+  if (explicit) return Number(explicit[1]) * 1000;
+  if (provider === "openai") {
+    if (/^(gpt-5|gpt-4\.1|gpt-4o|o1|o3|o4)(?:[.-]|$)/.test(model)) return 128000;
+    if (/^gpt-4-turbo(?:-|$)/.test(model)) return 128000;
+    if (/^gpt-4-32k(?:-|$)/.test(model)) return 32000;
+    if (/^gpt-4(?:-|$)/.test(model)) return 8192;
+    if (/^gpt-3\.5-turbo(?:-|$)/.test(model)) return model.includes("16k") ? 16000 : 4096;
+  }
+  if (provider === "anthropic" && /^claude-(3|3\.5|3\.7|4|haiku|sonnet|opus)/.test(model)) return 200000;
+  if (provider === "gemini") {
+    if (/gemini-(1\.5|2\.0|2\.5|3|3\.1|3\.5)/.test(model)) return 1000000;
+    if (/gemini-1\.0/.test(model)) return 32000;
+  }
+  if (provider === "xai") {
+    if (/grok-(4|4\.)/.test(model)) return 256000;
+    if (/grok-(3|3\.|2|2\.)/.test(model)) return 131000;
+  }
+  if ((provider === "ollama" || provider === "openai-compatible") && model.includes("70b")) return 128000;
+  if ((provider === "ollama" || provider === "openai-compatible") && model.includes("32k")) return 32000;
   return 8192;
 }
 

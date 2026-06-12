@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { LLMError } from "@/lib/llm/errors";
+import { estimatedModelContextWindow } from "@/lib/llm/context";
 import type { LLMCapabilities, LLMConfig, LLMProvider, LLMTask } from "@/lib/llm/types";
 
 export const DEFAULT_ANTHROPIC_MODEL = "claude-haiku-4-5";
@@ -527,6 +528,7 @@ export function publicLLMStatus(env: Env = process.env) {
     model: p.model!,
     baseUrl: p.baseUrl ?? null,
     hasApiKey: !!p.apiKey,
+    contextWindow: estimatedModelContextWindow({ provider: p.provider, model: p.model }) ?? null,
     capabilities: PROVIDER_CAPABILITIES[p.provider!],
   }));
   const tasks = Object.fromEntries(
