@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 beforeEach(() => {
   vi.resetModules();
@@ -472,6 +474,13 @@ describe("hosted usage reservations", () => {
         providerResponseId: "img_1",
       },
     }));
+  });
+
+  it("only finalizes reserved usage rows so duplicate idempotency keys cannot mutate completed events", () => {
+    const source = readFileSync(join(process.cwd(), "lib/billing/usage.ts"), "utf8");
+
+    expect(source).toContain('.where(and(eq(usageEvents.id, reservation.id), eq(usageEvents.status, "reserved")))');
+    expect(source.match(/eq\(usageEvents\.status, "reserved"\)/g)).toHaveLength(2);
   });
 
   it("blocks hosted BYOK reservations when the plan disallows BYOK providers", async () => {

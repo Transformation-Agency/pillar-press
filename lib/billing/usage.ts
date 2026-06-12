@@ -711,7 +711,7 @@ export async function completeUsageReservation(
       completedAt: new Date(),
       updatedAt: new Date(),
     })
-    .where(eq(usageEvents.id, reservation.id));
+    .where(and(eq(usageEvents.id, reservation.id), eq(usageEvents.status, "reserved")));
 }
 
 export async function failUsageReservation(reservation: UsageReservation, err: unknown) {
@@ -727,5 +727,5 @@ export async function failUsageReservation(reservation: UsageReservation, err: u
       completedAt: new Date(),
       updatedAt: new Date(),
     })
-    .where(eq(usageEvents.id, reservation.id));
+    .where(and(eq(usageEvents.id, reservation.id), eq(usageEvents.status, "reserved")));
 }

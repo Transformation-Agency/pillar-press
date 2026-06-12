@@ -528,7 +528,9 @@ Stage 3 is complete only when:
   reports and support audits.
 - Idempotency keys prevent duplicate reservations. **Started:** reservations
   use the workspace/idempotency unique key and reuse existing reservations when
-  a request key is repeated.
+  a request key is repeated; usage finalizers only transition `reserved` rows to
+  `succeeded` or `failed`, so replayed idempotency keys cannot mutate already
+  completed usage events.
 
 ## Development Order
 
