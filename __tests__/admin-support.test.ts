@@ -56,6 +56,9 @@ describe("GET /api/admin/support/workspaces", () => {
         mediaProfileCount: 1,
         queuedJobCount: 0,
         processingJobCount: 1,
+        failedUsageEventCount: 3,
+        quotaBlockEventCount: 1,
+        lastUsageAt: "2026-06-12T10:00:00.000Z",
       }],
     }));
     vi.doMock("@/lib/db", () => ({ db: { execute } }));
@@ -75,6 +78,9 @@ describe("GET /api/admin/support/workspaces", () => {
       subscriptionStatus: "active",
       llmProfileCount: 2,
       mediaProfileCount: 1,
+      failedUsageEventCount: 3,
+      quotaBlockEventCount: 1,
+      lastUsageAt: "2026-06-12T10:00:00.000Z",
     })]);
     expect(JSON.stringify(body)).not.toContain("user@example.com");
     expect(JSON.stringify(body)).not.toContain("sk-");
@@ -123,7 +129,16 @@ describe("GET /api/admin/support/workspaces", () => {
           },
         }],
       })
-      .mockResolvedValueOnce({ rows: [{ id: "job_1", kind: "gather_run", status: "queued" }] });
+      .mockResolvedValueOnce({ rows: [{ id: "job_1", kind: "gather_run", status: "queued" }] })
+      .mockResolvedValueOnce({
+        rows: [{
+          task: "chat",
+          status: "failed",
+          errorCode: "quota_exceeded",
+          eventCount: 2,
+          lastSeenAt: "2026-06-12T10:00:00.000Z",
+        }],
+      });
     vi.doMock("@/lib/db", () => ({ db: { execute } }));
     vi.doMock("@/lib/audit", () => ({ safeRecordAuditEvent }));
 
@@ -141,6 +156,13 @@ describe("GET /api/admin/support/workspaces", () => {
     });
     expect(body.usageRollups).toEqual([{ llmCreditsUsed: 3, costUsd: "0.001000" }]);
     expect(body.backgroundJobs).toEqual([{ id: "job_1", kind: "gather_run", status: "queued" }]);
+    expect(body.usageDiagnostics).toEqual([{
+      task: "chat",
+      status: "failed",
+      errorCode: "quota_exceeded",
+      eventCount: 2,
+      lastSeenAt: "2026-06-12T10:00:00.000Z",
+    }]);
     expect(JSON.stringify(body)).not.toContain("sk-secret");
     expect(JSON.stringify(body)).not.toContain("private@example.com");
     expect(JSON.stringify(body)).not.toContain("hunter2");

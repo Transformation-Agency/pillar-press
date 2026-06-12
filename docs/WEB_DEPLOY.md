@@ -126,9 +126,9 @@ These routes are disabled unless `KINGS_PRESS_ADMIN_SECRET` or
 `KINGS_PRESS_SUPPORT_SECRET` is set. Send the secret as `Authorization: Bearer
 <secret>` or `x-kings-press-admin-secret: <secret>`. Responses include
 workspace subscription state, usage rollups, recent usage/audit/trial events,
-background job status, and provider profile counts. They do not return raw
-provider keys, billing emails, or Stripe customer email fields, and metadata is
-scrubbed again on read.
+30-day usage failure/quota-block summaries, background job status, and provider
+profile counts. They do not return raw provider keys, billing emails, or Stripe
+customer email fields, and metadata is scrubbed again on read.
 
 Trial extension is intentionally narrow admin tooling and requires
 `KINGS_PRESS_ADMIN_SECRET`; `KINGS_PRESS_SUPPORT_SECRET` is read-only and cannot

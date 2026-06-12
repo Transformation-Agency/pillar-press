@@ -199,7 +199,10 @@ export async function listSupportWorkspaces(req: Request) {
       coalesce(p.llm_profiles, 0)::int as "llmProfileCount",
       coalesce(p.media_profiles, 0)::int as "mediaProfileCount",
       coalesce(j.queued_jobs, 0)::int as "queuedJobCount",
-      coalesce(j.processing_jobs, 0)::int as "processingJobCount"
+      coalesce(j.processing_jobs, 0)::int as "processingJobCount",
+      coalesce(u.failed_usage_events, 0)::int as "failedUsageEventCount",
+      coalesce(u.quota_block_events, 0)::int as "quotaBlockEventCount",
+      u.last_usage_at as "lastUsageAt"
     from workspaces w
     left join lateral (
       select count(*) as member_count
@@ -235,6 +238,15 @@ export async function listSupportWorkspaces(req: Request) {
       from background_jobs
       where background_jobs.workspace_id = w.id
     ) j on true
+    left join lateral (
+      select
+        count(*) filter (where status = 'failed') as failed_usage_events,
+        count(*) filter (where error_code in ('quota_exceeded', 'storage_quota_exceeded')) as quota_block_events,
+        max(created_at) as last_usage_at
+      from usage_events
+      where usage_events.workspace_id = w.id
+        and usage_events.created_at >= now() - interval '30 days'
+    ) u on true
     order by w.created_at desc
     limit ${limit}
   `);
@@ -251,7 +263,7 @@ export async function listSupportWorkspaces(req: Request) {
 
 export async function getSupportWorkspace(req: Request, workspaceId: string) {
   requireAdminSupportAccess(req);
-  const [summary, usage, recentUsage, trialEvents, auditEvents, jobs] = await Promise.all([
+  const [summary, usage, recentUsage, trialEvents, auditEvents, jobs, usageDiagnostics] = await Promise.all([
     db.execute(sql`
       select *
       from (${sql.raw("select 1")}) noop
@@ -354,6 +366,20 @@ export async function getSupportWorkspace(req: Request, workspaceId: string) {
       order by created_at desc
       limit 12
     `),
+    db.execute(sql`
+      select
+        task,
+        status,
+        error_code as "errorCode",
+        count(*)::int as "eventCount",
+        max(created_at) as "lastSeenAt"
+      from usage_events
+      where workspace_id = ${workspaceId}
+        and created_at >= now() - interval '30 days'
+      group by task, status, error_code
+      order by max(created_at) desc, count(*) desc
+      limit 24
+    `),
   ]);
 
   const summaryRows = rowsOf(summary);
@@ -377,5 +403,6 @@ export async function getSupportWorkspace(req: Request, workspaceId: string) {
     trialEvents: rowsOf(trialEvents).map(scrub),
     auditEvents: rowsOf(auditEvents).map(scrub),
     backgroundJobs: rowsOf(jobs).map(scrub),
+    usageDiagnostics: rowsOf(usageDiagnostics).map(scrub),
   };
 }
