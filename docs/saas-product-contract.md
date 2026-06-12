@@ -27,6 +27,9 @@ Do this as a staged migration, not a rewrite.
    returns `quota_exceeded`, `subscription_required`, `subscription_inactive`,
    or `trial_expired`.
 6. Stage 5: workers/jobs for long-running Gather, Weave, media, and batch work.
+   **Started:** a hosted `background_jobs` table plus typed enqueue/claim/
+   complete/fail/cancel helpers now provide the database-backed queue
+   foundation for moving long operations out of synchronous API requests.
 7. Stage 6: production ops, admin, support, observability, and launch gates.
    **Started:** sensitive hosted mutations now record sanitized audit events for
    Stripe webhooks, billing Checkout/Portal sessions, and hosted LLM/media BYOK
@@ -298,6 +301,41 @@ Initial audited actions:
 - Billing Checkout and Customer Portal session creation.
 - Hosted LLM/media provider profile updates, with secret-free metadata only.
 
+### `background_jobs`
+
+Hosted queue foundation for long-running Gather, Weave, media, export, and
+maintenance workflows.
+
+Important fields:
+- `workspace_id`, `user_id`, `campaign_id`, `piece_id`
+- `kind`
+- `status`
+- `priority`
+- `run_after`
+- `locked_by`, `locked_at`
+- `attempts`, `max_attempts`
+- `idempotency_key`
+- `payload`, `result`
+- `error_code`, `error_message`
+
+Valid statuses:
+- `queued`
+- `processing`
+- `succeeded`
+- `failed`
+- `canceled`
+
+Initial kinds:
+- `gather_run`
+- `weave`
+- `media_generation`
+- `bulk_export`
+- `maintenance`
+
+Rule:
+- Background job payloads/results are workflow metadata, not secret storage.
+  The shared helper redacts obvious secret-like keys before persistence.
+
 ## Entitlement Enforcement Contract
 
 All expensive routes will eventually follow this pattern:
@@ -486,5 +524,9 @@ Stage 3 is complete only when:
    and `/api/billing/portal`; `/api/billing/status` returns a normalized
    `lifecycle` object for trial ending/expired/upgrade actions; hosted API
    billing-blocked responses open the same panel with context.
-9. Stage 5: introduce a worker/job runner for long operations.
+9. Stage 5: introduce a worker/job runner for long operations. **Started:**
+   `db/migrations/0009_background_jobs.sql`, `db/schema.ts`, and
+   `lib/jobs/background.ts` define the hosted queue foundation; the next step is
+   wiring selected long-running routes to enqueue jobs and adding a worker entry
+   point.
 10. Stage 6: add admin/support tooling and production observability.

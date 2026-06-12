@@ -30,6 +30,14 @@ export const subscriptionStatus = [
   "paused",
 ] as const;
 export const usageEventStatus = ["reserved", "succeeded", "failed", "canceled"] as const;
+export const backgroundJobStatus = ["queued", "processing", "succeeded", "failed", "canceled"] as const;
+export const backgroundJobKind = [
+  "gather_run",
+  "weave",
+  "media_generation",
+  "bulk_export",
+  "maintenance",
+] as const;
 export const usageEventTask = [
   "review",
   "revision",
@@ -499,3 +507,41 @@ export const auditEvents = pgTable(
 
 export type AuditEvent = typeof auditEvents.$inferSelect;
 export type NewAuditEvent = typeof auditEvents.$inferInsert;
+
+export const backgroundJobs = pgTable(
+  "background_jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: text("user_id"),
+    campaignId: text("campaign_id"),
+    pieceId: text("piece_id"),
+    kind: text("kind", { enum: backgroundJobKind }).notNull(),
+    status: text("status", { enum: backgroundJobStatus }).notNull().default("queued"),
+    priority: integer("priority").notNull().default(0),
+    runAfter: timestamp("run_after", { withTimezone: true }).notNull().defaultNow(),
+    lockedBy: text("locked_by"),
+    lockedAt: timestamp("locked_at", { withTimezone: true }),
+    attempts: integer("attempts").notNull().default(0),
+    maxAttempts: integer("max_attempts").notNull().default(3),
+    idempotencyKey: text("idempotency_key"),
+    payload: jsonb("payload").notNull().default({}),
+    result: jsonb("result").notNull().default({}),
+    errorCode: text("error_code"),
+    errorMessage: text("error_message"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (t) => ({
+    byWorkspace: index("background_jobs_workspace_idx").on(t.workspaceId),
+    byStatusRunAfter: index("background_jobs_status_run_after_idx").on(t.status, t.runAfter, t.priority),
+    byWorkspaceStatus: index("background_jobs_workspace_status_idx").on(t.workspaceId, t.status, t.runAfter),
+    uniqIdempotency: unique("background_jobs_workspace_idempotency_unique").on(t.workspaceId, t.idempotencyKey),
+  }),
+);
+
+export type BackgroundJob = typeof backgroundJobs.$inferSelect;
+export type NewBackgroundJob = typeof backgroundJobs.$inferInsert;
