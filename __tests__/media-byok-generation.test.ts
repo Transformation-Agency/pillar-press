@@ -171,4 +171,146 @@ describe("POST /api/hedra/generate hosted media BYOK", () => {
     });
     expect(failUsageReservation).not.toHaveBeenCalled();
   });
+
+  it("gates and uses a saved Hedra key for hosted image generation", async () => {
+    const reservation = { id: "usage_hedra", workspaceId: "workspace_1", idempotencyKey: "k" };
+    const requireByokProviderAccess = vi.fn(async () => ({}));
+    const requireManagedProviderAccess = vi.fn();
+    const reserveUsage = vi.fn(async () => reservation);
+    const completeUsageReservation = vi.fn();
+    const failUsageReservation = vi.fn();
+    const listModels = vi.fn(async () => [{
+      id: "hedra-image-v1",
+      name: "Hedra Image",
+      type: "image",
+      credits: 2,
+    }]);
+    const generateAsset = vi.fn(async () => ({
+      id: "gen_1",
+      status: "queued",
+      progress: 0,
+      asset_id: "asset_1",
+    }));
+    const inserted: Array<Record<string, unknown>> = [];
+    const returning = vi.fn(async () => [{ id: "job_hedra", hedraGenerationId: "gen_1" }]);
+    const values = vi.fn((value) => {
+      inserted.push(value);
+      return { returning };
+    });
+
+    vi.doMock("@/lib/auth", () => ({
+      requireUser: vi.fn(async () => ({ id: "user_1", workspaceId: "workspace_1", role: "author" })),
+    }));
+    vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => false }));
+    vi.doMock("@/lib/tenant", () => ({
+      campaignInWorkspace: vi.fn(async () => true),
+      tenantNotFound: vi.fn(() => new Response(JSON.stringify({ code: "not_found" }), { status: 404 })),
+    }));
+    vi.doMock("@/lib/db", async () => {
+      const actual = await vi.importActual<any>("@/lib/db");
+      return {
+        ...actual,
+        db: {
+          insert: vi.fn(() => ({ values })),
+          query: {
+            pieces: { findFirst: vi.fn() },
+            references: { findFirst: vi.fn() },
+            styleProfiles: { findFirst: vi.fn() },
+          },
+        },
+      };
+    });
+    vi.doMock("@/db/style-schema", () => ({ styleProfiles: { campaignId: "style_profiles.campaign_id" } }));
+    vi.doMock("@/lib/local/database", () => ({
+      createLocalMediaJob: vi.fn(),
+      getLocalMediaJob: vi.fn(),
+      getLocalPiece: vi.fn(),
+      getLocalReferences: vi.fn(),
+      getLocalStyleProfile: vi.fn(),
+    }));
+    vi.doMock("@/lib/mediaProviders", () => ({
+      getImageProviderForUser: vi.fn(async () => null),
+      getAudioProviderForUser: vi.fn(async () => null),
+      getElevenLabsProviderForUser: vi.fn(async () => null),
+      getHedraProviderForUser: vi.fn(async () => ({
+        provider: "hedra",
+        apiKey: "user-hedra-secret",
+        providerSource: "byok",
+        profileId: "hedra-main",
+      })),
+    }));
+    vi.doMock("@/lib/mediaImage", () => ({ generateOpenAICompatibleImage: vi.fn() }));
+    vi.doMock("@/lib/mediaAudio", () => ({ generateOpenAICompatibleSpeech: vi.fn() }));
+    vi.doMock("@/lib/hedra", () => ({
+      listModels,
+      generateAsset,
+      createAsset: vi.fn(),
+      uploadAsset: vi.fn(),
+    }));
+    vi.doMock("@/lib/elevenlabs", () => ({ textToSpeechLong: vi.fn() }));
+    vi.doMock("@/lib/storage", () => ({ uploadPublicAudio: vi.fn() }));
+    vi.doMock("@/lib/ai/imagePrompt", () => ({ craftImagePrompt: vi.fn() }));
+    vi.doMock("@/lib/llm", () => ({ getAIForTaskForUser: vi.fn() }));
+    vi.doMock("@/lib/refContext", () => ({ buildRefContext: vi.fn(() => "") }));
+    vi.doMock("@/lib/billing/usage", () => ({
+      reserveUsage,
+      completeUsageReservation,
+      failUsageReservation,
+    }));
+    vi.doMock("@/lib/billing/entitlements", () => ({
+      requireConcurrentJobCapacity: vi.fn(async () => ({ current: 0, limit: 1 })),
+      requireByokProviderAccess,
+      requireManagedProviderAccess,
+    }));
+
+    const { POST } = await import("../app/api/hedra/generate/route");
+    const res = await POST(new Request("http://test.local/api/hedra/generate", {
+      method: "POST",
+      body: JSON.stringify({
+        type: "image",
+        provider: "hedra",
+        modelId: "hedra-image-v1",
+        prompt: "Create a cover image.",
+        enhance: false,
+      }),
+    }));
+    const body = await res.json();
+
+    expect(res.status).toBe(201);
+    expect(requireByokProviderAccess).toHaveBeenCalledWith({ id: "user_1", workspaceId: "workspace_1", role: "author" });
+    expect(requireManagedProviderAccess).not.toHaveBeenCalled();
+    expect(listModels).toHaveBeenCalledWith(["image"], { apiKey: "user-hedra-secret" });
+    expect(reserveUsage).toHaveBeenCalledWith(expect.objectContaining({
+      task: "media_generation",
+      feature: "media.image",
+      providerSource: "byok",
+      provider: "hedra",
+      model: "hedra-image-v1",
+      metadata: expect.objectContaining({
+        profileId: "hedra-main",
+        hedraProfileId: "hedra-main",
+      }),
+    }));
+    expect(generateAsset).toHaveBeenCalledWith(expect.objectContaining({
+      type: "image",
+      modelId: "hedra-image-v1",
+      textPrompt: "Create a cover image.",
+    }), { apiKey: "user-hedra-secret" });
+    expect(inserted[0]).toMatchObject({
+      type: "image",
+      hedraGenerationId: "gen_1",
+      hedraAssetId: "asset_1",
+      meta: expect.objectContaining({
+        provider: "hedra",
+        providerSource: "byok",
+        profileId: "hedra-main",
+        hedraProfileId: "hedra-main",
+      }),
+    });
+    expect(JSON.stringify(body)).not.toContain("user-hedra-secret");
+    expect(completeUsageReservation).toHaveBeenCalledWith(reservation, {
+      actualCredits: 2,
+      providerRequestId: "gen_1",
+    });
+  });
 });

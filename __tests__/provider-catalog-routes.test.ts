@@ -141,4 +141,46 @@ describe("hosted provider catalog routes", () => {
       models: [{ id: "m1", name: "Image", type: "image" }],
     });
   });
+
+  it("uses a saved Hedra BYOK key for live models after BYOK access is allowed", async () => {
+    const listModels = vi.fn(async () => [{ id: "m1", name: "Image", type: "image" }]);
+    const requireByokProviderAccess = vi.fn(async () => ({}));
+    const requireManagedProviderAccess = vi.fn();
+
+    vi.doMock("@/lib/auth", () => ({
+      requireUser: vi.fn(async () => ({ id: "user_1", workspaceId: "workspace_1", role: "author" })),
+    }));
+    vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => false }));
+    vi.doMock("@/lib/hedra", () => ({ listModels }));
+    vi.doMock("@/lib/mediaProviders", () => ({
+      getHedraProviderForUser: vi.fn(async () => ({
+        provider: "hedra",
+        apiKey: "user-hedra-key",
+        providerSource: "byok",
+        profileId: "hedra-main",
+      })),
+    }));
+    vi.doMock("@/lib/billing/entitlements", () => ({
+      requireManagedProviderAccess,
+      requireByokProviderAccess,
+    }));
+    vi.doMock("@/lib/tenant", () => ({
+      tenantNotFound: () => Response.json({ error: "Not found.", code: "not_found" }, { status: 404 }),
+    }));
+
+    const { GET } = await import("../app/api/hedra/models/route");
+    const res = await GET(new Request("http://test.local/api/hedra/models?type=image"));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(requireByokProviderAccess).toHaveBeenCalledWith({ id: "user_1", workspaceId: "workspace_1", role: "author" });
+    expect(requireManagedProviderAccess).not.toHaveBeenCalled();
+    expect(listModels).toHaveBeenCalledWith(["image"], { apiKey: "user-hedra-key" });
+    expect(body).toEqual({
+      providerSource: "byok",
+      source: "hedra",
+      models: [{ id: "m1", name: "Image", type: "image" }],
+    });
+    expect(JSON.stringify(body)).not.toContain("user-hedra-key");
+  });
 });

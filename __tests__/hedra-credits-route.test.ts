@@ -20,6 +20,9 @@ describe("Hedra credits route in hosted mode", () => {
     }));
     vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => false }));
     vi.doMock("@/lib/hedra", () => ({ getCredits }));
+    vi.doMock("@/lib/mediaProviders", () => ({
+      getHedraProviderForUser: vi.fn(async () => null),
+    }));
     vi.doMock("@/lib/billing/entitlements", () => ({
       requireManagedProviderAccess,
       requireByokProviderAccess: vi.fn(),
@@ -33,9 +36,53 @@ describe("Hedra credits route in hosted mode", () => {
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(body).toEqual({ ok: true, configured: true, managed: true, credits: null });
+    expect(body).toEqual({ ok: true, configured: true, managed: true, providerSource: "managed", credits: null });
     expect(requireManagedProviderAccess).toHaveBeenCalledWith({ id: "user_1", workspaceId: "workspace_1", role: "author" });
     expect(getCredits).not.toHaveBeenCalled();
+  });
+
+  it("checks saved BYOK Hedra credits through the hosted media profile", async () => {
+    const getCredits = vi.fn(async () => ({ remaining: 17 }));
+    const requireByokProviderAccess = vi.fn(async () => ({}));
+    const requireManagedProviderAccess = vi.fn();
+
+    vi.doMock("@/lib/auth", () => ({
+      requireUser: vi.fn(async () => ({ id: "user_1", workspaceId: "workspace_1", role: "author" })),
+    }));
+    vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => false }));
+    vi.doMock("@/lib/hedra", () => ({ getCredits }));
+    vi.doMock("@/lib/mediaProviders", () => ({
+      getHedraProviderForUser: vi.fn(async () => ({
+        provider: "hedra",
+        apiKey: "user-saved-hedra-key",
+        providerSource: "byok",
+        profileId: "hedra-main",
+      })),
+    }));
+    vi.doMock("@/lib/billing/entitlements", () => ({
+      requireManagedProviderAccess,
+      requireByokProviderAccess,
+    }));
+    vi.doMock("@/lib/tenant", () => ({
+      tenantNotFound: () => Response.json({ error: "Not found.", code: "not_found" }, { status: 404 }),
+    }));
+
+    const { GET } = await import("../app/api/hedra/credits/route");
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body).toEqual({
+      ok: true,
+      configured: true,
+      managed: false,
+      providerSource: "byok",
+      credits: { remaining: 17 },
+    });
+    expect(requireByokProviderAccess).toHaveBeenCalledWith({ id: "user_1", workspaceId: "workspace_1", role: "author" });
+    expect(requireManagedProviderAccess).not.toHaveBeenCalled();
+    expect(getCredits).toHaveBeenCalledWith({ apiKey: "user-saved-hedra-key" });
+    expect(JSON.stringify(body)).not.toContain("user-saved-hedra-key");
   });
 
   it("checks BYOK Hedra credits only after BYOK provider access is allowed", async () => {
@@ -47,6 +94,9 @@ describe("Hedra credits route in hosted mode", () => {
     }));
     vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => false }));
     vi.doMock("@/lib/hedra", () => ({ getCredits }));
+    vi.doMock("@/lib/mediaProviders", () => ({
+      getHedraProviderForUser: vi.fn(async () => null),
+    }));
     vi.doMock("@/lib/billing/entitlements", () => ({
       requireManagedProviderAccess: vi.fn(),
       requireByokProviderAccess,

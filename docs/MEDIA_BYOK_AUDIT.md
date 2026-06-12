@@ -45,9 +45,9 @@ flowchart TD
   passed through.
 - The optional image prompt enhancement now uses `getAIForTaskForUser("mediaPrompt")`,
   so the LLM part of media generation can use hosted LLM BYOK.
-- Hosted Hedra credit checks and hosted Eleven/Hedra catalog calls now respect
-  managed/BYOK provider access gates before touching platform or user provider
-  keys.
+- Hosted Hedra credit checks and hosted Eleven/Hedra catalog calls now resolve
+  saved media profiles, respect managed/BYOK provider access gates, and avoid
+  exposing managed platform credits.
 - Hosted media provider keys can now be saved as encrypted `provider_secrets`
   rows with `kind = "media"` for `hedra`, `elevenlabs`, `openai`, `xai`, and
   `custom-image`. Browser reads receive only secret-free metadata.
@@ -57,6 +57,11 @@ flowchart TD
 - `POST /api/hedra/generate` now uses saved BYOK media profiles for OpenAI/xAI
   compatible image generation, OpenAI audio generation, Hedra image/video/avatar
   generation, and ElevenLabs voiceover audio used in Hedra videos.
+- Hedra image/video/avatar generation now checks the resolved provider source
+  before calling live Hedra model/generation APIs, so hosted BYOK and managed
+  media follow the same gate ordering as LLM calls.
+- Hedra asset uploads now check the resolved provider source before creating or
+  uploading provider assets.
 - Hedra model/status/asset operations and ElevenLabs TTS accept per-request API
   key overrides.
 - `GET /api/media/providers` merges managed availability with hosted saved BYOK
@@ -139,6 +144,8 @@ experience is still an MVP surface.
    - Route tests proving managed media generation requires managed-provider
      access.
    - Route tests proving BYOK media generation requires BYOK-provider access.
+   - Route tests proving Hedra model and credit lookups use saved hosted BYOK
+     keys only after BYOK access is allowed.
    - Regression tests proving secrets never appear in status responses, errors,
      or media job metadata.
 

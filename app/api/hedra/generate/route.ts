@@ -33,7 +33,7 @@ import { generateOpenAICompatibleImage } from "@/lib/mediaImage";
 import { generateOpenAICompatibleSpeech } from "@/lib/mediaAudio";
 import { campaignInWorkspace, tenantNotFound } from "@/lib/tenant";
 import { completeUsageReservation, failUsageReservation, reserveUsage, type UsageReservation } from "@/lib/billing/usage";
-import { requireConcurrentJobCapacity } from "@/lib/billing/entitlements";
+import { requireByokProviderAccess, requireConcurrentJobCapacity, requireManagedProviderAccess } from "@/lib/billing/entitlements";
 import type { SessionUser } from "@/lib/auth";
 import type { Piece } from "@/lib/db";
 
@@ -87,6 +87,13 @@ function combinedSource(primary: MediaSecretConfig | null, secondary: MediaSecre
   return primary?.providerSource === "byok" && (!secondary || secondary.providerSource === "byok")
     ? "byok"
     : "managed";
+}
+
+async function requireMediaProviderAccessForSource(user: SessionUser, providerSource: MediaProviderSource) {
+  if (isLocalFirstMode() || !user.workspaceId) return;
+  const billingUser = { ...user, workspaceId: user.workspaceId };
+  if (providerSource === "byok") await requireByokProviderAccess(billingUser);
+  else await requireManagedProviderAccess(billingUser);
 }
 
 // POST /api/hedra/generate
@@ -276,6 +283,8 @@ export async function POST(req: Request) {
     const hedraProvider = await getHedraProviderForUser(user);
     const needsVoiceover = !body.audioAssetId && Boolean(body.script) && (body.type === "avatar_video" || body.type === "video");
     const voiceoverProvider = needsVoiceover ? await getElevenLabsProviderForUser(user) : null;
+    const providerSource = combinedSource(hedraProvider, voiceoverProvider);
+    await requireMediaProviderAccessForSource(user, providerSource);
     const models = await listModels([wanted], { apiKey: hedraProvider?.apiKey });
     const model = models.find((m) => m.id === body.modelId);
     if (!model) return NextResponse.json({ error: "Unknown or unavailable model.", code: "bad_request" }, { status: 400 });
@@ -289,7 +298,7 @@ export async function POST(req: Request) {
       feature: `media.${body.type}`,
       campaignId: body.campaignId,
       pieceId: body.pieceId,
-      providerSource: combinedSource(hedraProvider, voiceoverProvider),
+      providerSource,
       provider: "hedra",
       model: body.modelId,
       metadata: {
