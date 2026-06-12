@@ -1,8 +1,45 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 beforeEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+describe("hosted auth mode defaults", () => {
+  it("keeps local web/dev skip-login compatibility when AUTH_DISABLED is omitted", async () => {
+    const { isAuthDisabled } = await import("@/lib/auth");
+
+    expect(isAuthDisabled()).toBe(true);
+  });
+
+  it("requires account auth by default in hosted mode when AUTH_DISABLED is omitted", async () => {
+    vi.stubEnv("KINGS_PRESS_RUNTIME", "hosted");
+
+    const { isAuthDisabled } = await import("@/lib/auth");
+
+    expect(isAuthDisabled()).toBe(false);
+  });
+
+  it("allows explicit hosted private-preview skip-login mode", async () => {
+    vi.stubEnv("KINGS_PRESS_RUNTIME", "hosted");
+    vi.stubEnv("AUTH_DISABLED", "true");
+
+    const { isAuthDisabled } = await import("@/lib/auth");
+
+    expect(isAuthDisabled()).toBe(true);
+  });
+
+  it("keeps explicit AUTH_DISABLED=false strict in all runtimes", async () => {
+    vi.stubEnv("AUTH_DISABLED", "false");
+
+    const { isAuthDisabled } = await import("@/lib/auth");
+
+    expect(isAuthDisabled()).toBe(false);
+  });
 });
 
 describe("hosted auth API contract", () => {

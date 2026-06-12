@@ -413,8 +413,10 @@ Rules:
 ## Stage 1 Success Gate
 
 Stage 1 is complete only when:
-- Hosted production uses `AUTH_DISABLED=false`. **Started:** `.env.hosted.example`
-  and `docs/WEB_DEPLOY.md` now default hosted SaaS to Supabase Auth.
+- Hosted production uses Supabase Auth. **Implemented:** hosted/web/Postgres
+  runtime now requires account auth by default when `AUTH_DISABLED` is omitted;
+  `.env.hosted.example` and `docs/WEB_DEPLOY.md` still set
+  `AUTH_DISABLED=false` explicitly for operator clarity.
 - Basic Auth is no longer the product auth path. **Started:** Basic Auth remains
   documented only as a temporary private-preview gate while `AUTH_DISABLED=true`.
 - A new user can sign up and get a workspace. **Started:** the static web app now

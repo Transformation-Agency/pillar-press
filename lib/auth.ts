@@ -13,16 +13,20 @@ import { headers, cookies } from "next/headers";
 import { and, eq } from "drizzle-orm";
 import { db, memberships } from "@/lib/db";
 import { ensureLocalWorkspace, LOCAL_USER_ID } from "@/lib/local/database";
-import { isLocalFirstMode } from "@/lib/local/mode";
+import { isHostedWebMode, isLocalFirstMode } from "@/lib/local/mode";
 import { supabaseFromToken } from "@/lib/supabase";
 
 export type Role = (typeof import("@/db/schema").membershipRole)[number];
 
-// Skip-login compatibility: when AUTH_DISABLED is not explicitly "false", web
-// dev runs without authentication. Desktop local-first mode has its own branch
-// below and never needs Supabase.
+// Skip-login compatibility remains the default for local web/dev, but hosted
+// SaaS mode must fail safer: public deployments require real account auth
+// unless AUTH_DISABLED=true is deliberately set for a private-preview gate.
 const DEFAULT_USER_ID = process.env.DEFAULT_USER_ID ?? "dev-user";
-export const isAuthDisabled = () => process.env.AUTH_DISABLED !== "false";
+export const isAuthDisabled = () => {
+  const value = (process.env.AUTH_DISABLED ?? "").trim();
+  if (isHostedWebMode()) return /^(1|true|yes)$/i.test(value);
+  return value !== "false";
+};
 
 export interface SessionUser {
   id: string;

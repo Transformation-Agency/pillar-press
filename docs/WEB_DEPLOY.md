@@ -6,7 +6,9 @@ to the old Pillar Press code. The hosted runtime uses:
 - Next.js App Router API routes.
 - Hosted Postgres through `DATABASE_URL`.
 - Supabase Storage for public media assets.
-- Supabase Auth for hosted accounts when `AUTH_DISABLED=false`.
+- Supabase Auth for hosted accounts. Hosted mode requires login by default when
+  `AUTH_DISABLED` is omitted; set `AUTH_DISABLED=false` explicitly in
+  production for clarity.
 - The current King’s Press static workspace UI.
 - Optional Basic Auth only for temporary private previews while `AUTH_DISABLED=true`.
 
@@ -41,7 +43,7 @@ KINGS_PRESS_HOSTED_SECRET_KEY=<long random encryption secret>
 KINGS_PRESS_JOB_SECRET=<long random worker secret>
 ```
 
-With `AUTH_DISABLED=false`, the static browser app shows a King's Press
+With hosted auth enabled, the static browser app shows a King's Press
 sign-in/create-account screen, signs users in through Supabase Auth, attaches
 the Supabase bearer token to same-origin `/api/*` calls, and auto-creates the
 first workspace on the first authenticated request.
