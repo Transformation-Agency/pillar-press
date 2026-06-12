@@ -1,6 +1,6 @@
 # Hosted Media BYOK Audit
 
-Status: audit complete, hosted media BYOK server plumbing implemented, setup/UI polish not complete.
+Status: audit complete, hosted media BYOK server plumbing implemented, live provider smoke not complete.
 
 This audit covers `POST /api/hedra/generate` and the media provider helpers that
 power Studio image, audio, video, and avatar generation in hosted web mode.
@@ -78,6 +78,10 @@ flowchart TD
   Hedra checks credits, ElevenLabs lists voices, and OpenAI/xAI/custom
   OpenAI-compatible media profiles list models through the saved encrypted
   profile.
+- `GET /api/media/providers` now returns secret-free provider setup metadata:
+  key labels, help URLs, default base URLs, default models, and model
+  placeholders. Studio uses that server catalog instead of hard-coded provider
+  defaults.
 
 ## Gaps
 
@@ -91,15 +95,16 @@ Impact: before launch, run a hosted staging smoke with real BYOK keys for each
 supported provider and confirm generated assets persist beyond signed provider
 URL expiry.
 
-### 2. Hosted media provider management still needs richer defaults
+### 2. Hosted media provider management still needs live polish
 
 First-run setup and Studio now write hosted media keys through the encrypted
 settings route, Studio can remove saved profiles, and saved profiles can be
-tested without exposing keys. A production SaaS should still add richer
-provider-specific help and clearer model/capability defaults per media task.
+tested without exposing keys. The provider catalog now exposes setup help and
+default model/base URL metadata. A production SaaS should still refine provider
+copy and model recommendations as vendor APIs change.
 
 Impact: hosted BYOK media can be configured without env vars, but the management
-experience still needs polish before broad self-serve launch.
+experience still needs live-provider validation before broad self-serve launch.
 
 ## Required Implementation Order
 
@@ -143,13 +148,15 @@ experience still needs polish before broad self-serve launch.
 
 6. Update provider status and setup UI. **Started.**
    - `GET /api/media/providers` should merge managed availability with
-     user-saved hosted media BYOK status.
+     user-saved hosted media BYOK status. **Implemented.**
    - Onboarding/setup should save media keys through the hosted media settings
-     route when not running in desktop local-first mode.
+     route when not running in desktop local-first mode. **Implemented.**
    - Studio should list and remove saved hosted media profiles without exposing
      keys. **Implemented.**
    - Studio should test saved hosted media profiles without asking the user to
      paste the key again. **Implemented.**
+   - Studio should receive provider help, model placeholders, and base URL
+     defaults from the secret-free server catalog. **Implemented.**
 
 7. Add tests. **Started.**
    - Media settings encryption tests for `kind = "media"`.

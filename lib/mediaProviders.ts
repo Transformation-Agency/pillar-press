@@ -42,6 +42,14 @@ export type MediaProviderInfo = {
   capabilities: MediaCapability[];
   envVars: string[];
   models: MediaModelInfo[];
+  setup: {
+    keyLabel: string;
+    summary: string;
+    helpUrl: string;
+    defaultModel?: string;
+    defaultBaseUrl?: string;
+    modelPlaceholder: string;
+  };
 };
 
 export type ImageProviderConfig = {
@@ -125,6 +133,12 @@ export function getMediaProviderStatus(env: NodeJS.ProcessEnv = process.env): Me
     capabilities: ["image", "video", "avatar"],
     envVars: ["HEDRA_API_KEY"],
     models: [],
+    setup: {
+      keyLabel: "Hedra API key",
+      summary: "Use Hedra for image, video, and avatar generation in Studio.",
+      helpUrl: "https://www.hedra.com/",
+      modelPlaceholder: "Selected from Hedra models at generation time",
+    },
   };
   const elevenlabs: MediaProviderInfo = {
     id: "elevenlabs",
@@ -143,6 +157,13 @@ export function getMediaProviderStatus(env: NodeJS.ProcessEnv = process.env): Me
       credits: 1,
       requires: { prompt: true, voice: true },
     }],
+    setup: {
+      keyLabel: "ElevenLabs API key",
+      summary: "Use ElevenLabs for polished text-to-speech and voiceover drafts.",
+      helpUrl: "https://elevenlabs.io/app/settings/api-keys",
+      defaultModel: "eleven-tts-multilingual-v2",
+      modelPlaceholder: "eleven-tts-multilingual-v2",
+    },
   };
   const openai: MediaProviderInfo = {
     id: "openai",
@@ -151,6 +172,14 @@ export function getMediaProviderStatus(env: NodeJS.ProcessEnv = process.env): Me
     capabilities: ["image", "audio"],
     envVars: ["MEDIA_OPENAI_API_KEY", "OPENAI_API_KEY"],
     models: [...openaiModels, ...openaiAudioModels],
+    setup: {
+      keyLabel: "OpenAI API key",
+      summary: "Use OpenAI for image generation and built-in read-aloud audio.",
+      helpUrl: "https://platform.openai.com/api-keys",
+      defaultModel: openaiModels[0]?.id ?? "gpt-image-1",
+      defaultBaseUrl: "https://api.openai.com/v1",
+      modelPlaceholder: "gpt-image-1 or gpt-4o-mini-tts",
+    },
   };
   const xai: MediaProviderInfo = {
     id: "xai",
@@ -159,6 +188,14 @@ export function getMediaProviderStatus(env: NodeJS.ProcessEnv = process.env): Me
     capabilities: ["image"],
     envVars: ["MEDIA_XAI_API_KEY", "XAI_API_KEY"],
     models: xaiModels,
+    setup: {
+      keyLabel: "xAI API key",
+      summary: "Use xAI/Grok for OpenAI-compatible image generation.",
+      helpUrl: "https://console.x.ai/",
+      defaultModel: xaiModels[0]?.id ?? "grok-2-image",
+      defaultBaseUrl: "https://api.x.ai/v1",
+      modelPlaceholder: "grok-2-image",
+    },
   };
   const customImage: MediaProviderInfo = {
     id: "custom-image",
@@ -167,6 +204,14 @@ export function getMediaProviderStatus(env: NodeJS.ProcessEnv = process.env): Me
     capabilities: ["image"],
     envVars: ["MEDIA_IMAGE_BASE_URL", "MEDIA_IMAGE_API_KEY", "MEDIA_IMAGE_MODELS"],
     models: customModels,
+    setup: {
+      keyLabel: "Custom image API key",
+      summary: "Use any OpenAI-compatible image endpoint by adding its base URL.",
+      helpUrl: "https://platform.openai.com/docs/api-reference/images",
+      defaultModel: customModels[0]?.id ?? "custom-image-model",
+      defaultBaseUrl: "",
+      modelPlaceholder: "Provider model name",
+    },
   };
 
   return {

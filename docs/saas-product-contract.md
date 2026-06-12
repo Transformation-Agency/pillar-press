@@ -456,9 +456,10 @@ Stage 3 is complete only when:
   `docs/MEDIA_BYOK_AUDIT.md` for the current credential-flow audit and required
   implementation order. Server-side generation/status consumption is
   implemented; hosted setup/UI media profile management can add, replace, and
-  remove encrypted media profiles and test saved profiles without exposing
-  keys; the remaining work is live provider smoke coverage and production-grade
-  provider-specific help and capability defaults.
+  remove encrypted media profiles, test saved profiles without exposing keys,
+  and read provider help/default metadata from the secret-free provider catalog;
+  the remaining proof point is live provider smoke coverage against staging
+  BYOK keys.
 - Usage rollups reflect the ledger. **Started:** `GET /api/billing/status`
   rebuilds the current billing period's `usage_rollups` row from
   `usage_events` for LLM, media, Gather, provider cost, and existing storage

@@ -5,11 +5,16 @@ function MediaProvidersDialog({ status, onClose }) {
   const [settings, setSettings] = React.useState({ profiles: [], defaultProfileId: null });
   const [provider, setProvider] = React.useState("openai");
   const [apiKey, setApiKey] = React.useState("");
-  const [model, setModel] = React.useState("gpt-4o-mini-tts");
+  const [model, setModel] = React.useState("gpt-image-1");
   const [baseUrl, setBaseUrl] = React.useState("https://api.openai.com/v1");
   const [label, setLabel] = React.useState("");
   const [message, setMessage] = React.useState("");
   const [busy, setBusy] = React.useState(false);
+  const providerMeta = React.useMemo(() => {
+    const entries = {};
+    providers.forEach((item) => { entries[item.id] = item; });
+    return entries;
+  }, [providers]);
   const providerLabels = {
     hedra: "Hedra",
     elevenlabs: "ElevenLabs",
@@ -28,6 +33,17 @@ function MediaProvidersDialog({ status, onClose }) {
     xai: "grok-2-image",
     "custom-image": "custom-image-model",
     hedra: "",
+  };
+  const currentProvider = providerMeta[provider] || null;
+  const currentSetup = (currentProvider && currentProvider.setup) || {};
+  const providerLabel = (id) => (providerMeta[id] && providerMeta[id].label) || providerLabels[id] || id;
+  const providerDefaultModel = (id) => {
+    const setup = providerMeta[id] && providerMeta[id].setup;
+    return (setup && setup.defaultModel) || defaultModels[id] || "";
+  };
+  const providerDefaultBaseUrl = (id) => {
+    const setup = providerMeta[id] && providerMeta[id].setup;
+    return (setup && typeof setup.defaultBaseUrl === "string") ? setup.defaultBaseUrl : (defaultBaseUrl[id] || "");
   };
   const profileIdFor = (profile) =>
     String(["media", profile.provider, profile.baseUrl || "", profile.model || ""].join("-"))
@@ -51,9 +67,9 @@ function MediaProvidersDialog({ status, onClose }) {
     setProvider(next);
     setApiKey("");
     setMessage("");
-    setModel(defaultModels[next] || "");
-    setBaseUrl(defaultBaseUrl[next] || "");
-    setLabel(providerLabels[next] || next);
+    setModel(providerDefaultModel(next));
+    setBaseUrl(providerDefaultBaseUrl(next));
+    setLabel(providerLabel(next));
   }
 
   async function saveProvider() {
@@ -71,7 +87,7 @@ function MediaProvidersDialog({ status, onClose }) {
     try {
       const profile = {
         id: profileIdFor({ provider, baseUrl, model }),
-        label: label.trim() || providerLabels[provider] || provider,
+        label: label.trim() || providerLabel(provider),
         provider,
         model: model.trim() || undefined,
         baseUrl: baseUrl.trim() || undefined,
@@ -99,7 +115,7 @@ function MediaProvidersDialog({ status, onClose }) {
   async function deleteProvider(profile) {
     if (!profile || !profile.id) return;
     setBusy("delete-" + profile.id);
-    setMessage("Removing " + (profile.label || providerLabels[profile.provider] || "media profile") + ".");
+    setMessage("Removing " + (profile.label || providerLabel(profile.provider) || "media profile") + ".");
     try {
       const response = await fetch("/api/media/provider-settings?profileId=" + encodeURIComponent(profile.id), {
         method: "DELETE",
@@ -119,7 +135,7 @@ function MediaProvidersDialog({ status, onClose }) {
   async function testSavedProvider(profile) {
     if (!profile || !profile.id) return;
     setBusy("test-" + profile.id);
-    setMessage("Testing " + (profile.label || providerLabels[profile.provider] || "media profile") + ".");
+    setMessage("Testing " + (profile.label || providerLabel(profile.provider) || "media profile") + ".");
     try {
       const response = await fetch("/api/media/provider-settings/test", {
         method: "POST",
@@ -181,23 +197,29 @@ function MediaProvidersDialog({ status, onClose }) {
             </label>
             <label>
               <span className="eyebrow">Label</span>
-              <input className="field" value={label} onChange={(e) => setLabel(e.target.value)} placeholder={providerLabels[provider] || provider} />
+              <input className="field" value={label} onChange={(e) => setLabel(e.target.value)} placeholder={providerLabel(provider)} />
             </label>
             <label>
-              <span className="eyebrow">API key</span>
+              <span className="eyebrow">{currentSetup.keyLabel || "API key"}</span>
               <input className="field" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="Paste API key" />
             </label>
             <label>
               <span className="eyebrow">Model or default</span>
-              <input className="field" value={model} onChange={(e) => setModel(e.target.value)} placeholder={defaultModels[provider] || "Optional"} />
+              <input className="field" value={model} onChange={(e) => setModel(e.target.value)} placeholder={currentSetup.modelPlaceholder || providerDefaultModel(provider) || "Optional"} />
             </label>
             {(provider === "openai" || provider === "xai" || provider === "custom-image") && (
               <label style={{ gridColumn: "1 / -1" }}>
                 <span className="eyebrow">Base URL</span>
-                <input className="field" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder={provider === "custom-image" ? "https://provider.example/v1" : defaultBaseUrl[provider]} />
+                <input className="field" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder={provider === "custom-image" ? "https://provider.example/v1" : providerDefaultBaseUrl(provider)} />
               </label>
             )}
           </div>
+          {(currentSetup.summary || currentSetup.helpUrl) && (
+            <p className="muted" style={{ fontSize: 12.5, margin: "10px 0 0", lineHeight: 1.5 }}>
+              {currentSetup.summary}
+              {currentSetup.helpUrl ? <> <a href={currentSetup.helpUrl} target="_blank" rel="noreferrer">Get a key</a>.</> : null}
+            </p>
+          )}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginTop: 12 }}>
             <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>
               Saved profiles: {(settings.profiles || []).length || 0}. Existing saved keys stay encrypted; leave this blank unless you are adding or replacing a key.
@@ -222,9 +244,9 @@ function MediaProvidersDialog({ status, onClose }) {
                   background: "var(--paper)",
                 }}>
                   <div>
-                    <div style={{ fontSize: 14.5 }}>{profile.label || providerLabels[profile.provider] || profile.provider}</div>
+                    <div style={{ fontSize: 14.5 }}>{profile.label || providerLabel(profile.provider)}</div>
                     <div className="muted" style={{ fontSize: 12.5 }}>
-                      {(providerLabels[profile.provider] || profile.provider) + (profile.model ? " · " + profile.model : "")}
+                      {providerLabel(profile.provider) + (profile.model ? " · " + profile.model : "")}
                       {profile.id === settings.defaultProfileId ? " · default" : ""}
                     </div>
                   </div>

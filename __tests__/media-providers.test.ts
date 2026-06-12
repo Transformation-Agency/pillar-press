@@ -30,7 +30,40 @@ describe("media provider status", () => {
     expect(status.elevenlabs).toMatchObject({ id: "elevenlabs", configured: true, capabilities: ["audio"] });
     expect(status.openai).toMatchObject({ id: "openai", configured: true, capabilities: ["image", "audio"] });
     expect(status.xai).toMatchObject({ id: "xai", configured: true, capabilities: ["image"] });
+    expect(status.openai.setup).toMatchObject({
+      keyLabel: "OpenAI API key",
+      defaultModel: "gpt-image-1",
+      defaultBaseUrl: "https://api.openai.com/v1",
+    });
+    expect(status.xai.setup).toMatchObject({
+      defaultModel: "grok-2-image",
+      defaultBaseUrl: "https://api.x.ai/v1",
+    });
+    expect(status.customImage.setup).toMatchObject({
+      keyLabel: "Custom image API key",
+      modelPlaceholder: "Provider model name",
+    });
     expect(status.providers).toHaveLength(5);
+    expect(JSON.stringify(status)).not.toContain("secret");
+  });
+
+  it("uses configured model lists for secret-free provider defaults", () => {
+    const status = getMediaProviderStatus({
+      NODE_ENV: "test",
+      MEDIA_OPENAI_IMAGE_MODELS: "gpt-image-1, custom-openai-image",
+      MEDIA_OPENAI_AUDIO_MODELS: "tts-1",
+      MEDIA_XAI_IMAGE_MODELS: "grok-2-image-latest",
+      MEDIA_IMAGE_MODELS: "custom-image-a, custom-image-b",
+    });
+
+    expect(status.openai.setup.defaultModel).toBe("gpt-image-1");
+    expect(status.openai.models.map((model) => model.id)).toEqual([
+      "gpt-image-1",
+      "custom-openai-image",
+      "tts-1",
+    ]);
+    expect(status.xai.setup.defaultModel).toBe("grok-2-image-latest");
+    expect(status.customImage.setup.defaultModel).toBe("custom-image-a");
     expect(JSON.stringify(status)).not.toContain("secret");
   });
 
