@@ -14,7 +14,8 @@ routes.
 The database can store more than LLM secrets because `provider_secrets.kind` is
 generic. Hosted media provider settings now read and write `kind = "media"` via
 `GET/PUT /api/media/provider-settings`; media generation now prefers saved
-hosted BYOK media profiles and falls back to managed env/desktop settings.
+hosted BYOK media profiles, then compatible hosted LLM BYOK profiles, and
+finally managed env/desktop settings.
 
 ## Current Credential Flow
 
@@ -24,6 +25,7 @@ flowchart TD
   Generate --> Reserve["reserveUsage(task=media_generation)"]
   Generate --> MediaConfig["get*ProviderForUser(user)"]
   MediaConfig --> HostedMedia["Encrypted provider_secrets kind=media"]
+  MediaConfig --> HostedLLM["Compatible encrypted provider_secrets kind=llm\nOpenAI/xAI reused for media"]
   MediaConfig --> Env["Managed server env MEDIA_* / provider API keys"]
   MediaConfig --> Desktop["desktopMediaProvider() in local-first desktop"]
   Generate --> HedraClient["lib/hedra.ts"]
@@ -52,8 +54,12 @@ flowchart TD
   rows with `kind = "media"` for `hedra`, `elevenlabs`, `openai`, `xai`, and
   `custom-image`. Browser reads receive only secret-free metadata.
 - `lib/mediaProviders.ts` now resolves hosted media providers per user,
-  preferring saved BYOK media profiles and falling back to managed env/desktop
-  settings.
+  preferring saved BYOK media profiles, then compatible hosted LLM BYOK
+  profiles, and falling back to managed env/desktop settings.
+- Compatible hosted LLM BYOK profiles can now satisfy media provider resolution
+  without duplicating keys. An OpenAI LLM profile can power OpenAI image/audio
+  media routes; an xAI LLM profile can power xAI image routes. Dedicated media
+  profiles still win when present.
 - `POST /api/hedra/generate` now uses saved BYOK media profiles for OpenAI/xAI
   compatible image generation, OpenAI audio generation, Hedra image/video/avatar
   generation, and ElevenLabs voiceover audio used in Hedra videos.
@@ -65,7 +71,8 @@ flowchart TD
 - Hedra model/status/asset operations and ElevenLabs TTS accept per-request API
   key overrides.
 - `GET /api/media/providers` merges managed availability with hosted saved BYOK
-  media provider status.
+  media provider status and compatible hosted LLM BYOK OpenAI/xAI profile
+  status.
 - Media usage reservations now mark BYOK media generation with
   `providerSource: "byok"` and profile metadata where applicable.
 - First-run setup and the full-screen model setup save an OpenAI key as both a
@@ -128,8 +135,9 @@ experience still needs live-provider validation before broad self-serve launch.
    - Recommended API:
      `getMediaProviderForUser(provider, capability, user)`.
    - Return `{ config, providerSource, provider, model, profileId }`.
-   - Hosted mode should prefer saved BYOK media profile, then managed env only
-     when plan allows managed providers.
+   - Hosted mode should prefer saved BYOK media profile, then compatible hosted
+     LLM BYOK profile for OpenAI/xAI media, then managed env only when plan
+     allows managed providers.
    - Desktop/local-first should keep env/desktop behavior.
 
 4. Add API-key override support to media clients. **Implemented.**
@@ -182,8 +190,12 @@ experience still needs live-provider validation before broad self-serve launch.
 - A hosted user can test a saved media provider profile without re-pasting the
   key or exposing it to the browser.
 - Studio status reflects those saved providers.
+- Studio status reflects compatible saved OpenAI/xAI LLM profiles as media
+  capable, without returning raw keys.
 - Image generation can run from a hosted user-saved OpenAI/xAI/custom key.
 - Audio generation can run from a hosted user-saved OpenAI or ElevenLabs key.
+- Image/audio generation can reuse compatible hosted OpenAI/xAI LLM BYOK keys
+  when a dedicated media key has not been saved.
 - Hedra image/video/avatar generation can run from a hosted user-saved Hedra
   key.
 - Hedra avatar/video voiceover can combine hosted user-saved ElevenLabs and

@@ -27,6 +27,15 @@ describe("hosted media BYOK resolver", () => {
       })),
       getHostedMediaProviderProfileForProvider: vi.fn(),
     }));
+    vi.doMock("@/lib/providerSettings", () => ({
+      getHostedProviderSettings: vi.fn(async () => ({
+        profiles: [],
+        defaultProfileId: null,
+        taskDefaults: {},
+      })),
+      getHostedProviderProfile: vi.fn(),
+      getHostedProviderProfileForProvider: vi.fn(),
+    }));
 
     const { getMediaProviderStatusForUser } = await import("@/lib/mediaProviders");
     const status = await getMediaProviderStatusForUser(
@@ -39,6 +48,56 @@ describe("hosted media BYOK resolver", () => {
     expect(status.openai.profileIds).toContain("openai-media");
     expect(status.hedra.configured).toBe(true);
     expect(status.hedra.sources).toContain("byok");
+    expect(JSON.stringify(status)).not.toContain("sk-");
+  });
+
+  it("marks compatible hosted LLM BYOK profiles as media-capable without exposing keys", async () => {
+    vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => false }));
+    vi.doMock("@/lib/desktopSettings", () => ({ desktopMediaProvider: vi.fn(() => null) }));
+    vi.doMock("@/lib/mediaProviderSettings", () => ({
+      getHostedMediaProviderSettings: vi.fn(async () => ({
+        profiles: [],
+        defaultProfileId: null,
+      })),
+      getHostedMediaProviderProfileForProvider: vi.fn(),
+    }));
+    vi.doMock("@/lib/providerSettings", () => ({
+      getHostedProviderSettings: vi.fn(async () => ({
+        profiles: [{
+          id: "openai-main",
+          label: "OpenAI Main",
+          provider: "openai",
+          model: "gpt-4o-mini",
+          hasApiKey: true,
+        }, {
+          id: "xai-main",
+          label: "xAI Main",
+          provider: "xai",
+          model: "grok-3",
+          hasApiKey: true,
+        }],
+        defaultProfileId: "openai-main",
+        taskDefaults: {},
+      })),
+      getHostedProviderProfile: vi.fn(),
+      getHostedProviderProfileForProvider: vi.fn(),
+    }));
+
+    const { getMediaProviderStatusForUser } = await import("@/lib/mediaProviders");
+    const status = await getMediaProviderStatusForUser(
+      { id: "user_1", workspaceId: "workspace_1" },
+      {} as NodeJS.ProcessEnv,
+    );
+
+    expect(status.openai.configured).toBe(true);
+    expect(status.openai.sources).toContain("byok");
+    expect(status.openai.profileIds).toContain("openai-main");
+    expect(status.openai.models.some((model) => model.id === "gpt-image-1" && model.profileId === "openai-main")).toBe(true);
+    expect(status.openai.models.some((model) => model.id === "gpt-4o-mini-tts" && model.profileId === "openai-main")).toBe(true);
+    expect(status.xai.configured).toBe(true);
+    expect(status.xai.profileIds).toContain("xai-main");
+    expect(status.xai.models.some((model) => model.id === "grok-2-image" && model.profileId === "xai-main")).toBe(true);
+    expect(JSON.stringify(status)).not.toContain("secret");
     expect(JSON.stringify(status)).not.toContain("sk-");
   });
 });

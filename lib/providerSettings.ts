@@ -162,6 +162,17 @@ export async function getHostedProviderProfile(
   return row ? rowToSecret(row) : null;
 }
 
+export async function getHostedProviderProfileForProvider(
+  user: Pick<SessionUser, "id" | "workspaceId">,
+  provider: LLMProvider,
+): Promise<HostedProviderProfileSecret | null> {
+  const rows = await db.select().from(providerSecrets).where(scope(user));
+  const validRows = rows.filter((row) => validProvider(row.provider) && row.model);
+  const row = validRows.find((item) => item.provider === provider && item.isDefault)
+    ?? validRows.find((item) => item.provider === provider);
+  return row ? rowToSecret(row) : null;
+}
+
 export async function saveHostedProviderSettings(
   user: Pick<SessionUser, "id" | "workspaceId">,
   settings: HostedProviderSettingsInput,

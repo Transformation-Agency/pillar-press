@@ -9,6 +9,13 @@ import {
   type HostedMediaProviderProfileView,
   type MediaProvider,
 } from "@/lib/mediaProviderSettings";
+import {
+  getHostedProviderProfile,
+  getHostedProviderProfileForProvider,
+  getHostedProviderSettings,
+  type HostedProviderProfileSecret,
+  type HostedProviderProfileView,
+} from "@/lib/providerSettings";
 
 export type MediaProviderSource = "managed" | "byok";
 
@@ -292,6 +299,44 @@ function modelForProfile(profile: HostedMediaProviderProfileView): MediaModelInf
   return null;
 }
 
+function mediaProviderFromLlmProfile(
+  profile: Pick<HostedProviderProfileView, "provider"> | null | undefined,
+): "openai" | "xai" | null {
+  if (!profile) return null;
+  if (profile.provider === "openai") return "openai";
+  if (profile.provider === "xai") return "xai";
+  return null;
+}
+
+function addLlmProfileMediaModels(info: MediaProviderInfo, profile: HostedProviderProfileView) {
+  const mediaProvider = mediaProviderFromLlmProfile(profile);
+  if (!mediaProvider) return;
+  const modelIds = info.models.map((model) => `${model.type}:${model.id}`);
+  const defaults = mediaProvider === "openai"
+    ? ["gpt-image-1", "gpt-4o-mini-tts"]
+    : ["grok-2-image"];
+  for (const id of defaults) {
+    const type: MediaCapability = id.includes("tts") ? "audio" : "image";
+    if (modelIds.includes(`${type}:${id}`)) {
+      const existing = info.models.find((model) => model.id === id && model.type === type);
+      if (existing && !existing.profileId) existing.profileId = profile.id;
+      continue;
+    }
+    info.models.push({
+      id,
+      name: id,
+      type,
+      provider: mediaProvider,
+      profileId: profile.id,
+      aspectRatios: type === "image" ? ["1:1", "4:5", "16:9", "9:16"] : [],
+      resolutions: type === "image" ? ["1024x1024", "1024x1536", "1536x1024", "auto"] : [],
+      durations: [],
+      credits: 1,
+      requires: type === "audio" ? { prompt: true, voice: true } : { prompt: true },
+    });
+  }
+}
+
 export async function getMediaProviderStatusForUser(
   user: Pick<SessionUser, "id" | "workspaceId">,
   env: NodeJS.ProcessEnv = process.env,
@@ -312,6 +357,18 @@ export async function getMediaProviderStatusForUser(
     if (model && !info.models.some((item) => item.id === model.id && item.type === model.type)) {
       info.models.push(model);
     }
+  }
+  const llmSettings = await getHostedProviderSettings(user);
+  for (const profile of llmSettings.profiles) {
+    if (!profile.hasApiKey) continue;
+    const mediaProvider = mediaProviderFromLlmProfile(profile);
+    if (!mediaProvider) continue;
+    const key = mediaStatusKey(mediaProvider);
+    if (!key) continue;
+    const info = status[key];
+    info.configured = true;
+    addSource(info, "byok", profile.id);
+    addLlmProfileMediaModels(info, profile);
   }
   return {
     ...status,
@@ -360,6 +417,23 @@ async function hostedMediaProfileById(
   return getHostedMediaProviderProfile(user, profileId);
 }
 
+async function hostedLlmMediaProfileById(
+  user: Pick<SessionUser, "id" | "workspaceId">,
+  profileId: string | undefined | null,
+): Promise<HostedProviderProfileSecret | null> {
+  if (isLocalFirstMode() || !user.workspaceId || !profileId) return null;
+  const profile = await getHostedProviderProfile(user, profileId);
+  return profile && mediaProviderFromLlmProfile(profile) ? profile : null;
+}
+
+async function hostedLlmMediaProfileForProvider(
+  user: Pick<SessionUser, "id" | "workspaceId">,
+  provider: "openai" | "xai",
+): Promise<HostedProviderProfileSecret | null> {
+  if (isLocalFirstMode() || !user.workspaceId) return null;
+  return getHostedProviderProfileForProvider(user, provider);
+}
+
 export async function getImageProviderForUser(
   provider: string | undefined,
   user: Pick<SessionUser, "id" | "workspaceId">,
@@ -367,7 +441,8 @@ export async function getImageProviderForUser(
   profileId?: string,
 ): Promise<ImageProviderConfig | null> {
   const exact = await hostedMediaProfileById(user, profileId);
-  const selectedProvider = exact?.provider ?? provider;
+  const exactLlm = exact ? null : await hostedLlmMediaProfileById(user, profileId);
+  const selectedProvider = exact?.provider ?? mediaProviderFromLlmProfile(exactLlm) ?? provider;
   if (!supportsImageProvider(selectedProvider)) return null;
   if (exact) {
     const apiKey = exact.apiKey?.trim();
@@ -377,12 +452,29 @@ export async function getImageProviderForUser(
     }
     return null;
   }
+  if (exactLlm) {
+    const mediaProvider = mediaProviderFromLlmProfile(exactLlm);
+    const apiKey = exactLlm.apiKey?.trim();
+    const baseUrl = (exactLlm.baseUrl || (mediaProvider ? defaultMediaBaseUrl(mediaProvider) : "")).trim().replace(/\/$/, "");
+    if (mediaProvider && supportsImageProvider(mediaProvider) && apiKey && baseUrl) {
+      return { provider: mediaProvider, apiKey, baseUrl, providerSource: "byok", profileId: exactLlm.id };
+    }
+    return null;
+  }
   if (!isLocalFirstMode() && user.workspaceId) {
     const saved = await getHostedMediaProviderProfileForProvider(user, selectedProvider);
     const apiKey = saved?.apiKey?.trim();
     const baseUrl = (saved?.baseUrl || defaultMediaBaseUrl(selectedProvider)).trim().replace(/\/$/, "");
     if (saved && apiKey && baseUrl) {
       return { provider: selectedProvider, apiKey, baseUrl, providerSource: "byok", profileId: saved.id };
+    }
+    const llmSaved = selectedProvider === "openai" || selectedProvider === "xai"
+      ? await hostedLlmMediaProfileForProvider(user, selectedProvider)
+      : null;
+    const llmApiKey = llmSaved?.apiKey?.trim();
+    const llmBaseUrl = (llmSaved?.baseUrl || defaultMediaBaseUrl(selectedProvider)).trim().replace(/\/$/, "");
+    if (llmSaved && llmApiKey && llmBaseUrl) {
+      return { provider: selectedProvider, apiKey: llmApiKey, baseUrl: llmBaseUrl, providerSource: "byok", profileId: llmSaved.id };
     }
   }
   const managed = getImageProviderConfig(selectedProvider, env);
@@ -406,7 +498,8 @@ export async function getAudioProviderForUser(
   profileId?: string,
 ): Promise<AudioProviderConfig | null> {
   const exact = await hostedMediaProfileById(user, profileId);
-  const selectedProvider = exact?.provider ?? provider;
+  const exactLlm = exact ? null : await hostedLlmMediaProfileById(user, profileId);
+  const selectedProvider = exact?.provider ?? mediaProviderFromLlmProfile(exactLlm) ?? provider;
   if (selectedProvider !== "openai") return null;
   if (exact) {
     const apiKey = exact.apiKey?.trim();
@@ -416,12 +509,26 @@ export async function getAudioProviderForUser(
     }
     return null;
   }
+  if (exactLlm) {
+    const apiKey = exactLlm.apiKey?.trim();
+    const baseUrl = (exactLlm.baseUrl || defaultMediaBaseUrl("openai")).trim().replace(/\/$/, "");
+    if (apiKey && baseUrl) {
+      return { provider: "openai", apiKey, baseUrl, providerSource: "byok", profileId: exactLlm.id };
+    }
+    return null;
+  }
   if (!isLocalFirstMode() && user.workspaceId) {
     const saved = await getHostedMediaProviderProfileForProvider(user, "openai");
     const apiKey = saved?.apiKey?.trim();
     const baseUrl = (saved?.baseUrl || defaultMediaBaseUrl("openai")).trim().replace(/\/$/, "");
     if (saved && apiKey && baseUrl) {
       return { provider: "openai", apiKey, baseUrl, providerSource: "byok", profileId: saved.id };
+    }
+    const llmSaved = await hostedLlmMediaProfileForProvider(user, "openai");
+    const llmApiKey = llmSaved?.apiKey?.trim();
+    const llmBaseUrl = (llmSaved?.baseUrl || defaultMediaBaseUrl("openai")).trim().replace(/\/$/, "");
+    if (llmSaved && llmApiKey && llmBaseUrl) {
+      return { provider: "openai", apiKey: llmApiKey, baseUrl: llmBaseUrl, providerSource: "byok", profileId: llmSaved.id };
     }
   }
   const managed = getAudioProviderConfig(provider, env);
