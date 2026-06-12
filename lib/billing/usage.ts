@@ -19,6 +19,17 @@ import {
 
 type UsageDimension = "llm" | "media" | "gather";
 const USAGE_DIMENSIONS: UsageDimension[] = ["llm", "media", "gather"];
+const ALL_USAGE_TASKS: UsageEventTask[] = [
+  "review",
+  "revision",
+  "outputs",
+  "weave",
+  "gather",
+  "file_extract",
+  "media_generation",
+  "chat",
+  "utility",
+];
 
 export type UsageReservationInput = {
   user: SessionUser;
@@ -139,6 +150,15 @@ function normalizeStorageBytes(value: unknown) {
   return 0n;
 }
 
+function normalizeNumber(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "") {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : 0;
+  }
+  return 0;
+}
+
 export async function getEntitlementForPlan(planId: string) {
   return entitlementForPlan(planId);
 }
@@ -191,6 +211,88 @@ async function usedStorageBytes(input: {
   return normalizeStorageBytes(rollup?.storageBytesUsed);
 }
 
+async function usageEventTotals(input: {
+  workspaceId: string;
+  periodStart: Date;
+  periodEnd: Date;
+}) {
+  const rows = await db
+    .select({
+      task: usageEvents.task,
+      status: usageEvents.status,
+      estimatedCredits: usageEvents.estimatedCredits,
+      actualCredits: usageEvents.actualCredits,
+      estimatedCostUsd: usageEvents.estimatedCostUsd,
+      actualCostUsd: usageEvents.actualCostUsd,
+    })
+    .from(usageEvents)
+    .where(
+      and(
+        eq(usageEvents.workspaceId, input.workspaceId),
+        inArray(usageEvents.task, ALL_USAGE_TASKS),
+        inArray(usageEvents.status, ["reserved", "succeeded"]),
+        gte(usageEvents.createdAt, input.periodStart),
+        lt(usageEvents.createdAt, input.periodEnd),
+      ),
+    );
+
+  return rows.reduce(
+    (totals, row) => {
+      const dimension = usageDimensionForTask(row.task);
+      const actual = row.status === "succeeded" ? row.actualCredits : 0;
+      totals[dimension] += Math.max(actual || row.estimatedCredits || 0, 0);
+      totals.costUsd += normalizeNumber(row.status === "succeeded" ? row.actualCostUsd : row.estimatedCostUsd);
+      return totals;
+    },
+    { llm: 0, media: 0, gather: 0, costUsd: 0 },
+  );
+}
+
+async function usageTotalsForPeriod(input: {
+  workspaceId: string;
+  periodStart: Date;
+  periodEnd: Date;
+}) {
+  const [events, storageBytes] = await Promise.all([
+    usageEventTotals(input),
+    usedStorageBytes(input),
+  ]);
+  return { ...events, storageBytes };
+}
+
+export async function syncUsageRollupForPeriod(input: {
+  workspaceId: string;
+  periodStart: Date;
+  periodEnd: Date;
+  totals?: Awaited<ReturnType<typeof usageTotalsForPeriod>>;
+}) {
+  const totals = input.totals ?? await usageTotalsForPeriod(input);
+  await db
+    .insert(usageRollups)
+    .values({
+      workspaceId: input.workspaceId,
+      periodStart: input.periodStart,
+      periodEnd: input.periodEnd,
+      llmCreditsUsed: Math.max(0, Math.ceil(totals.llm)),
+      mediaGenerationsUsed: Math.max(0, Math.ceil(totals.media)),
+      gatherRunsUsed: Math.max(0, Math.ceil(totals.gather)),
+      storageBytesUsed: totals.storageBytes.toString(),
+      costUsd: Math.max(0, totals.costUsd).toFixed(6),
+      updatedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: [usageRollups.workspaceId, usageRollups.periodStart, usageRollups.periodEnd],
+      set: {
+        llmCreditsUsed: Math.max(0, Math.ceil(totals.llm)),
+        mediaGenerationsUsed: Math.max(0, Math.ceil(totals.media)),
+        gatherRunsUsed: Math.max(0, Math.ceil(totals.gather)),
+        storageBytesUsed: totals.storageBytes.toString(),
+        costUsd: Math.max(0, totals.costUsd).toFixed(6),
+        updatedAt: new Date(),
+      },
+    });
+}
+
 export function quotaErrorMessage(dimension: UsageDimension) {
   if (dimension === "media") return "Media generation limit reached for this billing period.";
   if (dimension === "gather") return "Gather run limit reached for this billing period.";
@@ -235,37 +337,41 @@ export async function usageSummaryForSubscription(input: {
   entitlement: Entitlement | null;
 }) {
   const period = periodForSubscription(input.subscription);
-  const rows = await Promise.all(
-    USAGE_DIMENSIONS.map(async (dimension) => {
-      const used = await usedCredits({
-        workspaceId: input.workspaceId,
-        dimension,
-        periodStart: period.start,
-        periodEnd: period.end,
-      });
-      const limit = input.entitlement ? limitForDimension(input.entitlement, dimension) : 0;
-      return [dimension, {
-        used,
-        limit,
-        remaining: Math.max(limit - used, 0),
-      }] as const;
-    }),
-  );
-  const storageUsed = await usedStorageBytes({
+  const totals = await usageTotalsForPeriod({
     workspaceId: input.workspaceId,
     periodStart: period.start,
     periodEnd: period.end,
   });
+  await syncUsageRollupForPeriod({
+    workspaceId: input.workspaceId,
+    periodStart: period.start,
+    periodEnd: period.end,
+    totals,
+  });
+  const rows = USAGE_DIMENSIONS.map((dimension) => {
+    const used = Math.max(0, Math.ceil(totals[dimension]));
+    const limit = input.entitlement ? limitForDimension(input.entitlement, dimension) : 0;
+    return [dimension, {
+      used,
+      limit,
+      remaining: Math.max(limit - used, 0),
+    }] as const;
+  });
+  const dimensionSummary = Object.fromEntries(rows) as Record<UsageDimension, {
+    used: number;
+    limit: number;
+    remaining: number;
+  }>;
   const storageLimit = input.entitlement ? storageQuotaBytes(input.entitlement) : 0n;
   return {
     periodStart: period.start.toISOString(),
     periodEnd: period.end.toISOString(),
     dimensions: {
-      ...Object.fromEntries(rows),
+      ...dimensionSummary,
       storage: {
-        used: Number(storageUsed),
+        used: Number(totals.storageBytes),
         limit: Number(storageLimit),
-        remaining: Number(storageLimit > storageUsed ? storageLimit - storageUsed : 0n),
+        remaining: Number(storageLimit > totals.storageBytes ? storageLimit - totals.storageBytes : 0n),
       },
     },
   };

@@ -567,6 +567,105 @@ describe("hosted usage reservations", () => {
     expect(updateSet).toHaveBeenCalledWith(expect.objectContaining({ updatedAt: expect.any(Date) }));
     expect(updateWhere).toHaveBeenCalled();
   });
+
+  it("rebuilds current-period usage rollups from the usage event ledger", async () => {
+    const onConflictDoUpdate = vi.fn(async () => undefined);
+    const values = vi.fn(() => ({ onConflictDoUpdate }));
+    const insert = vi.fn(() => ({ values }));
+    const select = vi
+      .fn()
+      .mockReturnValueOnce({
+        from: () => ({
+          where: vi.fn(async () => [
+            {
+              task: "chat",
+              status: "succeeded",
+              estimatedCredits: 2,
+              actualCredits: 4,
+              estimatedCostUsd: "0.001000",
+              actualCostUsd: "0.003000",
+            },
+            {
+              task: "outputs",
+              status: "reserved",
+              estimatedCredits: 3,
+              actualCredits: 0,
+              estimatedCostUsd: "0.002000",
+              actualCostUsd: null,
+            },
+            {
+              task: "media_generation",
+              status: "succeeded",
+              estimatedCredits: 1,
+              actualCredits: 1,
+              estimatedCostUsd: "0.004000",
+              actualCostUsd: "0.005000",
+            },
+            {
+              task: "gather",
+              status: "succeeded",
+              estimatedCredits: 1,
+              actualCredits: 2,
+              estimatedCostUsd: "0.002000",
+              actualCostUsd: "0.006000",
+            },
+          ]),
+        }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            limit: vi.fn(async () => [{ storageBytesUsed: "2048" }]),
+          }),
+        }),
+      });
+
+    vi.doMock("@/lib/db", async () => {
+      const actual = await vi.importActual<any>("@/lib/db");
+      return { ...actual, db: { select, insert } };
+    });
+
+    const { usageSummaryForSubscription } = await import("@/lib/billing/usage");
+
+    const summary = await usageSummaryForSubscription({
+      workspaceId: "workspace_1",
+      subscription: {
+        workspaceId: "workspace_1",
+        planId: "trial",
+        status: "trialing",
+        currentPeriodStart: new Date("2026-06-01T00:00:00.000Z"),
+        currentPeriodEnd: new Date("2026-07-01T00:00:00.000Z"),
+      } as any,
+      entitlement: {
+        monthlyLlmCredits: 250,
+        monthlyMediaGenerations: 5,
+        monthlyGatherRuns: 10,
+        storageQuotaGb: 1,
+      } as any,
+    });
+
+    expect(summary.dimensions.llm).toEqual({ used: 7, limit: 250, remaining: 243 });
+    expect(summary.dimensions.media).toEqual({ used: 1, limit: 5, remaining: 4 });
+    expect(summary.dimensions.gather).toEqual({ used: 2, limit: 10, remaining: 8 });
+    expect(summary.dimensions.storage.used).toBe(2048);
+    expect(values).toHaveBeenCalledWith(expect.objectContaining({
+      workspaceId: "workspace_1",
+      llmCreditsUsed: 7,
+      mediaGenerationsUsed: 1,
+      gatherRunsUsed: 2,
+      storageBytesUsed: "2048",
+      costUsd: "0.016000",
+    }));
+    expect(onConflictDoUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      set: expect.objectContaining({
+        llmCreditsUsed: 7,
+        mediaGenerationsUsed: 1,
+        gatherRunsUsed: 2,
+        storageBytesUsed: "2048",
+        costUsd: "0.016000",
+      }),
+    }));
+  });
 });
 
 describe("billing error responses", () => {

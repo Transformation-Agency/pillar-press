@@ -434,7 +434,10 @@ Stage 3 is complete only when:
   implemented; hosted setup/UI media profile management is available as an MVP;
   the remaining work is live provider smoke coverage and production-grade profile
   editing/rotation UX.
-- Usage rollups reflect the ledger.
+- Usage rollups reflect the ledger. **Started:** `GET /api/billing/status`
+  rebuilds the current billing period's `usage_rollups` row from
+  `usage_events` for LLM, media, Gather, provider cost, and existing storage
+  bytes before returning the hosted Billing panel summary.
 - Provider failure records failed usage without double-charging. **Started:**
   the first gated routes mark reserved usage as failed when downstream work
   throws.
