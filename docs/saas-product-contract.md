@@ -450,7 +450,10 @@ Stage 2 is complete only when:
   per workspace/plan for webhook retries.
 - Subscription state survives browser redirects and refreshes. **Implemented:**
   subscription rows are stored in Postgres; `GET /api/billing/status` returns
-  the current workspace subscription and public plan catalog.
+  the current workspace subscription and public plan catalog. Current
+  subscription selection now intentionally prefers active/trialing paid
+  Stripe-backed rows over bootstrap trial rows and keeps paid billing problems
+  such as `past_due` visible instead of silently falling back to trial access.
 - Failed payment/past-due/canceled states are represented in the DB.
   **Implemented:** Stripe statuses map into the subscription status enum,
   including `past_due`, `canceled`, `unpaid`, `incomplete`, and `paused`.

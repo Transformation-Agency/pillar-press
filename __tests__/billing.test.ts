@@ -50,6 +50,90 @@ describe("hosted billing helpers", () => {
     });
   });
 
+  it("selects an active paid Stripe subscription over a newer bootstrap trial", async () => {
+    const { selectCurrentSubscription } = await import("@/lib/billing/stripe");
+    const trial = {
+      id: "sub_trial",
+      workspaceId: "workspace_1",
+      planId: "trial",
+      status: "trialing",
+      stripeSubscriptionId: null,
+      currentPeriodEnd: null,
+      trialEnd: new Date("2026-06-20T00:00:00.000Z"),
+      createdAt: new Date("2026-06-11T00:00:00.000Z"),
+      updatedAt: new Date("2026-06-11T00:00:00.000Z"),
+    };
+    const paid = {
+      id: "sub_pro",
+      workspaceId: "workspace_1",
+      planId: "pro",
+      status: "active",
+      stripeSubscriptionId: "sub_stripe_pro",
+      currentPeriodEnd: new Date("2026-07-01T00:00:00.000Z"),
+      trialEnd: null,
+      createdAt: new Date("2026-06-10T00:00:00.000Z"),
+      updatedAt: new Date("2026-06-10T00:00:00.000Z"),
+    };
+
+    expect(selectCurrentSubscription([trial, paid] as any[])).toBe(paid);
+  });
+
+  it("keeps a paid billing problem visible instead of falling back to a trial row", async () => {
+    const { selectCurrentSubscription } = await import("@/lib/billing/stripe");
+    const trial = {
+      id: "sub_trial",
+      workspaceId: "workspace_1",
+      planId: "trial",
+      status: "trialing",
+      stripeSubscriptionId: null,
+      currentPeriodEnd: null,
+      trialEnd: new Date("2026-06-20T00:00:00.000Z"),
+      createdAt: new Date("2026-06-09T00:00:00.000Z"),
+      updatedAt: new Date("2026-06-09T00:00:00.000Z"),
+    };
+    const pastDue = {
+      id: "sub_pro_past_due",
+      workspaceId: "workspace_1",
+      planId: "pro",
+      status: "past_due",
+      stripeSubscriptionId: "sub_stripe_pro",
+      currentPeriodEnd: new Date("2026-07-01T00:00:00.000Z"),
+      trialEnd: null,
+      createdAt: new Date("2026-06-10T00:00:00.000Z"),
+      updatedAt: new Date("2026-06-12T00:00:00.000Z"),
+    };
+
+    expect(selectCurrentSubscription([trial, pastDue] as any[])).toBe(pastDue);
+  });
+
+  it("uses the newest trial when no Stripe-backed subscription exists", async () => {
+    const { selectCurrentSubscription } = await import("@/lib/billing/stripe");
+    const oldTrial = {
+      id: "sub_trial_old",
+      workspaceId: "workspace_1",
+      planId: "trial",
+      status: "trialing",
+      stripeSubscriptionId: null,
+      currentPeriodEnd: null,
+      trialEnd: new Date("2026-06-12T00:00:00.000Z"),
+      createdAt: new Date("2026-06-01T00:00:00.000Z"),
+      updatedAt: new Date("2026-06-01T00:00:00.000Z"),
+    };
+    const newTrial = {
+      id: "sub_trial_new",
+      workspaceId: "workspace_1",
+      planId: "trial",
+      status: "trialing",
+      stripeSubscriptionId: null,
+      currentPeriodEnd: null,
+      trialEnd: new Date("2026-06-20T00:00:00.000Z"),
+      createdAt: new Date("2026-06-02T00:00:00.000Z"),
+      updatedAt: new Date("2026-06-02T00:00:00.000Z"),
+    };
+
+    expect(selectCurrentSubscription([oldTrial, newTrial] as any[])).toBe(newTrial);
+  });
+
   it("syncs a Stripe subscription into the workspace subscription row", async () => {
     const plan = {
       id: "pro",

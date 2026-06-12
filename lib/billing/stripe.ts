@@ -1,5 +1,5 @@
 import Stripe from "stripe";
-import { and, desc, eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import {
   auditEvents,
   billingCustomers,
@@ -8,6 +8,7 @@ import {
   subscriptions,
   trialEvents,
   type Plan,
+  type Subscription,
   type SubscriptionStatus,
 } from "@/lib/db";
 import { getOrCreateWorkspace, requireUser, type SessionUser } from "@/lib/auth";
@@ -141,14 +142,38 @@ export async function requireCheckoutPlan(planId: string) {
   return { plan, priceId };
 }
 
+function subscriptionTimestamp(subscription: Pick<Subscription, "currentPeriodEnd" | "trialEnd" | "updatedAt" | "createdAt">) {
+  return Math.max(
+    subscription.currentPeriodEnd?.getTime() ?? 0,
+    subscription.trialEnd?.getTime() ?? 0,
+    subscription.updatedAt?.getTime() ?? 0,
+    subscription.createdAt?.getTime() ?? 0,
+  );
+}
+
+function subscriptionPriority(subscription: Pick<Subscription, "planId" | "status" | "stripeSubscriptionId">) {
+  const paid = subscription.planId !== "trial" || Boolean(subscription.stripeSubscriptionId);
+  if (paid && (subscription.status === "active" || subscription.status === "trialing")) return 400;
+  if (paid && (subscription.status === "past_due" || subscription.status === "unpaid" || subscription.status === "paused")) return 300;
+  if (paid) return 200;
+  if (subscription.status === "trialing") return 100;
+  return 0;
+}
+
+export function selectCurrentSubscription<T extends Subscription>(rows: T[]): T | null {
+  return rows.slice().sort((a, b) => {
+    const priority = subscriptionPriority(b) - subscriptionPriority(a);
+    if (priority) return priority;
+    return subscriptionTimestamp(b) - subscriptionTimestamp(a);
+  })[0] ?? null;
+}
+
 export async function getLatestSubscription(workspaceId: string) {
-  const [subscription] = await db
+  const rows = await db
     .select()
     .from(subscriptions)
-    .where(eq(subscriptions.workspaceId, workspaceId))
-    .orderBy(desc(subscriptions.createdAt))
-    .limit(1);
-  return subscription ?? null;
+    .where(eq(subscriptions.workspaceId, workspaceId));
+  return selectCurrentSubscription(rows);
 }
 
 export async function getOrCreateTrialSubscription(user: BillingSessionUser) {
