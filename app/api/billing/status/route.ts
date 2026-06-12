@@ -8,6 +8,7 @@ import {
 import {
   billingAccessForSubscription,
   getEntitlementForPlan,
+  safeRecordTrialExpirationEvent,
   usageSummaryForSubscription,
 } from "@/lib/billing/usage";
 
@@ -27,6 +28,13 @@ export async function GET() {
       entitlement,
     });
     const access = billingAccessForSubscription(subscription);
+    if (!access.allowed && access.code === "trial_expired") {
+      await safeRecordTrialExpirationEvent({
+        user,
+        subscription,
+        source: "billing_status",
+      });
+    }
 
     return NextResponse.json({
       plans,

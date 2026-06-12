@@ -268,6 +268,8 @@ Implemented events:
   subscription for the workspace. Metadata is limited to Stripe/local ids needed
   for support reconciliation and does not include emails, raw Stripe payloads, or
   secrets.
+- `expired`: created once when billing status or a hosted gated operation first
+  observes that the workspace trial has ended.
 
 ### `audit_events`
 

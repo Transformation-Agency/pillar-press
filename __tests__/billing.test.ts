@@ -229,6 +229,7 @@ describe("hosted billing status API", () => {
     vi.doMock("@/lib/billing/usage", () => ({
       billingAccessForSubscription: vi.fn(() => ({ allowed: true })),
       getEntitlementForPlan: vi.fn(async () => entitlement),
+      safeRecordTrialExpirationEvent: vi.fn(),
       usageSummaryForSubscription: vi.fn(async () => usage),
     }));
 
@@ -243,6 +244,56 @@ describe("hosted billing status API", () => {
       entitlement,
       usage,
       access: { allowed: true },
+    });
+  });
+
+  it("records an expired trial event when billing status detects trial expiration", async () => {
+    const user = { id: "user_1", workspaceId: "workspace_1", role: "author" };
+    const subscription = {
+      id: "sub_trial",
+      workspaceId: "workspace_1",
+      planId: "trial",
+      status: "trialing",
+      trialStart: new Date("2026-06-01T00:00:00.000Z"),
+      trialEnd: new Date("2026-06-08T00:00:00.000Z"),
+    };
+    const safeRecordTrialExpirationEvent = vi.fn();
+
+    vi.doMock("@/lib/billing/stripe", () => ({
+      BillingError: class BillingError extends Error {},
+      requireBillingUser: vi.fn(async () => user),
+      listPublicPlans: vi.fn(async () => [{ id: "starter", name: "Starter", stripeConfigured: true }]),
+      getOrCreateTrialSubscription: vi.fn(async () => subscription),
+    }));
+    vi.doMock("@/lib/billing/usage", () => ({
+      billingAccessForSubscription: vi.fn(() => ({
+        allowed: false,
+        code: "trial_expired",
+        message: "Your free trial has ended. Choose a plan to continue.",
+      })),
+      getEntitlementForPlan: vi.fn(async () => ({ planId: "trial" })),
+      safeRecordTrialExpirationEvent,
+      usageSummaryForSubscription: vi.fn(async () => ({
+        periodStart: "2026-06-01T00:00:00.000Z",
+        periodEnd: "2026-06-08T00:00:00.000Z",
+        dimensions: {},
+      })),
+    }));
+
+    const { GET } = await import("../app/api/billing/status/route");
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.access).toEqual({
+      allowed: false,
+      code: "trial_expired",
+      message: "Your free trial has ended. Choose a plan to continue.",
+    });
+    expect(safeRecordTrialExpirationEvent).toHaveBeenCalledWith({
+      user,
+      subscription,
+      source: "billing_status",
     });
   });
 });

@@ -17,6 +17,7 @@ describe("hosted usage reservations", () => {
       quotaErrorMessage,
       storageQuotaBytes,
       subscriptionAllowsUsage,
+      trialExpirationEventValues,
       usageDimensionForTask,
     } = await import("@/lib/billing/usage");
 
@@ -34,6 +35,28 @@ describe("hosted usage reservations", () => {
     expect(entitlementAllowsByokProvider({ allowedProviders: ["byok"] } as any)).toBe(true);
     expect(entitlementAllowsByokProvider({ allowedProviders: ["managed"] } as any)).toBe(false);
     expect(storageQuotaBytes({ storageQuotaGb: 2 } as any)).toBe(2n * 1024n * 1024n * 1024n);
+    expect(trialExpirationEventValues({
+      user: { id: "user_1" },
+      subscription: {
+        id: "sub_trial",
+        workspaceId: "workspace_1",
+        planId: "trial",
+        trialStart: new Date("2026-06-01T00:00:00.000Z"),
+        trialEnd: new Date("2026-06-08T00:00:00.000Z"),
+      } as any,
+      source: "billing_status",
+    })).toEqual({
+      workspaceId: "workspace_1",
+      userId: "user_1",
+      event: "expired",
+      planId: "trial",
+      trialStart: new Date("2026-06-01T00:00:00.000Z"),
+      trialEnd: new Date("2026-06-08T00:00:00.000Z"),
+      metadata: {
+        source: "billing_status",
+        localSubscriptionId: "sub_trial",
+      },
+    });
     expect(billingAccessForSubscription(null)).toMatchObject({ allowed: false, code: "subscription_required" });
     expect(billingAccessForSubscription({
       status: "trialing",
@@ -197,9 +220,21 @@ describe("hosted usage reservations", () => {
         this.code = code;
       }
     }
-    const insert = vi.fn();
-    const select = vi.fn();
+    const inserted: Array<Record<string, unknown>> = [];
+    const values = vi.fn((value) => {
+      inserted.push(value);
+      return {};
+    });
+    const insert = vi.fn(() => ({ values }));
+    const select = vi.fn(() => ({
+      from: () => ({
+        where: () => ({
+          limit: vi.fn(async () => []),
+        }),
+      }),
+    }));
     const subscription = {
+      id: "sub_trial",
       workspaceId: "workspace_1",
       planId: "trial",
       status: "trialing",
@@ -229,8 +264,19 @@ describe("hosted usage reservations", () => {
       feature: "llm.util.utility",
       estimatedCredits: 1,
     })).rejects.toMatchObject({ status: 402, code: "trial_expired" });
-    expect(select).not.toHaveBeenCalled();
-    expect(insert).not.toHaveBeenCalled();
+    expect(values).toHaveBeenCalledWith(expect.objectContaining({
+      workspaceId: "workspace_1",
+      userId: "user_1",
+      event: "expired",
+      planId: "trial",
+      trialStart: new Date("2026-06-01T00:00:00.000Z"),
+      trialEnd: new Date("2026-06-08T00:00:00.000Z"),
+      metadata: {
+        source: "usage.utility",
+        localSubscriptionId: "sub_trial",
+      },
+    }));
+    expect(JSON.stringify(inserted)).not.toContain("private@example.com");
   });
 
   it("blocks hosted managed provider work before inserting when plan disallows managed keys", async () => {

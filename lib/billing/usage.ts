@@ -3,6 +3,7 @@ import { getOrCreateWorkspace, type SessionUser } from "@/lib/auth";
 import {
   db,
   entitlements,
+  trialEvents,
   usageEvents,
   usageRollups,
   type Entitlement,
@@ -331,6 +332,71 @@ export function billingAccessForSubscription(
   return { allowed: true };
 }
 
+export function trialExpirationEventValues(input: {
+  user: Pick<SessionUser, "id">;
+  subscription: Pick<Subscription, "id" | "workspaceId" | "planId" | "trialStart" | "trialEnd">;
+  source: string;
+}) {
+  return {
+    workspaceId: input.subscription.workspaceId,
+    userId: input.user.id,
+    event: "expired",
+    planId: input.subscription.planId,
+    trialStart: input.subscription.trialStart ?? null,
+    trialEnd: input.subscription.trialEnd ?? null,
+    metadata: {
+      source: input.source,
+      localSubscriptionId: input.subscription.id,
+    },
+  };
+}
+
+async function trialLifecycleEventExists(input: {
+  workspaceId: string;
+  event: string;
+  planId: string;
+}) {
+  const [existing] = await db
+    .select({ id: trialEvents.id })
+    .from(trialEvents)
+    .where(
+      and(
+        eq(trialEvents.workspaceId, input.workspaceId),
+        eq(trialEvents.event, input.event),
+        eq(trialEvents.planId, input.planId),
+      ),
+    )
+    .limit(1);
+  return Boolean(existing);
+}
+
+export async function safeRecordTrialExpirationEvent(input: {
+  user: Pick<SessionUser, "id">;
+  subscription: Subscription | null;
+  source: string;
+}) {
+  if (isLocalFirstMode() || !input.subscription) return;
+  if (input.subscription.status !== "trialing" || !input.subscription.trialEnd) return;
+  if (input.subscription.trialEnd.getTime() > Date.now()) return;
+  const values = trialExpirationEventValues({
+    user: input.user,
+    subscription: input.subscription,
+    source: input.source,
+  });
+  try {
+    if (await trialLifecycleEventExists({
+      workspaceId: values.workspaceId,
+      event: values.event,
+      planId: values.planId,
+    })) {
+      return;
+    }
+    await db.insert(trialEvents).values(values);
+  } catch (err) {
+    console.warn("trial_expiration_event_failed", err instanceof Error ? err.message : String(err));
+  }
+}
+
 export async function usageSummaryForSubscription(input: {
   workspaceId: string;
   subscription: Subscription | null;
@@ -384,6 +450,13 @@ export async function reserveUsage(input: UsageReservationInput): Promise<UsageR
   const subscription = await activeSubscriptionForWorkspace(user);
   const access = billingAccessForSubscription(subscription);
   if (!access.allowed) {
+    if (access.code === "trial_expired") {
+      await safeRecordTrialExpirationEvent({
+        user,
+        subscription,
+        source: `usage.${input.task}`,
+      });
+    }
     throw new BillingError(402, access.code, access.message);
   }
   if (!subscription) {
@@ -478,6 +551,13 @@ export async function reserveStorageBytes(input: {
   const subscription = await activeSubscriptionForWorkspace(user);
   const access = billingAccessForSubscription(subscription);
   if (!access.allowed) {
+    if (access.code === "trial_expired") {
+      await safeRecordTrialExpirationEvent({
+        user,
+        subscription,
+        source: `storage.${input.feature}`,
+      });
+    }
     throw new BillingError(402, access.code, access.message);
   }
   if (!subscription) {
