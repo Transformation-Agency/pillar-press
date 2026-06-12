@@ -6,12 +6,14 @@ import {
   resolveAnthropicFileFallback,
   resolveFileLLMConfig,
   resolveMainLLMConfig,
+  resolveProfileLLMConfig,
   resolveTaskLLMConfig,
 } from "@/lib/llm/config";
 import { anthropicProvider } from "@/lib/llm/providers/anthropic";
 import { geminiProvider } from "@/lib/llm/providers/gemini";
 import { openAICompatibleProvider, openAIProvider } from "@/lib/llm/providers/openaiCompatible";
 import { ollamaProvider } from "@/lib/llm/providers/ollama";
+import { sanitizeModelOutput } from "@/lib/llm/sanitize";
 import type { AI, AIMessage, AIOptions, LLMAdapter, LLMConfig, LLMTask, MultimodalContentBlock } from "@/lib/llm/types";
 
 export type {
@@ -27,7 +29,8 @@ export type {
 } from "@/lib/llm/types";
 export { LLMError } from "@/lib/llm/errors";
 export { extractJSON, repairJSON } from "@/lib/llm/json";
-export { LLM_TASK_LABELS, LLM_TASKS, publicLLMStatus, resolveMainLLMConfig, resolveTaskLLMConfig, resolveFileLLMConfig } from "@/lib/llm/config";
+export { sanitizeModelOutput } from "@/lib/llm/sanitize";
+export { LLM_TASK_LABELS, LLM_TASKS, publicLLMStatus, resolveMainLLMConfig, resolveTaskLLMConfig, resolveProfileLLMConfig, resolveFileLLMConfig } from "@/lib/llm/config";
 
 function createAdapter(config: LLMConfig): LLMAdapter {
   if (config.provider === "anthropic") return anthropicProvider(config);
@@ -51,7 +54,8 @@ function withSystemPreamble(messages: AIMessage[], system?: string): AIMessage[]
 
 export function createAI(adapter: LLMAdapter): AI {
   async function complete(messages: AIMessage[], system?: string, opts: AIOptions = {}): Promise<string> {
-    return adapter.complete(withSystemPreamble(messages, system), opts);
+    const text = await adapter.complete(withSystemPreamble(messages, system), opts);
+    return sanitizeModelOutput(text);
   }
 
   async function json<T = unknown>(prompt: string, { system }: AIOptions = {}): Promise<T> {
@@ -79,6 +83,7 @@ let mainAdapter: LLMAdapter | null = null;
 let mainAI: AI | null = null;
 let mainConfigKey: string | null = null;
 const taskAIs = new Map<LLMTask, { key: string; ai: AI }>();
+const profileAIs = new Map<string, { key: string; ai: AI }>();
 
 function configKey(config: LLMConfig): string {
   return JSON.stringify({
@@ -113,6 +118,16 @@ export function getAIForTask(task: LLMTask): AI {
   if (cached?.key === key) return cached.ai;
   const next = createAI(createAdapter(config));
   taskAIs.set(task, { key, ai: next });
+  return next;
+}
+
+export function getAIForProfile(profileId: string): AI {
+  const config = resolveProfileLLMConfig(profileId);
+  const key = configKey(config);
+  const cached = profileAIs.get(profileId);
+  if (cached?.key === key) return cached.ai;
+  const next = createAI(createAdapter(config));
+  profileAIs.set(profileId, { key, ai: next });
   return next;
 }
 
@@ -153,6 +168,7 @@ export function resetLLMForTests() {
   mainAI = null;
   mainConfigKey = null;
   taskAIs.clear();
+  profileAIs.clear();
 }
 
 export const ai: AI = {

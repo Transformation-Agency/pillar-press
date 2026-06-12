@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const completeMock = vi.fn();
+const completeProfileMock = vi.fn();
 const campaignFindMock = vi.fn();
 const referencesFindMock = vi.fn();
 
@@ -32,14 +33,19 @@ vi.mock("@/lib/llm", () => ({
   getAIForTask: vi.fn(() => ({
     complete: completeMock,
   })),
+  getAIForProfile: vi.fn(() => ({
+    complete: completeProfileMock,
+  })),
 }));
 
 describe("POST /api/desk/chat", () => {
   beforeEach(() => {
     completeMock.mockReset();
+    completeProfileMock.mockReset();
     campaignFindMock.mockReset();
     referencesFindMock.mockReset();
     completeMock.mockResolvedValue("Keep going.");
+    completeProfileMock.mockResolvedValue("Profile answer.");
     campaignFindMock.mockResolvedValue({ id: "campaign_1", workspaceId: "workspace_1" });
     referencesFindMock.mockResolvedValue({
       doc: {
@@ -99,6 +105,24 @@ describe("POST /api/desk/chat", () => {
     expect(system).toContain("Avoid: hype");
     expect(system).toContain("Permissions: memory=not approved; examples=not approved; web=not approved; publish/send=not approved");
     expect(system).toContain("Earlier folded context:\nEarlier setup said this is a launch plan.");
+  }, 10000);
+
+  it("uses a thread-selected LLM profile when provided", async () => {
+    const { POST } = await import("@/app/api/desk/chat/route");
+
+    const res = await POST(new Request("http://test.local/api/desk/chat", {
+      method: "POST",
+      body: JSON.stringify({
+        campaignId: "campaign_1",
+        llmProfileId: "ollama-llama3-2-latest",
+        messages: [{ role: "user", content: "Use this thread model." }],
+      }),
+    }));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ text: "Profile answer." });
+    expect(completeProfileMock).toHaveBeenCalledTimes(1);
+    expect(completeMock).not.toHaveBeenCalled();
   });
 
   it("returns 404 instead of leaking out-of-scope campaigns", async () => {

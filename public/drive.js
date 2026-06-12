@@ -33,7 +33,12 @@
   refreshing = refresh().finally(() => { refreshing = null; });
 
   function config() {
-    return { folderId: status.folderId, folderName: status.folderName, localExportAvailable: status.localExportAvailable };
+    return { linked: !!status.linked, folderId: status.folderId, folderName: status.folderName, localExportAvailable: status.localExportAvailable };
+  }
+
+  function isLinked() {
+    if (!refreshing) { refreshing = refresh().finally(() => { refreshing = null; }); }
+    return !!status.linked;
   }
 
   function isConfigured() {
@@ -92,5 +97,5 @@
     return (data && data.file) || {};
   }
 
-  window.DRIVE = { isConfigured, config, uploadFile, uploadMany, uploadMediaFile, refresh };
+  window.DRIVE = { isConfigured, isLinked, config, uploadFile, uploadMany, uploadMediaFile, refresh };
 })();

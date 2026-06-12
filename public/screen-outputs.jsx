@@ -79,12 +79,19 @@ function outputFiles(piece) {
   return (piece.outputOrder || []).map((pid) => piece.outputs[pid]).filter(Boolean)
     .map((o) => ({ name: outputFilename(o), content: window.EXPORT.outputMarkdown(o), mime: "text/markdown" }));
 }
-function downloadAllOutputs(piece) {
+async function downloadAllOutputs(piece, setMsg) {
   const files = outputFiles(piece); if (!files.length) return;
-  window.EXPORT.downloadBlob(window.EXPORT.zipBlob(files), window.EXPORT.safeName(piece.title) + "-outputs.zip");
+  try {
+    const result = await window.EXPORT.downloadBlob(window.EXPORT.zipBlob(files), window.EXPORT.safeName(piece.title) + "-outputs.zip");
+    if (setMsg && result && result.path && window.KINGS_DESKTOP && window.KINGS_DESKTOP.isDesktop && window.KINGS_DESKTOP.isDesktop()) {
+      setMsg({ t: "ok", m: "Downloaded outputs.", link: "file://" + result.path });
+    }
+  } catch (e) {
+    if (setMsg) setMsg({ t: "err", m: (e && e.message) || "Download failed." });
+  }
 }
 async function driveSave(files, setMsg) {
-  if (!window.DRIVE.isConfigured()) { setMsg({ t: "link", m: "Link a Google Drive folder first." }); return; }
+  if (!window.DRIVE.isLinked || !window.DRIVE.isLinked()) { setMsg({ t: "link", m: "Link Google Drive first." }); return; }
   try {
     setMsg({ t: "busy", m: files.length > 1 ? `Saving ${files.length} files to Drive…` : `Saving ${files[0].name} to Drive…` });
     const res = await window.DRIVE.uploadMany(files, (i, n, name) => setMsg({ t: "busy", m: `Saving ${i + 1}/${n}: ${name}` }));
@@ -129,7 +136,10 @@ function OutputCard({ o, derivation, pieceId, platform, onCondensed, onDrive, on
   const [condensing, setCondensing] = React.useState(false);
   const [cerr, setCerr] = React.useState(null);
   const [ratio, setRatio] = React.useState(0.4);
-  const [hist, setHist] = React.useState([]); // stack of prior draftPost versions (multi-level undo)
+  const [hist, setHist] = React.useState(Array.isArray(o._history) ? o._history.filter((x) => typeof x === "string") : []);
+  React.useEffect(() => {
+    setHist(Array.isArray(o._history) ? o._history.filter((x) => typeof x === "string") : []);
+  }, [o._history]);
   const pct = Math.round(ratio * 100);
   const wc = (s) => (s || "").trim().split(/\s+/).filter(Boolean).length;
   const wordCount = wc(o.draftPost);
@@ -140,16 +150,18 @@ function OutputCard({ o, derivation, pieceId, platform, onCondensed, onDrive, on
     setCondensing(true); setCerr(null);
     try {
       const r = await window.GEN.condenseOutput(pieceId, platform, ratio);
-      setHist((h) => h.concat([before]));
-      if (onCondensed) onCondensed(platform, r.draftPost);
+      const nextHistory = Array.isArray(r.history) ? r.history.filter((x) => typeof x === "string") : hist.concat([before]);
+      setHist(nextHistory);
+      if (onCondensed) onCondensed(platform, r.draftPost, nextHistory);
     } catch (e) { setCerr((e && e.message) || "Couldn't condense."); }
     setCondensing(false);
   };
   const undo = () => {
     if (!hist.length) return;
     const last = hist[hist.length - 1];
-    setHist((h) => h.slice(0, -1));
-    if (onCondensed) onCondensed(platform, last);
+    const nextHistory = hist.slice(0, -1);
+    setHist(nextHistory);
+    if (onCondensed) onCondensed(platform, last, nextHistory);
   };
   return (
     <div className="card fade-in" style={{ padding: "24px 26px" }}>
@@ -179,15 +191,15 @@ function OutputCard({ o, derivation, pieceId, platform, onCondensed, onDrive, on
       <div style={{ whiteSpace: "pre-wrap", fontSize: 16.5, lineHeight: 1.7, padding: "18px 20px", background: "var(--paper-sunk)", borderRadius: "var(--radius)", marginBottom: 12 }}>{o.draftPost}</div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 18, flexWrap: "wrap" }}>
-        <button className="btn ghost sm" onClick={condense} disabled={condensing} title="Rewrite this post shorter (post only — hooks, CTAs and metadata untouched)">
-          {condensing ? <><Spinner size={13} /> Condensing…</> : "Make " + pct + "% shorter"}
-        </button>
         <input type="range" min="20" max="60" step="5" value={pct} disabled={condensing}
           onChange={(e) => setRatio(Number(e.target.value) / 100)}
           aria-label="Reduction amount" title={"Reduce by " + pct + "%"} style={{ width: 110, accentColor: "var(--accent)" }} />
+        <button className="btn ghost sm" onClick={condense} disabled={condensing} title="Regenerate this post shorter (post only — hooks, CTAs and metadata untouched)">
+          {condensing ? <><Spinner size={13} /> Regenerating…</> : "Regenerate"}
+        </button>
         <span className="mono" style={{ fontSize: 11, color: "var(--ink-3)" }}>{pct}% · {wordCount} words{prevWords != null ? " (was " + prevWords + ")" : ""}</span>
         {hist.length > 0 && !condensing &&
-          <button className="btn ghost sm" onClick={undo} title="Restore the previous version of this post">Undo{hist.length > 1 ? " (" + hist.length + ")" : ""}</button>}
+          <button className="btn ghost sm" onClick={undo} title="Restore the previous version of this post">Rollback{hist.length > 1 ? " (" + hist.length + ")" : ""}</button>}
         {cerr && <span style={{ fontSize: 13, color: "var(--sev-must)" }}>{cerr}</span>}
       </div>
 
@@ -240,11 +252,14 @@ function OutputsTab({ piece, onUpdate, refCtx, onGoStudio }) {
   const [err, setErr] = React.useState(null);
   const [driveOpen, setDriveOpen] = React.useState(false);
   const [msg, setMsg] = React.useState(null);
-  const onDriveOne = (o) => { if (!window.DRIVE.isConfigured()) { setDriveOpen(true); return; } driveSave([{ name: outputFilename(o), content: window.EXPORT.outputMarkdown(o), mime: "text/markdown" }], setMsg); };
+  const driveLinked = !!(window.DRIVE && window.DRIVE.isLinked && window.DRIVE.isLinked());
+  const onDriveOne = (o) => { if (!driveLinked) { setDriveOpen(true); return; } driveSave([{ name: outputFilename(o), content: window.EXPORT.outputMarkdown(o), mime: "text/markdown" }], setMsg); };
   const onVideo = (o) => { window.__studioPrefill = { type: "avatar", pieceId: piece.id, prompt: o.platform + " — " + (o.strategicPurpose || ""), script: o.draftPost || "" }; onGoStudio && onGoStudio(); };
   const onImage = (o) => { window.__studioPrefill = { type: "image", pieceId: piece.id, prompt: o.mediaRec || o.strategicPurpose || (o.platform + " post art") }; onGoStudio && onGoStudio(); };
-  const onCondensed = (platform, draftPost) => {
-    const outputs = Object.assign({}, piece.outputs, { [platform]: Object.assign({}, piece.outputs[platform], { draftPost }) });
+  const onCondensed = (platform, draftPost, history) => {
+    const nextOutput = Object.assign({}, piece.outputs[platform], { draftPost });
+    if (Array.isArray(history)) nextOutput._history = history;
+    const outputs = Object.assign({}, piece.outputs, { [platform]: nextOutput });
     onUpdate({ outputs });
   };
 
@@ -325,9 +340,9 @@ function OutputsTab({ piece, onUpdate, refCtx, onGoStudio }) {
         {(piece.outputOrder || []).length > 0 && (
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
             <div className="eyebrow" style={{ marginRight: "auto" }}>{piece.outputOrder.length} output{piece.outputOrder.length !== 1 ? "s" : ""}</div>
-            <button className="btn sm" onClick={() => downloadAllOutputs(piece)}><Icon name="doc" size={14} /> Download all (.zip)</button>
-            <button className="btn sm" onClick={() => { if (!window.DRIVE.isConfigured()) { setDriveOpen(true); return; } driveSave(outputFiles(piece), setMsg); }}><GoogleIcon size={13} /> Save all to Drive</button>
-            <button className="btn ghost sm" onClick={() => setDriveOpen(true)} title="Link / change Google Drive folder"><Icon name="gear" size={14} /> {window.DRIVE.isConfigured() ? "Drive linked" : "Link Drive"}</button>
+            <button className="btn sm" onClick={() => downloadAllOutputs(piece, setMsg)}><Icon name="doc" size={14} /> Download all (.zip)</button>
+            <button className="btn sm" onClick={() => driveSave(outputFiles(piece), setMsg)} disabled={!driveLinked} title={driveLinked ? "Save all outputs to Google Drive" : "Link Google Drive first"}><GoogleIcon size={13} /> Save all to Drive</button>
+            <button className="btn ghost sm" onClick={() => setDriveOpen(true)} title="Link / change Google Drive folder"><Icon name="gear" size={14} /> {driveLinked ? "Drive linked" : "Link Drive"}</button>
           </div>
         )}
         {msg && (
@@ -338,7 +353,7 @@ function OutputsTab({ piece, onUpdate, refCtx, onGoStudio }) {
             {msg.t === "ok" && <Icon name="check" size={15} />}
             {msg.t === "err" && <Icon name="warn" size={15} />}
             <span>{msg.m}</span>
-            {msg.link && <a href={msg.link} target="_blank" rel="noopener" style={{ marginLeft: 4 }}>Open in Drive →</a>}
+            {msg.link && <a href={msg.link} target="_blank" rel="noopener" style={{ marginLeft: 4 }}>{String(msg.link).startsWith("file:") ? "Show file" : "Open in Drive"} →</a>}
             {(msg.t === "link") && <button className="btn ghost sm" onClick={() => setDriveOpen(true)} style={{ marginLeft: 4 }}>Link Drive</button>}
             <button className="btn ghost sm" style={{ marginLeft: "auto" }} onClick={() => setMsg(null)}>Dismiss</button>
           </div>

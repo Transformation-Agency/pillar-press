@@ -104,15 +104,30 @@
   // prefers to derive from; falls back to canonical source if absent.
   const PLATFORMS = [
     { id: "substack", name: "Substack", order: 1, register: "essay",
-      derivesFrom: [], role: "Canonical source. The fullest expression — long-form essay register." },
+      derivesFrom: [],
+      role: "Canonical source. The fullest expression in a long-form essay/newsletter register.",
+      constraints: "Aim for 900-1,400 words when the source can support it; never exceed 1,600 words.",
+      outputShape: "Write a complete newsletter-style essay with short section breaks or strong paragraph turns. No hashtags." },
     { id: "facebook", name: "Facebook", order: 2, register: "field",
-      derivesFrom: ["substack"], role: "Relational adaptation of the canonical source. Warm, personal, field register." },
+      derivesFrom: ["substack"],
+      role: "Relational adaptation of the canonical source. Warm, personal, field register.",
+      constraints: "Aim for 120-220 words; never exceed 300 words. Keep it skimmable on mobile.",
+      outputShape: "Use 2-5 short paragraphs. Avoid hashtags unless essential. End with a soft invitation, reflective question, or light CTA." },
     { id: "instagram", name: "Instagram", order: 3, register: "field",
-      derivesFrom: ["facebook"], role: "Visual adaptation of the Facebook version. Include image/carousel/Reel recommendation." },
+      derivesFrom: ["facebook"],
+      role: "Caption-first adaptation that supports a visual post, carousel, or Reel.",
+      constraints: "Aim for 90-180 words; never exceed 2,000 characters. First line must work as a hook under 125 characters.",
+      outputShape: "Write the caption only. Put visual recommendations, carousel slide breakdowns, Reel beat lists, and bracketed production notes in metadata only. Include 3-8 relevant hashtags only if useful." },
     { id: "x", name: "X", order: 4, register: "field",
-      derivesFrom: ["substack", "facebook"], role: "Strongest theses and distinctions from the Substack + Facebook versions. Thread-friendly." },
+      derivesFrom: ["substack", "facebook"],
+      role: "Strongest theses and distinctions from the Substack + Facebook versions. Built for X as a concise thread.",
+      constraints: "Write 5-8 posts. Each post must be 260 characters or fewer.",
+      outputShape: "Format as a numbered thread: 1/ ... through N/. End with the practical takeaway or invitation." },
     { id: "threads", name: "Threads", order: 5, register: "field",
-      derivesFrom: ["facebook", "x"], role: "Conversational register, built from the Facebook + X versions." },
+      derivesFrom: ["facebook", "x"],
+      role: "Conversational register, built from the Facebook + X versions.",
+      constraints: "Aim for 80-160 words; never exceed 250 words.",
+      outputShape: "Use 1-4 short paragraphs. No formal essay framing. End with a conversational opening for replies when appropriate." },
   ];
 
   function canonicalSource(piece) {
@@ -157,7 +172,7 @@
   }
 
   // Condense ONE output's post to ~(1-ratio) length, server-side. Returns
-  // { platform, draftPost }. Does not touch hooks/CTAs/metadata.
+  // { platform, draftPost, history }. Does not touch hooks/CTAs/metadata.
   async function condenseOutput(pieceId, platform, ratio) {
     return apiSend("POST", "/pieces/" + pieceId + "/outputs/" + encodeURIComponent(platform) + "/condense", { ratio: ratio || 0.4 });
   }

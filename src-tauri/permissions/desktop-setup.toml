@@ -14,6 +14,7 @@ commands.allow = [
   "get_model_choice",
   "init_local_database",
   "create_local_backup",
+  "save_export_file",
   "desktop_runtime_status",
   "start_voice_session",
   "speak_text",

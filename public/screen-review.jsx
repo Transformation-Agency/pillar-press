@@ -271,7 +271,7 @@ function DirectionBox({ piece }) {
   );
 }
 
-function ReviewTab({ piece }) {
+function ReviewTab({ piece, onGoRevision }) {
   const isMobile = window.useIsMobile();
   const [sel, setSel] = React.useState({ key: null, anchor: null, bump: 0 });
   const [sevFilter, setSevFilter] = React.useState({ must: true, consider: true, note: true });
@@ -306,7 +306,12 @@ function ReviewTab({ piece }) {
         <div style={{ padding: "26px 28px 80px", maxWidth: 640, margin: "0 auto" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
             <div className="eyebrow">Review Packet</div>
-            <CopyButton text={() => packetToText(piece)} label="Copy packet" />
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <button className="btn primary sm" onClick={onGoRevision}>
+                Go to Revision <Icon name="arrowR" size={13} />
+              </button>
+              <CopyButton text={() => packetToText(piece)} label="Copy packet" />
+            </div>
           </div>
           <div style={{ display: "flex", gap: 6, marginBottom: 18 }}>
             {["must", "consider", "note"].map((sv) => {

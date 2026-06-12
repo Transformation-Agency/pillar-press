@@ -592,6 +592,28 @@ describe("provider adapters", () => {
 });
 
 describe("provider-neutral AI wrapper", () => {
+  it("strips local reasoning blocks before returning text", async () => {
+    const adapter: LLMAdapter = {
+      provider: "ollama",
+      model: "fake-reasoning-model",
+      capabilities: { text: true, json: true, vision: false, pdf: false },
+      complete: async () => "<think>I should not be shown.</think>\n\nHi there. How can I help?",
+    };
+
+    await expect(createAI(adapter).text("Say hello")).resolves.toBe("Hi there. How can I help?");
+  });
+
+  it("strips reasoning blocks before JSON parsing", async () => {
+    const adapter: LLMAdapter = {
+      provider: "ollama",
+      model: "fake-reasoning-model",
+      capabilities: { text: true, json: true, vision: false, pdf: false },
+      complete: async () => "<thinking>Build the object first.</thinking>\n{\"ok\":true}",
+    };
+
+    await expect(createAI(adapter).json("Return JSON")).resolves.toEqual({ ok: true });
+  });
+
   it("creates a one-off AI client from an unsaved provider config", async () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,

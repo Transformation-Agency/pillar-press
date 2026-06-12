@@ -409,6 +409,25 @@ export function resolveTaskLLMConfig(task: LLMTask, env: Env = process.env): LLM
   });
 }
 
+export function resolveProfileLLMConfig(profileId: string, env: Env = process.env): LLMConfig {
+  const id = trim(profileId);
+  if (!id) {
+    throw new LLMError(400, "llm_config", "Missing LLM profile id.");
+  }
+
+  const desktop = readDesktopLLMSettings(env);
+  const profile = findDesktopProfile(desktop, id);
+  if (!profile || !profile.provider) {
+    throw new LLMError(404, "llm_config", "The selected LLM profile was not found.");
+  }
+
+  return finalizeConfig(profile.provider, env, {
+    model: profile.model,
+    apiKey: profile.apiKey,
+    baseUrl: profile.baseUrl,
+  });
+}
+
 export function resolveFileLLMConfig(env: Env = process.env): LLMConfig | null {
   const main = resolveMainLLMConfig(env);
   const explicitProvider = trim(env.LLM_FILE_PROVIDER);

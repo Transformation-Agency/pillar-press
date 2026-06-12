@@ -13,6 +13,7 @@ function newDeskThread(campaignId) {
   return {
     id: deskUid("thread_"),
     campaignId: campaignId || null,
+    llmProfileId: null,
     title: "New thread",
     titleSet: false,
     messages: [],
@@ -26,8 +27,8 @@ function estimateTokens(text) {
   return Math.ceil(((text || "").length) / 4);
 }
 
-function contextWindowFor(status) {
-  const profile = effectiveLLMProfile(status);
+function contextWindowFor(status, thread) {
+  const profile = effectiveLLMProfile(status, thread && thread.llmProfileId);
   // Prefer the real loaded context reported by the server's provider probe
   // (LM Studio); the name-based guesses below are a fallback.
   if (profile && profile.contextWindow > 0) return profile.contextWindow;
@@ -41,9 +42,11 @@ function contextWindowFor(status) {
   return 8192;
 }
 
-function effectiveLLMProfile(status) {
+function effectiveLLMProfile(status, profileId) {
   if (!status) return null;
   const profiles = Array.isArray(status.profiles) ? status.profiles : [];
+  const explicitProfile = profileId ? profiles.find((profile) => profile && profile.id === profileId) : null;
+  if (explicitProfile) return explicitProfile;
   const taskProfileId =
     status.tasks && status.tasks.utility && status.tasks.utility.profileId
       ? status.tasks.utility.profileId
@@ -58,11 +61,17 @@ function effectiveLLMProfile(status) {
   return status.provider && status.model ? { provider: status.provider, model: status.model } : null;
 }
 
-function modelLabelFor(status) {
-  const profile = effectiveLLMProfile(status);
+function modelLabelFor(status, thread) {
+  const profile = effectiveLLMProfile(status, thread && thread.llmProfileId);
   if (!profile || !profile.model) return "Model setup";
+  const provider = profileProviderLabel(profile);
+  return provider ? provider + " · " + profile.model : profile.model;
+}
+
+function profileProviderLabel(profile) {
+  if (!profile) return "";
   const compatibleBaseUrl = String(profile.baseUrl || "");
-  const provider = {
+  return {
     anthropic: "Anthropic",
     gemini: "Gemini",
     openai: "OpenAI",
@@ -73,8 +82,7 @@ function modelLabelFor(status) {
         : "Compatible",
     xai: "xAI",
     ollama: "Ollama",
-  }[profile.provider] || "";
-  return provider ? provider + " · " + profile.model : profile.model;
+  }[profile.provider] || profile.provider || "";
 }
 
 function deskUsedTokens(thread) {
@@ -91,6 +99,7 @@ async function deskChatComplete(thread, campaignId) {
       mode: "desk",
       task: "utility",
       campaignId,
+      llmProfileId: thread.llmProfileId || null,
       messages: (thread.messages || []).map((m) => ({ role: m.role, content: m.content })),
       memory: thread.memory && thread.memory.note,
     }),
@@ -235,22 +244,47 @@ function MarkdownText({ text }) {
   );
 }
 
-function DeskBubble({ msg }) {
+function titleFromDraft(text, fallback) {
+  const firstLine = String(text || "").trim().split("\n").map((line) => line.trim()).find(Boolean);
+  if (!firstLine) return fallback || "Desk draft";
+  return firstLine
+    .replace(/^#+\s*/, "")
+    .replace(/[*_`>#-]/g, "")
+    .trim()
+    .slice(0, 72) || fallback || "Desk draft";
+}
+
+function DeskBubble({ msg, onSendToLibrary, latest }) {
   const mine = msg.role === "user";
+  const [saved, setSaved] = React.useState(false);
+  const saveDraft = () => {
+    if (!onSendToLibrary || !msg.content) return;
+    onSendToLibrary(msg.content);
+    setSaved(true);
+    window.setTimeout(() => setSaved(false), 1800);
+  };
   return (
-    <div style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start" }}>
-      <div style={{
-        maxWidth: "min(760px, 86%)",
-        lineHeight: 1.6,
-        fontSize: 16,
-        padding: "11px 14px",
-        borderRadius: 14,
-        borderTopLeftRadius: mine ? 14 : 4,
-        borderTopRightRadius: mine ? 4 : 14,
-        background: mine ? "var(--accent-soft)" : "var(--paper-2)",
-        border: "1px solid " + (mine ? "color-mix(in oklab, var(--accent) 26%, transparent)" : "var(--hair)"),
-      }}>
-        {mine ? msg.content : <MarkdownText text={msg.content} />}
+    <div className={"desk-turn " + (mine ? "desk-turn-user" : "desk-turn-assistant") + (latest ? " desk-turn-latest" : "")} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start" }}>
+      <div style={{ maxWidth: "min(760px, 86%)", display: "grid", gap: 7, justifyItems: mine ? "end" : "start" }}>
+        <div style={{
+          width: "100%",
+          boxSizing: "border-box",
+          lineHeight: 1.6,
+          fontSize: 16,
+          padding: "11px 14px",
+          borderRadius: 14,
+          borderTopLeftRadius: mine ? 14 : 4,
+          borderTopRightRadius: mine ? 4 : 14,
+          background: mine ? "var(--accent-soft)" : "var(--paper-2)",
+          border: "1px solid " + (mine ? "color-mix(in oklab, var(--accent) 26%, transparent)" : "var(--hair)"),
+        }}>
+          {mine ? msg.content : <MarkdownText text={msg.content} />}
+        </div>
+        {!mine && (
+          <button className="btn sm ghost desk-draft-action" onClick={saveDraft} style={{ fontSize: 12, padding: "6px 9px" }}>
+            <Icon name={saved ? "check" : "doc"} size={12} /> {saved ? "Saved to Library" : "Send to Library as Draft"}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -264,6 +298,7 @@ function Desk({ campaignId, onOpenPiece, hydrated }) {
   const [err, setErr] = React.useState(null);
   const [status, setStatus] = React.useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = React.useState(null);
+  const [modelMenuOpen, setModelMenuOpen] = React.useState(false);
   const streamRef = React.useRef(null);
   const taRef = React.useRef(null);
   const statusMountedRef = React.useRef(false);
@@ -302,9 +337,18 @@ function Desk({ campaignId, onOpenPiece, hydrated }) {
   const threads = allThreads.filter(belongsToCurrentCampaign);
   const active = threads.find((t) => t.id === desk.activeId) || threads[0] || null;
   const isSetupHandoff = !!(active && active.source === "pillar_press_setup");
-  const win = contextWindowFor(status);
+  const win = contextWindowFor(status, active);
   const used = active ? deskUsedTokens(active) : 0;
   const pct = Math.min(1, used / win);
+  const availableProfiles = Array.isArray(status && status.profiles) ? status.profiles.filter((profile) => profile && profile.id && profile.model) : [];
+  const profileGroups = availableProfiles.reduce((groups, profile) => {
+    const label = profileProviderLabel(profile) || "Other";
+    if (!groups[label]) groups[label] = [];
+    groups[label].push(profile);
+    return groups;
+  }, {});
+  const currentProfile = effectiveLLMProfile(status, active && active.llmProfileId);
+  const currentProfileId = (currentProfile && currentProfile.id) || null;
 
   React.useEffect(() => {
     if (!hydrated) return;
@@ -334,6 +378,34 @@ function Desk({ campaignId, onOpenPiece, hydrated }) {
     const scoped = Object.assign({}, next, { campaignId: next.campaignId || campaignId || null });
     saveThreads(threads.map((t) => t.id === scoped.id ? scoped : t), scoped.id);
   };
+
+  const selectThreadProfile = (profileId) => {
+    if (!active) return;
+    setModelMenuOpen(false);
+    updateThread(Object.assign({}, active, {
+      llmProfileId: profileId || null,
+      updatedAt: Date.now(),
+    }));
+  };
+
+  React.useEffect(() => {
+    setModelMenuOpen(false);
+  }, [active && active.id]);
+
+  React.useEffect(() => {
+    const onProfileSelected = (event) => {
+      const detail = (event && event.detail) || {};
+      const context = detail.context || {};
+      if (!active || context.scope !== "desk-thread" || context.threadId !== active.id || !detail.profileId) return;
+      updateThread(Object.assign({}, active, {
+        llmProfileId: detail.profileId,
+        updatedAt: Date.now(),
+      }));
+    };
+    window.addEventListener("pillarpress:llm-profile-selected", onProfileSelected);
+    return () => window.removeEventListener("pillarpress:llm-profile-selected", onProfileSelected);
+  }, [active && active.id, active && active.llmProfileId, campaignId, threads.length, allThreads.length]);
+
   const addThread = () => {
     const t = newDeskThread(campaignId);
     saveThreads([t].concat(threads), t.id);
@@ -398,13 +470,11 @@ function Desk({ campaignId, onOpenPiece, hydrated }) {
     ta.style.height = Math.min(150, ta.scrollHeight) + "px";
   }
 
-  function promote() {
-    if (!active || !(active.messages || []).length) return;
-    const seed = active.messages
-      .map((m) => (m.role === "user" ? "Author: " : "Desk: ") + m.content)
-      .join("\n\n");
-    const piece = window.Store.createPiece(active.title || "Desk thread", campaignId);
-    window.Store.updatePiece(piece.id, { original: seed });
+  function sendResponseToLibrary(content) {
+    const body = String(content || "").trim();
+    if (!body) return;
+    const title = titleFromDraft(body, active && active.title && active.title !== "New thread" ? active.title : "Desk draft");
+    const piece = window.Store.createPiece(title, campaignId, { original: body, status: "Draft" });
     onOpenPiece && onOpenPiece(piece.id);
   }
 
@@ -443,8 +513,45 @@ function Desk({ campaignId, onOpenPiece, hydrated }) {
             </div>
           </div>
           <span className="mono" style={{ fontSize: 11, color: "var(--ink-3)" }}>{Math.round(used / 1000 * 10) / 10}k / {Math.round(win / 1000)}k</span>
-          <button className="btn sm" onClick={() => window.dispatchEvent(new Event("pillarpress:open-model-setup"))}><Icon name="key" size={13} /> {modelLabelFor(status)}</button>
-          <button className="btn sm" onClick={promote} disabled={!active || !(active.messages || []).length}><Icon name="doc" size={13} /> Send to Library</button>
+          <span style={{ position: "relative", display: "inline-flex" }}>
+            <button className="btn sm" onClick={() => setModelMenuOpen(!modelMenuOpen)} disabled={!active}>
+              <Icon name="db" size={13} /> {modelLabelFor(status, active)}
+            </button>
+            {modelMenuOpen && (
+              <div style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, width: 320, zIndex: 40, border: "1px solid var(--hair)", borderRadius: 8, background: "var(--paper-2)", boxShadow: "0 18px 50px rgba(29, 31, 31, 0.16)", padding: 10 }}>
+                <div className="eyebrow" style={{ margin: "2px 4px 8px" }}>This thread uses</div>
+                <button
+                  onClick={() => selectThreadProfile(null)}
+                  style={{ width: "100%", display: "flex", justifyContent: "space-between", gap: 8, border: "1px solid " + (!active || !active.llmProfileId ? "var(--accent)" : "var(--hair)"), borderRadius: 7, background: !active || !active.llmProfileId ? "var(--accent-soft)" : "var(--paper)", color: "var(--ink)", padding: "8px 10px", cursor: "pointer", textAlign: "left", marginBottom: 8 }}
+                >
+                  <span>Default utility model</span>
+                  <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-3)" }}>fallback</span>
+                </button>
+                {availableProfiles.length ? Object.entries(profileGroups).map(([provider, profiles]) => (
+                  <div key={provider} style={{ marginTop: 10 }}>
+                    <div className="eyebrow" style={{ margin: "0 4px 6px" }}>{provider}</div>
+                    <div style={{ display: "grid", gap: 5 }}>
+                      {profiles.map((profile) => {
+                        const selected = active && active.llmProfileId === profile.id;
+                        return (
+                          <button
+                            key={profile.id}
+                            onClick={() => selectThreadProfile(profile.id)}
+                            style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, border: "1px solid " + (selected ? "var(--accent)" : "var(--hair)"), borderRadius: 7, background: selected ? "var(--accent-soft)" : "var(--paper)", color: selected ? "var(--accent-ink)" : "var(--ink)", padding: "8px 10px", cursor: "pointer", textAlign: "left" }}
+                          >
+                            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{profile.label || profile.model}</span>
+                            <span className="mono" style={{ fontSize: 10.5, color: selected ? "var(--accent-ink)" : "var(--ink-3)" }}>{profile.model}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )) : (
+                  <div className="muted" style={{ padding: "8px 4px", fontSize: 13.5 }}>No models are available yet. Add keys or local models first.</div>
+                )}
+              </div>
+            )}
+          </span>
         </div>
 
         <div ref={streamRef} className="scroll-y" style={{ flex: 1, minHeight: 0, padding: "24px 22px", display: "flex", flexDirection: "column", gap: 14 }}>
@@ -470,7 +577,13 @@ function Desk({ campaignId, onOpenPiece, hydrated }) {
                 <p className="muted" style={{ maxWidth: "48ch", margin: "8px auto 0", fontSize: 15.5 }}>Think out loud here. When a thread becomes useful, send it to the Library as a real piece.</p>
               </div>
             )}
-            {active && (active.messages || []).map((m) => <DeskBubble key={m.id} msg={m} />)}
+            {active && (() => {
+              const messages = active.messages || [];
+              const latestAssistantIndex = messages.reduce((last, msg, index) => msg.role === "assistant" ? index : last, -1);
+              return messages.map((m, index) => (
+                <DeskBubble key={m.id} msg={m} latest={index === latestAssistantIndex} onSendToLibrary={sendResponseToLibrary} />
+              ));
+            })()}
             {busy && <div style={{ display: "flex", justifyContent: "flex-start" }}><div className="card" style={{ padding: "11px 14px" }}><Spinner size={14} /> Thinking…</div></div>}
             {err && (
               <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>

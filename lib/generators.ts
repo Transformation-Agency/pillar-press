@@ -45,19 +45,36 @@ export interface Platform {
   register: string;
   derivesFrom: string[];
   role: string;
+  constraints: string;
+  outputShape: string;
 }
 
 export const PLATFORMS: readonly Platform[] = [
   { id: "substack", name: "Substack", order: 1, register: "essay",
-    derivesFrom: [], role: "Canonical source. The fullest expression — long-form essay register." },
+    derivesFrom: [],
+    role: "Canonical source. The fullest expression in a long-form essay/newsletter register.",
+    constraints: "Aim for 900-1,400 words when the source can support it; never exceed 1,600 words. Use a clear headline-like opening, developed sections, and a landing that leaves the reader with one memorable thesis.",
+    outputShape: "Write a complete newsletter-style essay with short section breaks or strong paragraph turns. No hashtags. No numbered social thread unless the source explicitly requires a list." },
   { id: "facebook", name: "Facebook", order: 2, register: "field",
-    derivesFrom: ["substack"], role: "Relational adaptation of the canonical source. Warm, personal, field register." },
+    derivesFrom: ["substack"],
+    role: "Relational adaptation of the canonical source. Warm, personal, field register.",
+    constraints: "Aim for 120-220 words; never exceed 300 words. Lead with a human observation, tension, or lived example. Keep it skimmable on mobile.",
+    outputShape: "Use 2-5 short paragraphs. Avoid hashtags unless essential. End with a soft invitation, reflective question, or light CTA." },
   { id: "instagram", name: "Instagram", order: 3, register: "field",
-    derivesFrom: ["facebook"], role: "Visual adaptation of the Facebook version. Include image/carousel/Reel recommendation." },
+    derivesFrom: ["facebook"],
+    role: "Visual adaptation of the Facebook version. Caption-first adaptation that supports a visual post, carousel, or Reel.",
+    constraints: "Aim for 90-180 words; never exceed 2,000 characters. The first line must work as a thumb-stopping hook under 125 characters. Use line breaks for scanability.",
+    outputShape: "Write the caption only. Do not include visual direction, image prompts, carousel slide breakdowns, Reel beat lists, bracketed notes, or any text labeled image/carousel/recommendation in the post body; put that material only in metadata. Include 3-8 relevant hashtags only if they genuinely help discovery." },
   { id: "x", name: "X", order: 4, register: "field",
-    derivesFrom: ["substack", "facebook"], role: "Strongest theses and distinctions from the Substack + Facebook versions. Thread-friendly." },
+    derivesFrom: ["substack", "facebook"],
+    role: "Strongest theses and distinctions from the Substack + Facebook versions. Built for X as a concise thread.",
+    constraints: "Write 5-8 posts. Each post must be 260 characters or fewer so it fits safely inside X's 280-character limit. Keep each post self-contained enough to read in sequence.",
+    outputShape: "Format as a numbered thread: 1/ ... through N/. The first post should state the core tension or claim. The final post should land the practical takeaway or invitation." },
   { id: "threads", name: "Threads", order: 5, register: "field",
-    derivesFrom: ["facebook", "x"], role: "Conversational register, built from the Facebook + X versions." },
+    derivesFrom: ["facebook", "x"],
+    role: "Conversational register, built from the Facebook + X versions.",
+    constraints: "Aim for 80-160 words; never exceed 250 words. Keep it casual, direct, and easy to respond to.",
+    outputShape: "Use 1-4 short paragraphs. No formal essay framing. End with a conversational opening for replies when appropriate." },
 ];
 
 /* ---------- The persisted output object ---------- */
@@ -136,6 +153,35 @@ interface PlatformMeta {
   followUp?: string;
 }
 
+export function cleanPlatformBody(platformId: string, body: string): string {
+  let out = String(body || "").trim();
+  if (platformId === "instagram") {
+    const lines = out.split(/\r?\n/);
+    const cleaned: string[] = [];
+    let skippingMediaBlock = false;
+    for (const line of lines) {
+      const trimmed = line.trim();
+      const startsMediaBlock =
+        /^\[(?:image|carousel|reel|visual|media)[^\]]*(?:recommendation|direction|prompt|breakdown)[^\]]*\]$/i.test(trimmed) ||
+        /^(?:image|carousel|reel|visual|media)\s+(?:recommendation|direction|prompt|breakdown)\s*:/i.test(trimmed);
+      if (startsMediaBlock) {
+        skippingMediaBlock = true;
+        continue;
+      }
+      if (skippingMediaBlock && /^(?:slide\s+\d+|beat\s+\d+|\d+\))\s*[:.]/i.test(trimmed)) continue;
+      if (skippingMediaBlock && trimmed === "") {
+        skippingMediaBlock = false;
+        if (cleaned.length && cleaned[cleaned.length - 1] !== "") cleaned.push("");
+        continue;
+      }
+      skippingMediaBlock = false;
+      cleaned.push(line);
+    }
+    out = cleaned.join("\n").trim();
+  }
+  return out;
+}
+
 /**
  * generatePlatform — produce one platform-native output. Two AI calls:
  *   1) the POST BODY in @@POST@@ … @@END@@ delimiter format (so a long body can
@@ -173,7 +219,16 @@ export async function generatePlatform(
   const bodySystem =
 `You write the BODY of a single platform-native post for an author. ${platform.role}
 Register to use: ${platform.register}. ${derivationText}
-This is an INDEPENDENT entry point, never a mere excerpt; it may point back to the longer work. If the source is long, DISTILL it to one sharp idea rather than reproducing it — aim for a complete, well-shaped post and do not exceed ~550 words.
+This is an INDEPENDENT entry point, never a mere excerpt; it may point back to the longer work. If the source is long, DISTILL it to one sharp idea rather than reproducing it.
+
+PLATFORM CONSTRAINTS:
+${platform.constraints}
+
+OUTPUT SHAPE:
+${platform.outputShape}
+
+POST-BODY BOUNDARY:
+The delimited post must contain only text the author could paste directly into ${platform.name}. Do not include production notes, labels, explanations, metadata, media recommendations, or bracketed directions inside @@POST@@.
 
 AUTHOR REFERENCES:
 ${refCtx}
@@ -194,6 +249,7 @@ Write the post now in the delimited format.`;
   const pm = bodyOut.split(/@@\s*POST\s*@@/i);
   if (pm.length > 1) draftPost = pm[1].split(/@@\s*END\s*@@/i)[0];
   draftPost = draftPost.replace(/@@\s*END\s*@@[\s\S]*$/i, "").trim();
+  draftPost = cleanPlatformBody(platform.id, draftPost);
 
   /* --- Call 2: the METADATA (compact JSON, given the finished body) --- */
   const metaSystem =

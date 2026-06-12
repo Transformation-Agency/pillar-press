@@ -137,7 +137,7 @@ function Workspace({ piece, refs, onBack, onGoStudio }) {
           onGoReview={() => setTab("review")} />
       )}
       {tab === "review" && (piece.packet
-        ? <ReviewTab piece={piece} />
+        ? <ReviewTab piece={piece} onGoRevision={() => setTab("revision")} />
         : <EmptyState icon="flag" title="No review packet yet" body="Paste a draft on the Draft tab and run the seven gates. The packet appears here, beside your original." />)}
       {tab === "revision" && <RevisionTab piece={piece} onUpdate={update} refCtx={refCtx} />}
       {tab === "outputs" && <OutputsTab piece={piece} onUpdate={update} refCtx={refCtx} onGoStudio={onGoStudio} />}
@@ -357,6 +357,7 @@ function DesktopOnboarding() {
   const [savedSettings, setSavedSettings] = React.useState(null);
   const [profileName, setProfileName] = React.useState("");
   const [taskDefaults, setTaskDefaults] = React.useState({});
+  const [modelSetupContext, setModelSetupContext] = React.useState(null);
 
   const desktop = window.KINGS_DESKTOP;
   const desktopSecretPrefix = "kpenc:v1:";
@@ -470,6 +471,7 @@ function DesktopOnboarding() {
     if (window.KP_ONBOARDING_ACTIONS && window.KP_ONBOARDING_ACTIONS.notifyProviderSetupClosed) {
       window.KP_ONBOARDING_ACTIONS.notifyProviderSetupClosed({ saved: false });
     }
+    setModelSetupContext(null);
     setOpen(false);
   };
 
@@ -483,6 +485,7 @@ function DesktopOnboarding() {
 
     desktop.onShowModelSetup((() => {
       if (!active) return;
+      setModelSetupContext(null);
       setOpen(true);
       refresh();
     })).then((fn) => {
@@ -490,8 +493,9 @@ function DesktopOnboarding() {
       if (!active && typeof unlisten === "function") unlisten();
     }).catch(() => {});
 
-    const openFromDesk = () => {
+    const openFromDesk = (event) => {
       if (!active) return;
+      setModelSetupContext((event && event.detail) || null);
       setOpen(true);
       refresh();
     };
@@ -844,8 +848,10 @@ function DesktopOnboarding() {
       setSavedSettings(persistedSettings || cleanedSettings);
       setTaskDefaults(nextTaskDefaults);
       window.localStorage.setItem(setupCompleteKey, "true");
-      window.dispatchEvent(new CustomEvent("pillarpress:llm-settings-changed"));
+      window.dispatchEvent(new CustomEvent("pillarpress:llm-settings-changed", { detail: { profileId: nextProfile.id, context: modelSetupContext } }));
+      window.dispatchEvent(new CustomEvent("pillarpress:llm-profile-selected", { detail: { profileId: nextProfile.id, context: modelSetupContext } }));
       notifyModelSetupSaved(persistedSettings || cleanedSettings, nextProfile);
+      setModelSetupContext(null);
       setOpen(false);
     } catch (e) {
       setMessage((e && e.message) || (typeof e === "string" ? e : "Could not save the model choice."));
@@ -1338,14 +1344,9 @@ function App() {
         <div className="spacer" />
         <CampaignSwitcher campaigns={campaigns} activeId={state.activeCampaignId}
           onSelect={(id) => window.Store.setActiveCampaign(id)} onAdd={() => setCampaignCreateOpen(true)} />
-        <button className="btn sm" onClick={() => setSetupOpen(true)} title="Setup provider, campaign, and preferences">
+        <button className="btn sm" onClick={openModelSetup} title="Set up available models and keys">
           <Icon name="gear" size={13} /> Setup
         </button>
-        {hasDesktopBridge && (
-          <button className="icon-btn" onClick={openModelSetup} title="Model settings">
-            <Icon name="key" size={16} />
-          </button>
-        )}
         <button className="icon-btn" onClick={() => window.Store.toggleTheme()} title="Toggle light / dark">
           <Icon name={state.theme === "dark" ? "sun" : "moon"} size={16} />
         </button>

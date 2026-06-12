@@ -125,6 +125,17 @@ struct BackupResult {
     path: String,
 }
 
+#[derive(Deserialize)]
+struct SaveExportArgs {
+    filename: String,
+    base64: String,
+}
+
+#[derive(Serialize)]
+struct SaveExportResult {
+    path: String,
+}
+
 #[derive(Serialize)]
 struct BackupManifest {
     app: String,
@@ -1332,6 +1343,71 @@ fn create_local_backup(app: AppHandle) -> Result<BackupResult, String> {
     })
 }
 
+fn safe_export_filename(name: &str) -> String {
+    let mut out = name
+        .chars()
+        .map(|c| match c {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '-',
+            c if c.is_control() => '-',
+            c => c,
+        })
+        .collect::<String>()
+        .trim()
+        .trim_matches('.')
+        .to_string();
+    if out.is_empty() {
+        out = "pillar-press-export.zip".into();
+    }
+    if out.len() > 140 {
+        out.truncate(140);
+    }
+    out
+}
+
+fn unique_path(mut path: PathBuf) -> PathBuf {
+    if !path.exists() {
+        return path;
+    }
+    let parent = path.parent().map(PathBuf::from).unwrap_or_else(PathBuf::new);
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("pillar-press-export")
+        .to_string();
+    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_string();
+    for i in 2..1000 {
+        let filename = if ext.is_empty() {
+            format!("{stem}-{i}")
+        } else {
+            format!("{stem}-{i}.{ext}")
+        };
+        path = parent.join(filename);
+        if !path.exists() {
+            break;
+        }
+    }
+    path
+}
+
+#[tauri::command]
+fn save_export_file(app: AppHandle, args: SaveExportArgs) -> Result<SaveExportResult, String> {
+    let bytes = BASE64
+        .decode(args.base64.as_bytes())
+        .map_err(|_| "Could not decode export data.".to_string())?;
+    let filename = safe_export_filename(&args.filename);
+    let dir = match app.path().download_dir() {
+        Ok(path) => path,
+        Err(_) => app_data_dir(&app)?.join("exports"),
+    };
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = unique_path(dir.join(filename));
+    fs::write(&path, bytes).map_err(|e| e.to_string())?;
+    let _ = open_path(path.clone());
+    Ok(SaveExportResult {
+        path: path.to_string_lossy().to_string(),
+    })
+}
+
 #[tauri::command]
 fn desktop_runtime_status(app: AppHandle) -> Result<DesktopRuntimeStatus, String> {
     let data_dir = app_data_dir(&app)?;
@@ -1713,6 +1789,7 @@ fn main() {
             get_model_choice,
             init_local_database,
             create_local_backup,
+            save_export_file,
             desktop_runtime_status,
             start_voice_session,
             speak_text,

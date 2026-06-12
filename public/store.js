@@ -574,18 +574,20 @@
 
     // campaignId (optional) targets a specific campaign — the Book Writer passes
     // the book's campaign so chapters land in the book, not the active campaign.
-    createPiece(title, campaignId) {
+    createPiece(title, campaignId, initial = {}) {
       const cid = campaignId || state.activeCampaignId;
+      const initialPatch = initial && typeof initial === "object" ? initial : {};
       const id = uid();
       const p = {
         id, campaignId: cid, title: title || "Untitled piece", status: "Draft",
         createdAt: now(), updatedAt: now(),
         original: "", packet: null, revision: null, outputs: {}, outputOrder: [],
+        ...initialPatch,
       };
       state.pieces.unshift(p);
       state.activePieceId = p.id;
       emit();
-      bg(apiSend("POST", "/campaigns/" + cid + "/pieces", { title: p.title, original: "" }).then((res) => {
+      bg(apiSend("POST", "/campaigns/" + cid + "/pieces", { title: p.title, original: p.original || "" }).then((res) => {
         const serverPiece = res && res.piece;
         if (!serverPiece || !serverPiece.id) return;
         replacePieceId(id, serverPiece.id);

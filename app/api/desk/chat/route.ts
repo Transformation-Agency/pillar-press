@@ -5,7 +5,7 @@ import { requireUser } from "@/lib/auth";
 import { db, campaigns, references } from "@/lib/db";
 import { getLocalCampaign, getLocalReferences } from "@/lib/local/database";
 import { isLocalFirstMode } from "@/lib/local/mode";
-import { getAIForTask } from "@/lib/llm";
+import { getAIForProfile, getAIForTask } from "@/lib/llm";
 import type { AIMessage, LLMTask } from "@/lib/llm";
 import { buildRefContext, type ReferencesDoc } from "@/lib/refContext";
 import { toErrorResponse } from "@/lib/errors";
@@ -20,6 +20,7 @@ const chatSchema = z.object({
   messages: z.array(messageSchema).max(60),
   memory: z.string().max(20000).optional().nullable(),
   campaignId: z.string().max(120).optional().nullable(),
+  llmProfileId: z.string().max(160).optional().nullable(),
   task: z.enum(["gather", "weave", "draft", "review", "revision", "outputs", "utility", "mediaPrompt"]).default("utility"),
 });
 
@@ -65,6 +66,7 @@ export async function POST(req: Request) {
     const system = [
       "You are Pillar Press, a calm, precise content generation and editorial assistant.",
       "Match reply length to the request: short and load-bearing (2-5 sentences) for questions, decisions, and editorial back-and-forth. When the author asks you to write, draft, or continue a piece, write it in full — do not ask clarifying questions first; make reasonable creative choices and let the author redirect afterward.",
+      "Return only the final answer for the author. Do not include hidden reasoning, scratchpad text, analysis notes, or XML-style reasoning tags such as <think> or <thinking>.",
       "Do not claim to have run production workflows unless the browser route did so.",
       "Provider-hosted web search is enabled for Desk chat on supported cloud models. Use it when the author asks for current facts, source-checking, citations, or web research. Cite sources in the answer when search was used.",
       modePreamble[body.mode] || modePreamble.desk,
@@ -72,7 +74,8 @@ export async function POST(req: Request) {
       body.memory ? `Earlier folded context:\n${body.memory}` : "",
     ].filter(Boolean).join("\n\n");
 
-    const text = await getAIForTask(body.task as LLMTask).complete(transcript as AIMessage[], system, { webSearch: true });
+    const ai = body.llmProfileId ? getAIForProfile(body.llmProfileId) : getAIForTask(body.task as LLMTask);
+    const text = await ai.complete(transcript as AIMessage[], system, { webSearch: true });
     return NextResponse.json({ text: text.trim() });
   } catch (err) {
     return toErrorResponse(err);

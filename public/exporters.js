@@ -62,12 +62,32 @@
 
   function blobFor(text, mime) { return new Blob([text], { type: mime || "text/markdown;charset=utf-8" }); }
 
-  function downloadBlob(blob, filename) {
+  function blobBase64(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = String(reader.result || "");
+        resolve(dataUrl.includes(",") ? dataUrl.split(",").pop() : dataUrl);
+      };
+      reader.onerror = () => reject(reader.error || new Error("Could not read export blob."));
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  async function downloadBlob(blob, filename) {
+    if (window.KINGS_DESKTOP && window.KINGS_DESKTOP.isDesktop && window.KINGS_DESKTOP.isDesktop() && window.KINGS_DESKTOP.saveExportFile) {
+      return window.KINGS_DESKTOP.saveExportFile(filename, await blobBase64(blob));
+    }
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url; a.download = filename;
-    document.body.appendChild(a); a.click();
-    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 400);
+    a.href = url;
+    a.download = filename;
+    a.rel = "noopener";
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 4000);
+    return { path: filename };
   }
 
   function downloadText(text, filename, mime) { downloadBlob(blobFor(text, mime), filename); }

@@ -4,6 +4,7 @@ import {
   AUDIENCE_PRESETS,
   resolveSources,
   canonicalSource,
+  cleanPlatformBody,
   generatePlatform,
   generateOutputs,
   type PlatformOutput,
@@ -141,6 +142,44 @@ describe("generatePlatform — two calls, exact output shape", () => {
     expect(out.riskCheck).toBe("Clear");
     expect(out.hooks).toEqual([]);
     expect(out.draftPost).toMatch(/^BODY for prompt len/);
+  });
+
+  it("injects platform-specific body constraints into the system prompt", async () => {
+    const ai = fakeAI();
+    await generatePlatform(
+      PLATFORMS.find((p) => p.id === "x")!,
+      { sourceText: "s", priorOutputs: {}, sourceIds: ["__source__"], audienceId: "leaders", refCtx: "" },
+      ai,
+    );
+    const xSystem = (ai.text as ReturnType<typeof vi.fn>).mock.calls[0][1].system;
+    expect(xSystem).toContain("PLATFORM CONSTRAINTS:");
+    expect(xSystem).toContain("Each post must be 260 characters or fewer");
+    expect(xSystem).toContain("Format as a numbered thread");
+
+    const igAI = fakeAI();
+    await generatePlatform(
+      PLATFORMS.find((p) => p.id === "instagram")!,
+      { sourceText: "s", priorOutputs: {}, sourceIds: ["__source__"], audienceId: "leaders", refCtx: "" },
+      igAI,
+    );
+    const instagramSystem = (igAI.text as ReturnType<typeof vi.fn>).mock.calls[0][1].system;
+    expect(instagramSystem).toContain("never exceed 2,000 characters");
+    expect(instagramSystem).toContain("Write the caption only");
+    expect(instagramSystem).toContain("Do not include production notes");
+  });
+});
+
+describe("cleanPlatformBody", () => {
+  it("removes Instagram media recommendations from the post body", () => {
+    const body = cleanPlatformBody("instagram", `Real caption opening.
+
+[Image/Carousel recommendation: 5-slide carousel]
+Slide 1: "Hook"
+Slide 2: "Point"
+Slide 3: "Close"
+
+#ai #discernment`);
+    expect(body).toBe("Real caption opening.\n\n#ai #discernment");
   });
 });
 

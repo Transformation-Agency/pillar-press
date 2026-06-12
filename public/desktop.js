@@ -44,6 +44,7 @@
     getModelChoice: () => invoke("get_model_choice"),
     initLocalDatabase: () => invoke("init_local_database"),
     createLocalBackup: () => invoke("create_local_backup"),
+    saveExportFile: (filename, base64) => invoke("save_export_file", { args: { filename, base64 } }),
     runtimeStatus: () => invoke("desktop_runtime_status"),
     startVoiceSession: () => invoke("start_voice_session"),
     speakText: (text, options) => invoke("speak_text", { args: { text, interrupt: !!(options && options.interrupt) } }),

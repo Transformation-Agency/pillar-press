@@ -33,6 +33,7 @@ async function resolvePiece(id: string, user: SessionUser): Promise<Piece | null
 }
 
 type OutputObject = { draftPost?: string } & Record<string, unknown>;
+const historyLimit = 10;
 
 /**
  * POST /api/pieces/[id]/outputs/[platform]/condense
@@ -65,19 +66,24 @@ export async function POST(
         });
     const refCtx = buildRefContext((ref?.doc as ReferencesDoc | undefined) ?? null);
 
-    const draftPost = await condensePost(target.draftPost, refCtx, ratio, getAIForTask("outputs"));
+    const originalDraft = target.draftPost;
+    const draftPost = await condensePost(originalDraft, refCtx, ratio, getAIForTask("outputs"));
+    const currentHistory = Array.isArray(target._history)
+      ? target._history.filter((item): item is string => typeof item === "string")
+      : [];
+    const nextHistory = currentHistory.concat([originalDraft]).slice(-historyLimit);
 
-    const nextOutputs = { ...outputs, [platform]: { ...target, draftPost } };
+    const nextOutputs = { ...outputs, [platform]: { ...target, draftPost, _history: nextHistory } };
     if (isLocalFirstMode()) {
       updateLocalPiece(piece.id, user.id, { outputs: nextOutputs }, user.workspaceId);
-      return NextResponse.json({ platform, draftPost });
+      return NextResponse.json({ platform, draftPost, history: nextHistory });
     }
     await db
       .update(pieces)
       .set({ outputs: nextOutputs, updatedAt: new Date() })
       .where(and(eq(pieces.id, piece.id), eq(pieces.userId, user.id)));
 
-    return NextResponse.json({ platform, draftPost });
+    return NextResponse.json({ platform, draftPost, history: nextHistory });
   } catch (err) {
     return toErrorResponse(err);
   }

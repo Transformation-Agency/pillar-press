@@ -223,6 +223,20 @@ a { color: var(--accent-ink); text-decoration: none; }
 }
 
 /* ---- Markdown in desk bubbles ---- */
+.desk-turn-assistant .desk-draft-action {
+  opacity: 0;
+  transform: translateY(-2px);
+  pointer-events: none;
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+.desk-turn-assistant:hover .desk-draft-action,
+.desk-turn-assistant:focus-within .desk-draft-action,
+.desk-turn-assistant.desk-turn-latest .desk-draft-action {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
 .desk-markdown {
   display: grid;
   gap: 10px;
