@@ -223,16 +223,29 @@ export async function getOrCreateBillingCustomer(input: {
   userId: string;
   email?: string | null;
 }) {
+  const email = input.email?.trim() || null;
   const [existing] = await db
     .select()
     .from(billingCustomers)
     .where(eq(billingCustomers.workspaceId, input.workspaceId))
     .limit(1);
-  if (existing) return existing;
+  if (existing) {
+    if (email && existing.billingEmail !== email) {
+      const stripe = getStripe();
+      await stripe.customers.update(existing.stripeCustomerId, { email });
+      const [updated] = await db
+        .update(billingCustomers)
+        .set({ billingEmail: email, updatedAt: new Date() })
+        .where(eq(billingCustomers.id, existing.id))
+        .returning();
+      return updated ?? existing;
+    }
+    return existing;
+  }
 
   const stripe = getStripe();
   const customer = await stripe.customers.create({
-    email: input.email ?? undefined,
+    email: email ?? undefined,
     metadata: {
       workspaceId: input.workspaceId,
       userId: input.userId,
@@ -245,7 +258,7 @@ export async function getOrCreateBillingCustomer(input: {
     .values({
       workspaceId: input.workspaceId,
       stripeCustomerId: customer.id,
-      billingEmail: input.email ?? null,
+      billingEmail: email,
     })
     .returning();
   return row;

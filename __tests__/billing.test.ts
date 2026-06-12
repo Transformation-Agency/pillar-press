@@ -524,12 +524,20 @@ describe("hosted billing status API", () => {
 describe("hosted billing session audit events", () => {
   it("records sanitized audit metadata when creating a Checkout session", async () => {
     const createCheckout = vi.fn(async () => ({ id: "cs_123", url: "https://checkout.stripe.test/session" }));
+    const getOrCreateBillingCustomer = vi.fn(async () => ({
+      stripeCustomerId: "cus_123",
+    }));
     const safeRecordAuditEvent = vi.fn();
 
     vi.doMock("@/lib/audit", () => ({ safeRecordAuditEvent }));
     vi.doMock("@/lib/billing/stripe", () => ({
       BillingError: TestBillingError,
-      requireBillingUser: vi.fn(async () => ({ id: "user_1", workspaceId: "workspace_1", role: "author" })),
+      requireBillingUser: vi.fn(async () => ({
+        id: "user_1",
+        workspaceId: "workspace_1",
+        role: "author",
+        email: "private@example.com",
+      })),
       requireCheckoutPlan: vi.fn(async () => ({
         plan: { id: "pro" },
         priceId: "price_pro",
@@ -539,9 +547,7 @@ describe("hosted billing session audit events", () => {
         status: "trialing",
         stripeSubscriptionId: null,
       })),
-      getOrCreateBillingCustomer: vi.fn(async () => ({
-        stripeCustomerId: "cus_123",
-      })),
+      getOrCreateBillingCustomer,
       appBaseUrl: vi.fn(() => "https://kingspress.test"),
       getStripe: vi.fn(() => ({
         checkout: {
@@ -555,7 +561,7 @@ describe("hosted billing session audit events", () => {
     const { POST } = await import("../app/api/billing/checkout/route");
     const res = await POST(new Request("https://kingspress.test/api/billing/checkout", {
       method: "POST",
-      body: JSON.stringify({ planId: "pro", email: "private@example.com" }),
+      body: JSON.stringify({ planId: "pro" }),
     }));
     const body = await res.json();
 
@@ -566,6 +572,11 @@ describe("hosted billing session audit events", () => {
       customer: "cus_123",
       line_items: [{ price: "price_pro", quantity: 1 }],
     }));
+    expect(getOrCreateBillingCustomer).toHaveBeenCalledWith({
+      workspaceId: "workspace_1",
+      userId: "user_1",
+      email: "private@example.com",
+    });
     expect(safeRecordAuditEvent).toHaveBeenCalledWith({
       workspaceId: "workspace_1",
       actorId: "user_1",
@@ -670,6 +681,9 @@ describe("hosted billing session audit events", () => {
 
   it("records sanitized audit metadata when creating a Customer Portal session", async () => {
     const createPortal = vi.fn(async () => ({ id: "bps_123", url: "https://billing.stripe.test/session" }));
+    const getOrCreateBillingCustomer = vi.fn(async () => ({
+      stripeCustomerId: "cus_123",
+    }));
     const safeRecordAuditEvent = vi.fn();
 
     vi.doMock("@/lib/audit", () => ({ safeRecordAuditEvent }));
@@ -683,10 +697,13 @@ describe("hosted billing session audit events", () => {
           this.code = code;
         }
       },
-      requireBillingUser: vi.fn(async () => ({ id: "user_1", workspaceId: "workspace_1", role: "author" })),
-      getOrCreateBillingCustomer: vi.fn(async () => ({
-        stripeCustomerId: "cus_123",
+      requireBillingUser: vi.fn(async () => ({
+        id: "user_1",
+        workspaceId: "workspace_1",
+        role: "author",
+        email: "private@example.com",
       })),
+      getOrCreateBillingCustomer,
       appBaseUrl: vi.fn(() => "https://kingspress.test"),
       getStripe: vi.fn(() => ({
         billingPortal: {
@@ -700,7 +717,7 @@ describe("hosted billing session audit events", () => {
     const { POST } = await import("../app/api/billing/portal/route");
     const res = await POST(new Request("https://kingspress.test/api/billing/portal", {
       method: "POST",
-      body: JSON.stringify({ email: "private@example.com" }),
+      body: JSON.stringify({}),
     }));
     const body = await res.json();
 
@@ -709,6 +726,11 @@ describe("hosted billing session audit events", () => {
     expect(createPortal).toHaveBeenCalledWith({
       customer: "cus_123",
       return_url: "https://kingspress.test/?billing=portal-return",
+    });
+    expect(getOrCreateBillingCustomer).toHaveBeenCalledWith({
+      workspaceId: "workspace_1",
+      userId: "user_1",
+      email: "private@example.com",
     });
     expect(safeRecordAuditEvent).toHaveBeenCalledWith({
       workspaceId: "workspace_1",

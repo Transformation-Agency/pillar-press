@@ -32,6 +32,7 @@ export interface SessionUser {
   id: string;
   workspaceId?: string;
   role?: Role;
+  email?: string | null;
 }
 
 /* ------------------------------------------------------------------ *
@@ -73,19 +74,20 @@ async function readAccessToken(): Promise<string | null> {
  * Returns just the id (no workspace) if no membership exists yet, so callers can
  * bootstrap one via {@link getOrCreateWorkspace}.
  */
-async function resolveMembership(userId: string): Promise<SessionUser> {
+async function resolveMembership(userId: string, email?: string | null): Promise<SessionUser> {
+  const identity = email ? { id: userId, email } : { id: userId };
   const rows = await db
     .select()
     .from(memberships)
     .where(eq(memberships.userId, userId));
 
-  if (rows.length === 0) return { id: userId };
+  if (rows.length === 0) return identity;
 
   // Deterministic pick: newest membership wins.
   const active = rows.reduce((a, b) =>
     a.createdAt > b.createdAt ? a : b,
   );
-  return { id: userId, workspaceId: active.workspaceId, role: active.role };
+  return { ...identity, workspaceId: active.workspaceId, role: active.role };
 }
 
 /**
@@ -108,15 +110,17 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
     if (debugId) {
       const debugWorkspace = h.get("x-debug-workspace") ?? undefined;
       const debugRole = h.get("x-debug-role") as Role | null;
+      const debugEmail = h.get("x-debug-email");
       if (debugWorkspace) {
         return {
           id: debugId,
           workspaceId: debugWorkspace,
           role: debugRole ?? "author",
+          ...(debugEmail ? { email: debugEmail } : {}),
         };
       }
       // No explicit workspace header → resolve from membership like a real user.
-      const resolved = await resolveMembership(debugId);
+      const resolved = await resolveMembership(debugId, debugEmail);
       if (debugRole) resolved.role = debugRole;
       return resolved;
     }
@@ -133,18 +137,20 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
   if (!token) return null;
 
   let userId: string;
+  let email: string | null = null;
   try {
     const supabase = supabaseFromToken(token);
     const { data, error } = await supabase.auth.getUser(token);
     if (error || !data?.user) return null;
     userId = data.user.id;
+    email = data.user.email ?? null;
   } catch {
     // Misconfiguration / network — treat as no session rather than leaking 500s
     // from a read of the session.
     return null;
   }
 
-  return resolveMembership(userId);
+  return resolveMembership(userId, email);
 }
 
 /** Require a valid session or throw a 401-tagged error. */

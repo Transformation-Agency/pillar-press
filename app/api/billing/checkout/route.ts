@@ -44,7 +44,7 @@ export async function POST(req: Request) {
     const customer = await getOrCreateBillingCustomer({
       workspaceId: user.workspaceId,
       userId: user.id,
-      email: body.email,
+      email: body.email ?? user.email,
     });
 
     const baseUrl = appBaseUrl(req);
