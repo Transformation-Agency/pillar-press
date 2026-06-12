@@ -35,7 +35,10 @@ Do this as a staged migration, not a rewrite.
 7. Stage 6: production ops, admin, support, observability, and launch gates.
    **Started:** sensitive hosted mutations now record sanitized audit events for
    Stripe webhooks, billing Checkout/Portal sessions, and hosted LLM/media BYOK
-   provider setting updates.
+   provider setting updates. A secret-protected read-only support endpoint now
+   exposes workspace subscription, usage, trial/audit, background-job, and
+   provider-profile diagnostics without returning raw provider keys, billing
+   emails, or unsanitized metadata.
 
 No stage should weaken the desktop path. Desktop/local-first stays SQLite and
 does not read or write the SaaS billing tables.
@@ -575,3 +578,7 @@ Stage 3 is complete only when:
    exposes scoped polling through `GET /api/gather/run/:jobId`; local-first
    Gather remains synchronous.
 10. Stage 6: add admin/support tooling and production observability.
+    **Started:** `GET /api/admin/support/workspaces` is available when
+    `KINGS_PRESS_ADMIN_SECRET` or `KINGS_PRESS_SUPPORT_SECRET` is configured.
+    It supports list and per-workspace diagnostics for support investigations
+    and records admin audit events for support reads.
