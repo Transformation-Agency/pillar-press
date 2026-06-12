@@ -19,6 +19,40 @@ function useHostedAuth() {
   return auth;
 }
 
+function friendlyHostedAuthError(message) {
+  const raw = String(message || "").trim();
+  const rateLimit = raw.match(/only request this after\s+(\d+)\s+seconds?/i);
+  if (rateLimit) {
+    const seconds = Number(rateLimit[1]) || 30;
+    return {
+      message: `King's Press is protecting account creation from repeated requests. Please wait ${seconds} seconds, then try again. If you already created this account, choose “I already have an account.”`,
+      waitSeconds: seconds,
+    };
+  }
+  if (/invalid login credentials/i.test(raw)) {
+    return {
+      message: "That email and password did not match. Check the password, or create an account if this is your first time here.",
+      waitSeconds: 0,
+    };
+  }
+  if (/email not confirmed/i.test(raw)) {
+    return {
+      message: "That account still needs email confirmation. Check your inbox, then come back and sign in.",
+      waitSeconds: 0,
+    };
+  }
+  if (/already registered|already exists|user already/i.test(raw)) {
+    return {
+      message: "That email already has an account. Choose “I already have an account” and sign in.",
+      waitSeconds: 0,
+    };
+  }
+  return {
+    message: raw || "Could not sign in.",
+    waitSeconds: 0,
+  };
+}
+
 function HostedAuthScreen({ auth }) {
   const [mode, setMode] = React.useState("signin");
   const [email, setEmail] = React.useState("");
@@ -27,6 +61,15 @@ function HostedAuthScreen({ auth }) {
   const [busy, setBusy] = React.useState(false);
   const [message, setMessage] = React.useState("");
   const [error, setError] = React.useState("");
+  const [cooldownUntil, setCooldownUntil] = React.useState(0);
+  const [now, setNow] = React.useState(Date.now());
+  const cooldownSeconds = Math.max(0, Math.ceil((cooldownUntil - now) / 1000));
+
+  React.useEffect(() => {
+    if (!cooldownUntil) return undefined;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [cooldownUntil]);
 
   React.useEffect(() => {
     if (auth && auth.recovery) {
@@ -60,12 +103,19 @@ function HostedAuthScreen({ auth }) {
         ? await window.KP_AUTH.signUp(email.trim(), password)
         : await window.KP_AUTH.signIn(email.trim(), password);
       if (result && result.confirmationRequired) {
+        setMode("signin");
+        setPassword("");
         setMessage("Check your email to confirm the account, then come back and sign in.");
       } else {
         await window.Store.reload();
       }
     } catch (err) {
-      setError(err && err.message ? err.message : "Could not sign in.");
+      const friendly = friendlyHostedAuthError(err && err.message ? err.message : "Could not sign in.");
+      setError(friendly.message);
+      if (friendly.waitSeconds > 0) {
+        setCooldownUntil(Date.now() + friendly.waitSeconds * 1000);
+        setNow(Date.now());
+      }
     } finally {
       setBusy(false);
     }
@@ -169,10 +219,12 @@ function HostedAuthScreen({ auth }) {
         {error && <p role="alert" style={{ color: "var(--sev-must)", margin: "0 0 12px" }}>{error}</p>}
         {message && <p role="status" style={{ color: "var(--muted)", margin: "0 0 12px" }}>{message}</p>}
 
-        <button className="btn primary" type="submit" disabled={busy} style={{ width: "100%", justifyContent: "center" }}>
+        <button className="btn primary" type="submit" disabled={busy || cooldownSeconds > 0} style={{ width: "100%", justifyContent: "center" }}>
           {busy
             ? <Spinner size={15} />
-            : mode === "signup"
+            : cooldownSeconds > 0
+              ? `Try again in ${cooldownSeconds}s`
+              : mode === "signup"
               ? "Create account"
               : mode === "resetRequest"
                 ? "Send reset link"
@@ -185,7 +237,7 @@ function HostedAuthScreen({ auth }) {
             <button
               className="link"
               type="button"
-              onClick={() => { setMode("resetRequest"); setError(""); setMessage(""); setPassword(""); setPasswordConfirm(""); }}
+              onClick={() => { setMode("resetRequest"); setError(""); setMessage(""); setPassword(""); setPasswordConfirm(""); setCooldownUntil(0); }}
               style={{ marginTop: 16, width: "100%", textAlign: "center" }}
             >
               Forgot your password?
@@ -193,7 +245,7 @@ function HostedAuthScreen({ auth }) {
             <button
               className="link"
               type="button"
-              onClick={() => { setMode("signup"); setError(""); setMessage(""); setPassword(""); setPasswordConfirm(""); }}
+              onClick={() => { setMode("signup"); setError(""); setMessage(""); setPassword(""); setPasswordConfirm(""); setCooldownUntil(0); }}
               style={{ marginTop: 10, width: "100%", textAlign: "center" }}
             >
               Create an account
@@ -204,7 +256,7 @@ function HostedAuthScreen({ auth }) {
           <button
             className="link"
             type="button"
-            onClick={() => { setMode("signin"); setError(""); setMessage(""); setPassword(""); setPasswordConfirm(""); }}
+            onClick={() => { setMode("signin"); setError(""); setMessage(""); setPassword(""); setPasswordConfirm(""); setCooldownUntil(0); }}
             style={{ marginTop: 16, width: "100%", textAlign: "center" }}
           >
             I already have an account
@@ -214,7 +266,7 @@ function HostedAuthScreen({ auth }) {
           <button
             className="link"
             type="button"
-            onClick={() => { setMode("signin"); setError(""); setMessage(""); setPassword(""); setPasswordConfirm(""); }}
+            onClick={() => { setMode("signin"); setError(""); setMessage(""); setPassword(""); setPasswordConfirm(""); setCooldownUntil(0); }}
             style={{ marginTop: 16, width: "100%", textAlign: "center" }}
           >
             Back to sign in

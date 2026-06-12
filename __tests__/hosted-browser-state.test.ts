@@ -30,4 +30,14 @@ describe("hosted browser account state isolation", () => {
     expect(app).toContain("window.Store.resetForAuth()");
     expect(app).toContain("onClick={signOutHosted}");
   });
+
+  it("softens hosted Supabase auth cooldown and duplicate-account errors", () => {
+    const app = readPublic("app.jsx");
+
+    expect(app).toContain("function friendlyHostedAuthError");
+    expect(app).toContain("only request this after");
+    expect(app).toContain("Try again in ${cooldownSeconds}s");
+    expect(app).toContain("choose “I already have an account.”");
+    expect(app).toContain("That email already has an account.");
+  });
 });
