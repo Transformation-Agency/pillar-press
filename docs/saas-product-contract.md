@@ -428,6 +428,11 @@ Stage 1 is complete only when:
   **Implemented:** browser API calls attach the Supabase bearer token; the server
   auth layer validates it, resolves membership, and bootstraps a workspace before
   normal API routes run if an authenticated user has no membership yet.
+- Browser state is scoped to the active hosted account. **Implemented:** the
+  REST-backed static Store clears its in-memory campaigns, pieces, media,
+  billing, Gather, Weave, and desk cache before rehydrating after sign-in and
+  immediately after hosted sign-out, preventing account data from lingering in a
+  reused browser tab.
 - Cross-workspace object access is denied and tested. **Started:** shared
   campaign/workspace scope helper plus regression tests now guard the hosted
   contract; Gather sources/items/runs and media jobs/prompt/status/export

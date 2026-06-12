@@ -50,32 +50,44 @@
   /* ---- minimal default state so getters never crash before hydrate ---- */
   const STATUSES = ["Draft", "Reviewed", "Revised", "Approved", "Formatted"];
 
-  let state = {
-    campaigns: [],
-    activeCampaignId: null,
-    settings: {
-      drive: { clientId: "", folderId: "", folderName: "" },
-      hedra: {},
-      eleven: {},
-    },
-    media: [],
-    billing: null,
-    gatherSources: [],
-    gatherItems: [],
-    gatherSummaries: [], // per-source research briefs from the last run (cache-only)
-    pieces: [],
-    activePieceId: null,
-    theme: "light",
-    role: "author",
-    weave: { sources: [], result: null },
-    desk: { threads: [], activeId: null },
-  };
+  function defaultState() {
+    return {
+      campaigns: [],
+      activeCampaignId: null,
+      settings: {
+        drive: { clientId: "", folderId: "", folderName: "" },
+        hedra: {},
+        eleven: {},
+      },
+      media: [],
+      billing: null,
+      gatherSources: [],
+      gatherItems: [],
+      gatherSummaries: [], // per-source research briefs from the last run (cache-only)
+      pieces: [],
+      activePieceId: null,
+      theme: "light",
+      role: "author",
+      weave: { sources: [], result: null },
+      desk: { threads: [], activeId: null },
+    };
+  }
+
+  let state = defaultState();
 
   // tracks which campaigns have had their per-campaign data hydrated
   const loadedCampaigns = new Set();
   const pendingCampaignCreates = new Map();
 
   function emit() { listeners.forEach((l) => l(state)); }
+
+  function resetState(shouldEmit) {
+    state = defaultState();
+    loadedCampaigns.clear();
+    pendingCampaignCreates.clear();
+    document.documentElement.setAttribute("data-theme", state.theme || "light");
+    if (shouldEmit !== false) emit();
+  }
 
   /* ---- normalization helpers ---- */
   function normSettings(raw) {
@@ -228,7 +240,7 @@
         await window.KP_AUTH.ready.catch(() => null);
         auth = window.KP_AUTH.snapshot ? window.KP_AUTH.snapshot() : null;
         if (auth && auth.requiresLogin && !auth.authenticated) {
-          emit();
+          resetState();
           return;
         }
       }
@@ -281,7 +293,8 @@
     STATUSES,
     getState: () => state,
     subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
-    reload() { loadedCampaigns.clear(); return hydrate(); },
+    reload() { resetState(); return hydrate(); },
+    resetForAuth() { resetState(); },
     async refreshBilling() {
       try {
         state.billing = await apiGet("/billing/status");

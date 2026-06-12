@@ -1477,6 +1477,10 @@ function App() {
     }
     setBackupBusy(false);
   };
+  const signOutHosted = async () => {
+    if (window.KP_AUTH && window.KP_AUTH.signOut) await window.KP_AUTH.signOut();
+    if (window.Store && window.Store.resetForAuth) window.Store.resetForAuth();
+  };
 
   if (auth.requiresLogin && !auth.authenticated) return <HostedAuthScreen auth={auth} />;
 
@@ -1509,7 +1513,7 @@ function App() {
           </button>
         )}
         {auth.requiresLogin && (
-          <button className="btn sm ghost" onClick={() => window.KP_AUTH && window.KP_AUTH.signOut()} title="Sign out">
+          <button className="btn sm ghost" onClick={signOutHosted} title="Sign out">
             Sign out
           </button>
         )}
