@@ -7,6 +7,7 @@ import {
 } from "@/lib/billing/stripe";
 import {
   billingAccessForSubscription,
+  billingLifecycleForSubscription,
   getEntitlementForPlan,
   safeRecordTrialExpirationEvent,
   usageSummaryForSubscription,
@@ -28,6 +29,7 @@ export async function GET() {
       entitlement,
     });
     const access = billingAccessForSubscription(subscription);
+    const lifecycle = billingLifecycleForSubscription(subscription, access);
     if (!access.allowed && access.code === "trial_expired") {
       await safeRecordTrialExpirationEvent({
         user,
@@ -42,6 +44,7 @@ export async function GET() {
       entitlement,
       usage,
       access,
+      lifecycle,
     });
   } catch (err) {
     return toErrorResponse(err);

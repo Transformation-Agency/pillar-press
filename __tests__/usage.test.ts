@@ -11,6 +11,7 @@ describe("hosted usage reservations", () => {
 
     const {
       billingAccessForSubscription,
+      billingLifecycleForSubscription,
       entitlementAllowsByokProvider,
       entitlementAllowsManagedProvider,
       periodForSubscription,
@@ -69,6 +70,29 @@ describe("hosted usage reservations", () => {
       status: "trialing",
       trialEnd: new Date("2026-06-12T00:00:00.000Z"),
     } as any, new Date("2026-06-11T00:00:00.000Z"))).toEqual({ allowed: true });
+    expect(billingLifecycleForSubscription(
+      {
+        planId: "trial",
+        status: "trialing",
+        trialStart: new Date("2026-06-01T00:00:00.000Z"),
+        trialEnd: new Date("2026-06-13T00:00:00.000Z"),
+      } as any,
+      { allowed: true },
+      new Date("2026-06-11T00:00:00.000Z"),
+    )).toEqual({
+      planId: "trial",
+      status: "trialing",
+      accessCode: null,
+      primaryAction: "choose_plan",
+      upgradeRecommended: true,
+      trial: {
+        startedAt: new Date("2026-06-01T00:00:00.000Z"),
+        endsAt: new Date("2026-06-13T00:00:00.000Z"),
+        daysRemaining: 2,
+        expired: false,
+        endsSoon: true,
+      },
+    });
 
     const period = periodForSubscription({
       currentPeriodStart: new Date("2026-06-01T00:00:00.000Z"),

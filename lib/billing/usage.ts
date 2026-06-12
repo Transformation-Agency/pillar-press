@@ -63,6 +63,8 @@ export type BillingAccess =
   | { allowed: true }
   | { allowed: false; code: "subscription_required" | "subscription_inactive" | "trial_expired"; message: string };
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 function startOfUtcMonth(now: Date) {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 }
@@ -330,6 +332,43 @@ export function billingAccessForSubscription(
     };
   }
   return { allowed: true };
+}
+
+export function billingLifecycleForSubscription(
+  subscription: Pick<Subscription, "planId" | "status" | "trialStart" | "trialEnd"> | null | undefined,
+  access: BillingAccess,
+  now = new Date(),
+) {
+  const trialEnd = subscription?.trialEnd ?? null;
+  const trialStart = subscription?.trialStart ?? null;
+  const isTrial = subscription?.status === "trialing";
+  const daysRemaining = isTrial && trialEnd
+    ? Math.max(0, Math.ceil((trialEnd.getTime() - now.getTime()) / DAY_MS))
+    : null;
+  const trialExpired = access.allowed === false && access.code === "trial_expired";
+  const trialEndsSoon = isTrial && !trialExpired && daysRemaining !== null && daysRemaining <= 2;
+  const accessCode = access.allowed ? null : access.code;
+  const primaryAction =
+    accessCode === "subscription_required" || accessCode === "trial_expired" || trialEndsSoon
+      ? "choose_plan"
+      : accessCode === "subscription_inactive"
+        ? "manage_billing"
+        : "none";
+
+  return {
+    planId: subscription?.planId ?? null,
+    status: subscription?.status ?? null,
+    accessCode,
+    primaryAction,
+    upgradeRecommended: primaryAction === "choose_plan",
+    trial: {
+      startedAt: trialStart,
+      endsAt: trialEnd,
+      daysRemaining,
+      expired: trialExpired,
+      endsSoon: trialEndsSoon,
+    },
+  };
 }
 
 export function trialExpirationEventValues(input: {

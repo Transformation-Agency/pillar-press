@@ -228,6 +228,20 @@ describe("hosted billing status API", () => {
     }));
     vi.doMock("@/lib/billing/usage", () => ({
       billingAccessForSubscription: vi.fn(() => ({ allowed: true })),
+      billingLifecycleForSubscription: vi.fn(() => ({
+        planId: "trial",
+        status: "trialing",
+        accessCode: null,
+        primaryAction: "none",
+        upgradeRecommended: false,
+        trial: {
+          startedAt: null,
+          endsAt: "2099-06-08T00:00:00.000Z",
+          daysRemaining: 9999,
+          expired: false,
+          endsSoon: false,
+        },
+      })),
       getEntitlementForPlan: vi.fn(async () => entitlement),
       safeRecordTrialExpirationEvent: vi.fn(),
       usageSummaryForSubscription: vi.fn(async () => usage),
@@ -244,6 +258,20 @@ describe("hosted billing status API", () => {
       entitlement,
       usage,
       access: { allowed: true },
+      lifecycle: {
+        planId: "trial",
+        status: "trialing",
+        accessCode: null,
+        primaryAction: "none",
+        upgradeRecommended: false,
+        trial: {
+          startedAt: null,
+          endsAt: "2099-06-08T00:00:00.000Z",
+          daysRemaining: 9999,
+          expired: false,
+          endsSoon: false,
+        },
+      },
     });
   });
 
@@ -270,6 +298,20 @@ describe("hosted billing status API", () => {
         allowed: false,
         code: "trial_expired",
         message: "Your free trial has ended. Choose a plan to continue.",
+      })),
+      billingLifecycleForSubscription: vi.fn(() => ({
+        planId: "trial",
+        status: "trialing",
+        accessCode: "trial_expired",
+        primaryAction: "choose_plan",
+        upgradeRecommended: true,
+        trial: {
+          startedAt: new Date("2026-06-01T00:00:00.000Z"),
+          endsAt: new Date("2026-06-08T00:00:00.000Z"),
+          daysRemaining: 0,
+          expired: true,
+          endsSoon: false,
+        },
       })),
       getEntitlementForPlan: vi.fn(async () => ({ planId: "trial" })),
       safeRecordTrialExpirationEvent,

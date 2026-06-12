@@ -1148,17 +1148,27 @@ function BillingPanel({ open, onClose, billing, notice }) {
   if (!open) return null;
 
   const subscription = billing && billing.subscription;
+  const lifecycle = (billing && billing.lifecycle) || null;
+  const trial = lifecycle && lifecycle.trial ? lifecycle.trial : null;
   const plans = (billing && billing.plans) || [];
   const usage = billing && billing.usage;
   const dims = usage && usage.dimensions ? usage.dimensions : {};
-  const planId = subscription && subscription.planId;
-  const status = subscription && subscription.status ? subscription.status : "trialing";
+  const planId = (lifecycle && lifecycle.planId) || (subscription && subscription.planId);
+  const status = (lifecycle && lifecycle.status) || (subscription && subscription.status) || "trialing";
   const planLabel = (plans.find((p) => p.id === planId) || { name: planId === "trial" ? "Free Trial" : "Current plan" }).name;
   const accessNotice =
     notice ||
     (billing && billing.access && billing.access.allowed === false
       ? { code: billing.access.code, error: billing.access.message }
       : null);
+  const lifecycleNotice = !accessNotice && trial && (trial.expired || trial.endsSoon)
+    ? {
+        title: trial.expired ? "Trial ended" : "Trial ending soon",
+        message: trial.expired
+          ? "Your free trial has ended. Choose a plan to keep publishing."
+          : "Your trial ends in " + trial.daysRemaining + " " + (trial.daysRemaining === 1 ? "day" : "days") + ". Choose a plan now so work does not pause.",
+      }
+    : null;
 
   const money = (cents, currency) => {
     if (!cents) return "Free";
@@ -1234,7 +1244,7 @@ function BillingPanel({ open, onClose, billing, notice }) {
             <h2 style={{ margin: 0, fontFamily: "var(--font-display)", fontSize: 30, fontWeight: 500 }}>Billing and usage</h2>
             <p className="muted" style={{ margin: "8px 0 0", lineHeight: 1.5 }}>
               {planLabel} · {status}
-              {subscription && subscription.trialEnd ? " · trial ends " + dateLabel(subscription.trialEnd) : ""}
+              {trial && trial.endsAt ? " · " + (trial.expired ? "trial ended " : "trial ends ") + dateLabel(trial.endsAt) : ""}
             </p>
           </div>
           <button className="icon-btn" onClick={onClose} title="Close billing"><Icon name="xLogo" size={14} /></button>
@@ -1251,6 +1261,20 @@ function BillingPanel({ open, onClose, billing, notice }) {
               <strong>{noticeTitle}</strong>
               <p style={{ margin: "6px 0 0", color: "var(--muted)", lineHeight: 1.45 }}>
                 {accessNotice.error || "Upgrade or manage billing to continue this workflow."}
+              </p>
+            </div>
+          )}
+
+          {lifecycleNotice && (
+            <div role="status" style={{
+              border: "1px solid var(--accent)",
+              borderRadius: 12,
+              padding: 13,
+              background: "color-mix(in oklch, var(--accent) 8%, var(--paper-2))",
+            }}>
+              <strong>{lifecycleNotice.title}</strong>
+              <p style={{ margin: "6px 0 0", color: "var(--muted)", lineHeight: 1.45 }}>
+                {lifecycleNotice.message}
               </p>
             </div>
           )}
