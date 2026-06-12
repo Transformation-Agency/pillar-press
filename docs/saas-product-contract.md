@@ -546,8 +546,10 @@ Stage 3 is complete only when:
   implemented; hosted setup/UI media profile management can add, replace, and
   remove encrypted media profiles, test saved profiles without exposing keys,
   and read provider help/default metadata from the secret-free provider catalog;
-  the remaining proof point is live provider smoke coverage against staging
-  BYOK keys.
+  route-level tests now prove hosted OpenAI image, OpenAI audio via compatible
+  LLM BYOK, and Hedra generation consume saved BYOK profiles without leaking
+  raw keys. The remaining proof point is live provider smoke coverage against
+  staging BYOK keys.
 - Usage rollups reflect the ledger. **Started:** `GET /api/billing/status`
   rebuilds the current billing period's `usage_rollups` row from
   `usage_events` for LLM, media, Gather, provider cost, and existing storage

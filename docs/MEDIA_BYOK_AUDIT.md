@@ -184,7 +184,10 @@ experience still needs live-provider validation before broad self-serve launch.
 7. Add tests. **Started.**
    - Media settings encryption tests for `kind = "media"`.
    - Route tests proving hosted media generation uses BYOK keys without reading
-     env keys.
+     env keys. **Implemented:** `__tests__/media-generation-byok.test.ts`
+     proves hosted OpenAI image generation through a saved media profile,
+     hosted OpenAI audio generation through a compatible LLM BYOK profile, and
+     hosted Hedra generation through a saved Hedra media profile.
    - Route tests proving managed media generation requires managed-provider
      access.
    - Route tests proving BYOK media generation requires BYOK-provider access.
