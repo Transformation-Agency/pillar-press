@@ -95,7 +95,7 @@ describe("hosted auth API contract", () => {
   });
 
   it("bootstraps a workspace for an authenticated hosted user without membership", async () => {
-    const getOrCreateWorkspace = vi.fn(async () => "workspace_1");
+    const ensureWorkspaceForUser = vi.fn(async (user) => ({ ...user, workspaceId: "workspace_1", role: "author" }));
     const getOrCreateTrialSubscription = vi.fn(async () => ({
       id: "sub_trial_1",
       planId: "trial",
@@ -110,7 +110,7 @@ describe("hosted auth API contract", () => {
     }));
     vi.doMock("@/lib/auth", () => ({
       getCurrentUser: vi.fn(async () => ({ id: "user_1" })),
-      getOrCreateWorkspace,
+      ensureWorkspaceForUser,
       isAuthDisabled: () => false,
     }));
     vi.doMock("@/lib/billing/stripe", () => ({
@@ -122,9 +122,9 @@ describe("hosted auth API contract", () => {
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(getOrCreateWorkspace).toHaveBeenCalledWith("user_1");
+    expect(ensureWorkspaceForUser).toHaveBeenCalledWith({ id: "user_1" });
     expect(getOrCreateTrialSubscription).toHaveBeenCalledWith(
-      { id: "user_1", workspaceId: "workspace_1" },
+      { id: "user_1", workspaceId: "workspace_1", role: "author" },
       "auth_session",
     );
     expect(body).toEqual({
@@ -153,7 +153,7 @@ describe("hosted auth API contract", () => {
     }));
     vi.doMock("@/lib/auth", () => ({
       getCurrentUser: vi.fn(async () => null),
-      getOrCreateWorkspace: vi.fn(),
+      ensureWorkspaceForUser: vi.fn(),
       isAuthDisabled: () => false,
     }));
     vi.doMock("@/lib/billing/stripe", () => ({
@@ -166,5 +166,49 @@ describe("hosted auth API contract", () => {
 
     expect(res.status).toBe(401);
     expect(body).toEqual({ authenticated: false, user: null });
+  });
+
+  it("requireUser bootstraps a workspace for authenticated hosted users before normal API routes run", async () => {
+    vi.doUnmock("@/lib/auth");
+    const seedWorkspace = vi.fn(async () => undefined);
+    const membershipSelectWhere = vi.fn(async () => []);
+    const from = vi.fn(() => ({ where: membershipSelectWhere }));
+    const select = vi.fn(() => ({ from }));
+    const returning = vi.fn(async () => [{ id: "workspace_1" }]);
+    const values = vi.fn((row: Record<string, unknown>) => (
+      row && Object.prototype.hasOwnProperty.call(row, "name")
+        ? { returning }
+        : undefined
+    ));
+    const insert = vi.fn(() => ({ values }));
+
+    vi.doMock("next/headers", () => ({
+      headers: vi.fn(async () => new Headers({ "x-debug-user": "user_1" })),
+      cookies: vi.fn(async () => ({ get: vi.fn(() => undefined) })),
+    }));
+    vi.doMock("@/lib/local/mode", () => ({
+      isHostedWebMode: () => true,
+      isLocalFirstMode: () => false,
+    }));
+    vi.doMock("@/lib/db", async () => {
+      const actual = await vi.importActual<any>("@/lib/db");
+      return { ...actual, db: { select, insert } };
+    });
+    vi.doMock("@/lib/seed", () => ({ seedWorkspace }));
+
+    const { requireUser } = await import("@/lib/auth");
+
+    await expect(requireUser()).resolves.toEqual({
+      id: "user_1",
+      workspaceId: "workspace_1",
+      role: "author",
+    });
+    expect(returning).toHaveBeenCalledTimes(1);
+    expect(values).toHaveBeenCalledWith(expect.objectContaining({
+      workspaceId: "workspace_1",
+      userId: "user_1",
+      role: "author",
+    }));
+    expect(seedWorkspace).toHaveBeenCalledWith(expect.anything(), "workspace_1");
   });
 });

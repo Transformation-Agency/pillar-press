@@ -151,7 +151,17 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
 export async function requireUser(): Promise<SessionUser> {
   const u = await getCurrentUser();
   if (!u) throw unauthorized();
-  return u;
+  return ensureWorkspaceForUser(u);
+}
+
+export async function ensureWorkspaceForUser(user: SessionUser): Promise<SessionUser & { workspaceId: string }> {
+  if (user.workspaceId) return { ...user, workspaceId: user.workspaceId };
+  if (isLocalFirstMode()) {
+    const workspaceId = ensureLocalWorkspace(user.id);
+    return { ...user, workspaceId, role: user.role ?? "author" };
+  }
+  const workspaceId = await getOrCreateWorkspace(user.id);
+  return { ...user, workspaceId, role: user.role ?? "author" };
 }
 
 /**

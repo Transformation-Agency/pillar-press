@@ -424,9 +424,10 @@ Stage 1 is complete only when:
   has a hosted sign-in/sign-up gate, and `/api/auth/session` bootstraps a
   workspace plus the initial trial subscription row for authenticated Supabase
   users with no membership.
-- `requireUser()` resolves a Supabase user and workspace membership. **Started:**
-  browser API calls attach the Supabase bearer token; the existing server auth
-  layer validates it and resolves membership.
+- `requireUser()` resolves a Supabase user and workspace membership.
+  **Implemented:** browser API calls attach the Supabase bearer token; the server
+  auth layer validates it, resolves membership, and bootstraps a workspace before
+  normal API routes run if an authenticated user has no membership yet.
 - Cross-workspace object access is denied and tested. **Started:** shared
   campaign/workspace scope helper plus regression tests now guard the hosted
   contract; Gather sources/items/runs and media jobs/prompt/status/export
