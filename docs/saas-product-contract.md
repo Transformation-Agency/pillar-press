@@ -479,9 +479,10 @@ Stage 2 is complete only when:
   in-app plan-change flow is added.
 - Stripe Customer Portal opens for the workspace billing customer.
   **Implemented:** `POST /api/billing/portal` returns a hosted portal URL.
-  Checkout and Portal creation default the Stripe billing customer email from
-  the authenticated hosted account, and existing customer rows created before
-  email capture are repaired when a verified account email is available.
+  Checkout and Portal creation use the authenticated hosted account email;
+  browser-supplied billing email fields are ignored, and existing customer rows
+  created before email capture are repaired when a verified account email is
+  available.
 - Webhooks verify signatures and sync DB state. **Implemented:**
   `POST /api/billing/webhook` verifies the raw Stripe payload and syncs
   subscription created/updated/deleted plus Checkout completion events.

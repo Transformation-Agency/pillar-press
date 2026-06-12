@@ -16,7 +16,6 @@ export const runtime = "nodejs";
 
 const CheckoutBody = z.object({
   planId: z.string().min(1).max(80),
-  email: z.string().email().optional(),
 });
 
 const PORTAL_MANAGED_STATUSES = new Set(["active", "trialing", "past_due", "unpaid", "paused"]);
@@ -44,7 +43,7 @@ export async function POST(req: Request) {
     const customer = await getOrCreateBillingCustomer({
       workspaceId: user.workspaceId,
       userId: user.id,
-      email: body.email ?? user.email,
+      email: user.email,
     });
 
     const baseUrl = appBaseUrl(req);

@@ -12,18 +12,16 @@ import {
 
 export const runtime = "nodejs";
 
-const PortalBody = z.object({
-  email: z.string().email().optional(),
-});
+const PortalBody = z.object({});
 
 export async function POST(req: Request) {
   try {
     const user = await requireBillingUser();
-    const body = PortalBody.parse(await req.json().catch(() => ({})));
+    PortalBody.parse(await req.json().catch(() => ({})));
     const customer = await getOrCreateBillingCustomer({
       workspaceId: user.workspaceId,
       userId: user.id,
-      email: body.email ?? user.email,
+      email: user.email,
     });
 
     if (!customer.stripeCustomerId) {

@@ -85,6 +85,10 @@ Routes:
 - `POST /api/billing/webhook` verifies the raw Stripe webhook payload using
   `STRIPE_WEBHOOK_SECRET` and syncs subscription state back into Postgres.
 
+Checkout and Portal customer creation use the authenticated hosted account
+email. Browser-supplied billing email fields are ignored so one signed-in
+account cannot steer billing records toward a different email.
+
 In Stripe, point the webhook endpoint at:
 
 ```text

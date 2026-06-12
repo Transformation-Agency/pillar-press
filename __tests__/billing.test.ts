@@ -623,7 +623,7 @@ describe("hosted billing session audit events", () => {
     const { POST } = await import("../app/api/billing/checkout/route");
     const res = await POST(new Request("https://kingspress.test/api/billing/checkout", {
       method: "POST",
-      body: JSON.stringify({ planId: "pro" }),
+      body: JSON.stringify({ planId: "pro", email: "attacker@example.com" }),
     }));
     const body = await res.json();
 
@@ -651,6 +651,8 @@ describe("hosted billing session audit events", () => {
       },
     });
     expect(JSON.stringify(safeRecordAuditEvent.mock.calls)).not.toContain("private@example.com");
+    expect(JSON.stringify(getOrCreateBillingCustomer.mock.calls)).not.toContain("attacker@example.com");
+    expect(JSON.stringify(safeRecordAuditEvent.mock.calls)).not.toContain("attacker@example.com");
   });
 
   it("does not create a duplicate Checkout session for the active current plan", async () => {
@@ -779,7 +781,7 @@ describe("hosted billing session audit events", () => {
     const { POST } = await import("../app/api/billing/portal/route");
     const res = await POST(new Request("https://kingspress.test/api/billing/portal", {
       method: "POST",
-      body: JSON.stringify({}),
+      body: JSON.stringify({ email: "attacker@example.com" }),
     }));
     const body = await res.json();
 
@@ -805,5 +807,7 @@ describe("hosted billing session audit events", () => {
       },
     });
     expect(JSON.stringify(safeRecordAuditEvent.mock.calls)).not.toContain("private@example.com");
+    expect(JSON.stringify(getOrCreateBillingCustomer.mock.calls)).not.toContain("attacker@example.com");
+    expect(JSON.stringify(safeRecordAuditEvent.mock.calls)).not.toContain("attacker@example.com");
   });
 });
