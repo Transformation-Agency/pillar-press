@@ -11,6 +11,17 @@ export async function generateOpenAICompatibleSpeech(input: {
   voice?: string;
   user?: SessionUser | null;
 }) {
+  const result = await synthesizeOpenAICompatibleSpeech(input);
+  const outputUrl = await uploadPublicAudio(result.bytes, `voiceover-${Date.now()}.mp3`, { user: input.user });
+  return { outputUrl, downloadUrl: outputUrl, voice: result.voice };
+}
+
+export async function synthesizeOpenAICompatibleSpeech(input: {
+  config: AudioProviderConfig;
+  model: string;
+  text: string;
+  voice?: string;
+}) {
   const voice = input.voice && OPENAI_VOICES.has(input.voice) ? input.voice : "alloy";
   const res = await fetch(`${input.config.baseUrl}/audio/speech`, {
     method: "POST",
@@ -31,6 +42,5 @@ export async function generateOpenAICompatibleSpeech(input: {
     throw new Error(`Audio provider request failed (${res.status}).`);
   }
   const bytes = Buffer.from(await res.arrayBuffer());
-  const outputUrl = await uploadPublicAudio(bytes, `voiceover-${Date.now()}.mp3`, { user: input.user });
-  return { outputUrl, downloadUrl: outputUrl, voice };
+  return { bytes, voice };
 }

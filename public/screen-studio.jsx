@@ -543,6 +543,7 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
       // the seed is art-directed server-side (enhance on).
       kind: type, prompt: usingDirected ? directed.trim() : (prompt || (isVoiceModel ? script : "")), modelId: model.id, modelName: model.name,
       provider: model.provider || "hedra",
+      mediaProfileId: model.profileId || null,
       aspect: model.aspectRatios.length ? aspect : (type === "audio" ? null : aspect),
       resolution: model.resolutions.length ? resolution : null,
       duration: model.durations.length ? duration : null,

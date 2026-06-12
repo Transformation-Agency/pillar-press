@@ -2,8 +2,10 @@ import { desktopMediaProvider } from "@/lib/desktopSettings";
 import type { SessionUser } from "@/lib/auth";
 import { isLocalFirstMode } from "@/lib/local/mode";
 import {
+  getHostedMediaProviderProfile,
   getHostedMediaProviderProfileForProvider,
   getHostedMediaProviderSettings,
+  type HostedMediaProviderProfileSecret,
   type HostedMediaProviderProfileView,
   type MediaProvider,
 } from "@/lib/mediaProviderSettings";
@@ -26,6 +28,7 @@ export type MediaModelInfo = {
   name: string;
   type: MediaCapability;
   provider: string;
+  profileId?: string;
   aspectRatios?: string[];
   resolutions?: string[];
   durations?: number[];
@@ -255,6 +258,7 @@ function modelForProfile(profile: HostedMediaProviderProfileView): MediaModelInf
       name: profile.model,
       type: "audio",
       provider: "elevenlabs",
+      profileId: profile.id,
       credits: 1,
       requires: { prompt: true, voice: true },
     };
@@ -265,6 +269,7 @@ function modelForProfile(profile: HostedMediaProviderProfileView): MediaModelInf
       name: profile.model,
       type: profile.model.includes("tts") ? "audio" : "image",
       provider: "openai",
+      profileId: profile.id,
       aspectRatios: ["1:1", "4:5", "16:9", "9:16"],
       resolutions: ["1024x1024", "1024x1536", "1536x1024", "auto"],
       credits: 1,
@@ -277,6 +282,7 @@ function modelForProfile(profile: HostedMediaProviderProfileView): MediaModelInf
       name: profile.model,
       type: "image",
       provider: profile.provider,
+      profileId: profile.id,
       aspectRatios: ["1:1", "4:5", "16:9", "9:16"],
       resolutions: ["1024x1024", "1024x1536", "1536x1024", "auto"],
       credits: 1,
@@ -346,21 +352,40 @@ function supportsImageProvider(provider: string | undefined): provider is ImageP
   return provider === "openai" || provider === "xai" || provider === "custom-image";
 }
 
+async function hostedMediaProfileById(
+  user: Pick<SessionUser, "id" | "workspaceId">,
+  profileId: string | undefined | null,
+): Promise<HostedMediaProviderProfileSecret | null> {
+  if (isLocalFirstMode() || !user.workspaceId || !profileId) return null;
+  return getHostedMediaProviderProfile(user, profileId);
+}
+
 export async function getImageProviderForUser(
   provider: string | undefined,
   user: Pick<SessionUser, "id" | "workspaceId">,
   env: NodeJS.ProcessEnv = process.env,
+  profileId?: string,
 ): Promise<ImageProviderConfig | null> {
-  if (!supportsImageProvider(provider)) return null;
+  const exact = await hostedMediaProfileById(user, profileId);
+  const selectedProvider = exact?.provider ?? provider;
+  if (!supportsImageProvider(selectedProvider)) return null;
+  if (exact) {
+    const apiKey = exact.apiKey?.trim();
+    const baseUrl = (exact.baseUrl || defaultMediaBaseUrl(selectedProvider)).trim().replace(/\/$/, "");
+    if (apiKey && baseUrl) {
+      return { provider: selectedProvider, apiKey, baseUrl, providerSource: "byok", profileId: exact.id };
+    }
+    return null;
+  }
   if (!isLocalFirstMode() && user.workspaceId) {
-    const saved = await getHostedMediaProviderProfileForProvider(user, provider);
+    const saved = await getHostedMediaProviderProfileForProvider(user, selectedProvider);
     const apiKey = saved?.apiKey?.trim();
-    const baseUrl = (saved?.baseUrl || defaultMediaBaseUrl(provider)).trim().replace(/\/$/, "");
+    const baseUrl = (saved?.baseUrl || defaultMediaBaseUrl(selectedProvider)).trim().replace(/\/$/, "");
     if (saved && apiKey && baseUrl) {
-      return { provider, apiKey, baseUrl, providerSource: "byok", profileId: saved.id };
+      return { provider: selectedProvider, apiKey, baseUrl, providerSource: "byok", profileId: saved.id };
     }
   }
-  const managed = getImageProviderConfig(provider, env);
+  const managed = getImageProviderConfig(selectedProvider, env);
   return managed ? { ...managed, providerSource: "managed" } : null;
 }
 
@@ -378,8 +403,19 @@ export async function getAudioProviderForUser(
   provider: string | undefined,
   user: Pick<SessionUser, "id" | "workspaceId">,
   env: NodeJS.ProcessEnv = process.env,
+  profileId?: string,
 ): Promise<AudioProviderConfig | null> {
-  if (provider !== "openai") return null;
+  const exact = await hostedMediaProfileById(user, profileId);
+  const selectedProvider = exact?.provider ?? provider;
+  if (selectedProvider !== "openai") return null;
+  if (exact) {
+    const apiKey = exact.apiKey?.trim();
+    const baseUrl = (exact.baseUrl || defaultMediaBaseUrl("openai")).trim().replace(/\/$/, "");
+    if (apiKey && baseUrl) {
+      return { provider: "openai", apiKey, baseUrl, providerSource: "byok", profileId: exact.id };
+    }
+    return null;
+  }
   if (!isLocalFirstMode() && user.workspaceId) {
     const saved = await getHostedMediaProviderProfileForProvider(user, "openai");
     const apiKey = saved?.apiKey?.trim();
@@ -396,7 +432,14 @@ async function getSecretProviderForUser(
   provider: "hedra" | "elevenlabs",
   user: Pick<SessionUser, "id" | "workspaceId">,
   env: NodeJS.ProcessEnv = process.env,
+  profileId?: string,
 ): Promise<MediaSecretConfig | null> {
+  const exact = await hostedMediaProfileById(user, profileId);
+  if (exact) {
+    if (exact.provider !== provider) return null;
+    const apiKey = exact.apiKey?.trim();
+    return apiKey ? { provider, apiKey, providerSource: "byok", profileId: exact.id } : null;
+  }
   if (!isLocalFirstMode() && user.workspaceId) {
     const saved = await getHostedMediaProviderProfileForProvider(user, provider);
     const apiKey = saved?.apiKey?.trim();
@@ -411,13 +454,15 @@ async function getSecretProviderForUser(
 export function getHedraProviderForUser(
   user: Pick<SessionUser, "id" | "workspaceId">,
   env: NodeJS.ProcessEnv = process.env,
+  profileId?: string,
 ): Promise<MediaSecretConfig | null> {
-  return getSecretProviderForUser("hedra", user, env);
+  return getSecretProviderForUser("hedra", user, env, profileId);
 }
 
 export function getElevenLabsProviderForUser(
   user: Pick<SessionUser, "id" | "workspaceId">,
   env: NodeJS.ProcessEnv = process.env,
+  profileId?: string,
 ): Promise<MediaSecretConfig | null> {
-  return getSecretProviderForUser("elevenlabs", user, env);
+  return getSecretProviderForUser("elevenlabs", user, env, profileId);
 }

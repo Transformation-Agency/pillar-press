@@ -129,3 +129,173 @@ describe("hosted background jobs", () => {
     }));
   });
 });
+
+describe("hosted background job runner", () => {
+  it("runs a queued Gather job with usage reservation and secret-free completion", async () => {
+    const job = {
+      id: "job_1",
+      workspaceId: "workspace_1",
+      userId: "user_1",
+      campaignId: "campaign_1",
+      pieceId: null,
+      kind: "gather_run",
+      status: "processing",
+      priority: 0,
+      runAfter: new Date(),
+      lockedBy: "worker_1",
+      lockedAt: new Date(),
+      attempts: 1,
+      maxAttempts: 3,
+      idempotencyKey: "gather:campaign_1",
+      payload: { campaignId: "campaign_1" },
+      result: {},
+      errorCode: null,
+      errorMessage: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      completedAt: null,
+    };
+    const claimNextBackgroundJob = vi.fn(async () => job);
+    const completeBackgroundJob = vi.fn(async () => ({ ...job, status: "succeeded" }));
+    const failBackgroundJob = vi.fn();
+    const reserveUsage = vi.fn(async () => ({ id: "usage_1", workspaceId: "workspace_1", idempotencyKey: "background:job_1:gather" }));
+    const completeUsageReservation = vi.fn();
+    const failUsageReservation = vi.fn();
+    const ai = {};
+    const getAIForTaskForUser = vi.fn(async () => ({
+      ai,
+      providerSource: "byok",
+      provider: "openai",
+      model: "gpt-4o-mini",
+      profileId: "profile_1",
+    }));
+    const runGatherForCampaign = vi.fn(async () => ({
+      found: 5,
+      saved: 2,
+      perSource: { source_1: 5 },
+      summaries: [{ sourceId: "source_1", text: "Summary" }],
+    }));
+
+    vi.doMock("@/lib/jobs/background", () => ({
+      claimNextBackgroundJob,
+      completeBackgroundJob,
+      failBackgroundJob,
+    }));
+    vi.doMock("@/lib/billing/usage", () => ({
+      reserveUsage,
+      completeUsageReservation,
+      failUsageReservation,
+    }));
+    vi.doMock("@/lib/llm", () => ({ getAIForTaskForUser }));
+    vi.doMock("@/lib/gather/runCampaign", () => ({ runGatherForCampaign }));
+
+    const { runNextBackgroundJob } = await import("@/lib/jobs/runner");
+    const result = await runNextBackgroundJob({ workerId: "worker_1" });
+
+    expect(result).toEqual({
+      claimed: true,
+      jobId: "job_1",
+      kind: "gather_run",
+      status: "succeeded",
+      result: {
+        found: 5,
+        saved: 2,
+        sourceCount: 1,
+        summaryCount: 1,
+      },
+    });
+    expect(claimNextBackgroundJob).toHaveBeenCalledWith({ workerId: "worker_1", kinds: ["gather_run"] });
+    expect(getAIForTaskForUser).toHaveBeenCalledWith("gather", { id: "user_1", workspaceId: "workspace_1", role: "author" });
+    expect(reserveUsage).toHaveBeenCalledWith(expect.objectContaining({
+      task: "gather",
+      feature: "jobs.gather_run",
+      campaignId: "campaign_1",
+      idempotencyKey: "background:job_1:gather",
+      providerSource: "byok",
+      provider: "openai",
+      model: "gpt-4o-mini",
+      metadata: { backgroundJobId: "job_1", profileId: "profile_1" },
+    }));
+    expect(runGatherForCampaign).toHaveBeenCalledWith("campaign_1", { id: "user_1", workspaceId: "workspace_1", role: "author" }, ai);
+    expect(completeUsageReservation).toHaveBeenCalledWith(
+      { id: "usage_1", workspaceId: "workspace_1", idempotencyKey: "background:job_1:gather" },
+      { actualCredits: 1, metadata: { backgroundJobId: "job_1", found: 5, saved: 2 } },
+    );
+    expect(completeBackgroundJob).toHaveBeenCalledWith(job, {
+      found: 5,
+      saved: 2,
+      sourceCount: 1,
+      summaryCount: 1,
+    });
+    expect(failUsageReservation).not.toHaveBeenCalled();
+    expect(failBackgroundJob).not.toHaveBeenCalled();
+  });
+
+  it("fails or requeues the job when Gather processing fails", async () => {
+    const job = {
+      id: "job_1",
+      workspaceId: "workspace_1",
+      userId: "user_1",
+      campaignId: "campaign_1",
+      pieceId: null,
+      kind: "gather_run",
+      status: "processing",
+      priority: 0,
+      runAfter: new Date(),
+      lockedBy: "worker_1",
+      lockedAt: new Date(),
+      attempts: 1,
+      maxAttempts: 3,
+      idempotencyKey: "gather:campaign_1",
+      payload: {},
+      result: {},
+      errorCode: null,
+      errorMessage: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      completedAt: null,
+    };
+    const error = new Error("Provider unavailable");
+    const claimNextBackgroundJob = vi.fn(async () => job);
+    const failBackgroundJob = vi.fn(async () => ({ ...job, status: "queued", errorMessage: error.message }));
+    const reserveUsage = vi.fn(async () => ({ id: "usage_1", workspaceId: "workspace_1", idempotencyKey: "background:job_1:gather" }));
+    const failUsageReservation = vi.fn();
+
+    vi.doMock("@/lib/jobs/background", () => ({
+      claimNextBackgroundJob,
+      completeBackgroundJob: vi.fn(),
+      failBackgroundJob,
+    }));
+    vi.doMock("@/lib/billing/usage", () => ({
+      reserveUsage,
+      completeUsageReservation: vi.fn(),
+      failUsageReservation,
+    }));
+    vi.doMock("@/lib/llm", () => ({
+      getAIForTaskForUser: vi.fn(async () => ({
+        ai: {},
+        providerSource: "managed",
+        provider: "anthropic",
+        model: "claude-haiku-4-5",
+      })),
+    }));
+    vi.doMock("@/lib/gather/runCampaign", () => ({
+      runGatherForCampaign: vi.fn(async () => { throw error; }),
+    }));
+
+    const { runNextBackgroundJob } = await import("@/lib/jobs/runner");
+    const result = await runNextBackgroundJob({ workerId: "worker_1" });
+
+    expect(result).toMatchObject({
+      claimed: true,
+      jobId: "job_1",
+      status: "requeued",
+      error: "Provider unavailable",
+    });
+    expect(failUsageReservation).toHaveBeenCalledWith(
+      { id: "usage_1", workspaceId: "workspace_1", idempotencyKey: "background:job_1:gather" },
+      error,
+    );
+    expect(failBackgroundJob).toHaveBeenCalledWith(job, error);
+  });
+});

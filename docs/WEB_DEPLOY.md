@@ -38,6 +38,7 @@ STRIPE_PRICE_STARTER=price_...
 STRIPE_PRICE_PRO=price_...
 
 KINGS_PRESS_HOSTED_SECRET_KEY=<long random encryption secret>
+KINGS_PRESS_JOB_SECRET=<long random worker secret>
 ```
 
 With `AUTH_DISABLED=false`, the static browser app shows a King's Press
@@ -132,7 +133,31 @@ psql "$DATABASE_URL" -f db/migrations/0005_gather_summary.sql
 psql "$DATABASE_URL" -f db/migrations/0006_saas_foundation.sql
 psql "$DATABASE_URL" -f db/migrations/0007_gather_schedules.sql
 psql "$DATABASE_URL" -f db/migrations/0008_provider_secrets.sql
+psql "$DATABASE_URL" -f db/migrations/0009_background_jobs.sql
 ```
+
+## Background Jobs
+
+Hosted long-running work uses the `background_jobs` table. The first worker
+entry point can claim and run queued Gather jobs.
+
+Set a server-only worker secret:
+
+```bash
+KINGS_PRESS_JOB_SECRET=<long random worker secret>
+```
+
+Then call the worker endpoint from a cron, scheduled function, or VPS timer:
+
+```bash
+curl -X POST "https://your-domain.example/api/jobs/run" \
+  -H "Authorization: Bearer $KINGS_PRESS_JOB_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{"workerId":"hosted-cron-1","limit":3}'
+```
+
+The endpoint returns how many jobs were processed. It does not accept provider
+keys or user secrets.
 
 ## Hetzner Or Any VPS
 
@@ -148,6 +173,7 @@ psql "$DATABASE_URL" -f db/migrations/0005_gather_summary.sql
 psql "$DATABASE_URL" -f db/migrations/0006_saas_foundation.sql
 psql "$DATABASE_URL" -f db/migrations/0007_gather_schedules.sql
 psql "$DATABASE_URL" -f db/migrations/0008_provider_secrets.sql
+psql "$DATABASE_URL" -f db/migrations/0009_background_jobs.sql
 npm run web:build
 PORT=3000 npm run web:start
 ```

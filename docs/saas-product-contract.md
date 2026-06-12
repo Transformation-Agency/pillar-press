@@ -28,8 +28,10 @@ Do this as a staged migration, not a rewrite.
    or `trial_expired`.
 6. Stage 5: workers/jobs for long-running Gather, Weave, media, and batch work.
    **Started:** a hosted `background_jobs` table plus typed enqueue/claim/
-   complete/fail/cancel helpers now provide the database-backed queue
-   foundation for moving long operations out of synchronous API requests.
+   complete/fail/cancel helpers and a secret-protected worker endpoint now
+   provide the database-backed queue foundation for moving long operations out
+   of synchronous API requests. The first registered worker kind is
+   `gather_run`.
 7. Stage 6: production ops, admin, support, observability, and launch gates.
    **Started:** sensitive hosted mutations now record sanitized audit events for
    Stripe webhooks, billing Checkout/Portal sessions, and hosted LLM/media BYOK
@@ -525,8 +527,9 @@ Stage 3 is complete only when:
    `lifecycle` object for trial ending/expired/upgrade actions; hosted API
    billing-blocked responses open the same panel with context.
 9. Stage 5: introduce a worker/job runner for long operations. **Started:**
-   `db/migrations/0009_background_jobs.sql`, `db/schema.ts`, and
-   `lib/jobs/background.ts` define the hosted queue foundation; the next step is
-   wiring selected long-running routes to enqueue jobs and adding a worker entry
-   point.
+   `db/migrations/0009_background_jobs.sql`, `db/schema.ts`,
+   `lib/jobs/background.ts`, `lib/jobs/runner.ts`, and `POST /api/jobs/run`
+   define the hosted queue and a secret-protected worker entry point. The next
+   step is wiring selected long-running routes to enqueue jobs instead of
+   executing synchronously.
 10. Stage 6: add admin/support tooling and production observability.

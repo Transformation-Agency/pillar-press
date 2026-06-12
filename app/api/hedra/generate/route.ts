@@ -30,7 +30,7 @@ import {
   type MediaSecretConfig,
 } from "@/lib/mediaProviders";
 import { generateOpenAICompatibleImage } from "@/lib/mediaImage";
-import { generateOpenAICompatibleSpeech } from "@/lib/mediaAudio";
+import { generateOpenAICompatibleSpeech, synthesizeOpenAICompatibleSpeech } from "@/lib/mediaAudio";
 import { campaignInWorkspace, tenantNotFound } from "@/lib/tenant";
 import { completeUsageReservation, failUsageReservation, reserveUsage, type UsageReservation } from "@/lib/billing/usage";
 import { requireByokProviderAccess, requireConcurrentJobCapacity, requireManagedProviderAccess } from "@/lib/billing/entitlements";
@@ -83,7 +83,10 @@ function profileMetadata(config: { providerSource?: MediaProviderSource; profile
   };
 }
 
-function combinedSource(primary: MediaSecretConfig | null, secondary: MediaSecretConfig | null): MediaProviderSource {
+function combinedSource(
+  primary: { providerSource?: MediaProviderSource } | null,
+  secondary: { providerSource?: MediaProviderSource } | null,
+): MediaProviderSource {
   return primary?.providerSource === "byok" && (!secondary || secondary.providerSource === "byok")
     ? "byok"
     : "managed";
@@ -119,8 +122,8 @@ export async function POST(req: Request) {
       const script = sanitizeText(body.script || body.prompt, 100000);
       if (!script) return NextResponse.json({ error: "Provide a script to voice.", code: "validation" }, { status: 422 });
 
-      const audioProvider = await getAudioProviderForUser(body.provider, user);
-      const elevenProvider = audioProvider ? null : await getElevenLabsProviderForUser(user);
+      const audioProvider = await getAudioProviderForUser(body.provider, user, process.env, body.mediaProfileId);
+      const elevenProvider = audioProvider ? null : await getElevenLabsProviderForUser(user, process.env, body.mediaProfileId);
       const usageSource = audioProvider?.providerSource ?? elevenProvider?.providerSource ?? "managed";
       const usageProfileId = audioProvider?.profileId ?? elevenProvider?.profileId;
       reservation = await reserveUsage({
@@ -203,7 +206,7 @@ export async function POST(req: Request) {
     }
 
     // ── OpenAI-compatible image providers ─────────────────────────────────
-    const imageProvider = await getImageProviderForUser(body.provider, user);
+    const imageProvider = await getImageProviderForUser(body.provider, user, process.env, body.mediaProfileId);
     if (body.type === "image" && imageProvider) {
       const prompt = sanitizeText(body.prompt, 2000);
       if (!prompt) return NextResponse.json({ error: "Provide an image prompt.", code: "validation" }, { status: 422 });
@@ -280,10 +283,11 @@ export async function POST(req: Request) {
 
     // ── Image / Video / Avatar (Hedra) ─────────────────────────────────────
     const wanted: GenerationType = body.type === "avatar_video" ? "video" : (body.type as GenerationType);
-    const hedraProvider = await getHedraProviderForUser(user);
+    const hedraProvider = await getHedraProviderForUser(user, process.env, body.mediaProfileId);
     const needsVoiceover = !body.audioAssetId && Boolean(body.script) && (body.type === "avatar_video" || body.type === "video");
-    const voiceoverProvider = needsVoiceover ? await getElevenLabsProviderForUser(user) : null;
-    const providerSource = combinedSource(hedraProvider, voiceoverProvider);
+    const voiceoverAudioProvider = needsVoiceover ? await getAudioProviderForUser("openai", user) : null;
+    const voiceoverProvider = needsVoiceover && !voiceoverAudioProvider ? await getElevenLabsProviderForUser(user) : null;
+    const providerSource = combinedSource(hedraProvider, voiceoverAudioProvider ?? voiceoverProvider);
     await requireMediaProviderAccessForSource(user, providerSource);
     const models = await listModels([wanted], { apiKey: hedraProvider?.apiKey });
     const model = models.find((m) => m.id === body.modelId);
@@ -303,6 +307,7 @@ export async function POST(req: Request) {
       model: body.modelId,
       metadata: {
         ...(hedraProvider?.profileId ? { profileId: hedraProvider.profileId, hedraProfileId: hedraProvider.profileId } : {}),
+        ...(voiceoverAudioProvider?.profileId ? { audioProfileId: voiceoverAudioProvider.profileId } : {}),
         ...(voiceoverProvider?.profileId ? { elevenlabsProfileId: voiceoverProvider.profileId } : {}),
       },
     });
@@ -339,11 +344,18 @@ export async function POST(req: Request) {
 
     // Voiceover for avatar/synced video: render TTS and upload it to Hedra.
     if (!audioAssetId && body.script && (body.type === "avatar_video" || body.type === "video")) {
-      const buf = await textToSpeechLong({
-        text: sanitizeText(body.script, 100000),
-        voiceId: body.voiceId ?? "",
-        apiKey: voiceoverProvider?.apiKey,
-      });
+      const buf = voiceoverAudioProvider
+        ? (await synthesizeOpenAICompatibleSpeech({
+            config: voiceoverAudioProvider,
+            model: body.modelId.includes("tts") ? body.modelId : "gpt-4o-mini-tts",
+            text: sanitizeText(body.script, 100000),
+            voice: body.voiceId,
+          })).bytes
+        : await textToSpeechLong({
+            text: sanitizeText(body.script, 100000),
+            voiceId: body.voiceId ?? "",
+            apiKey: voiceoverProvider?.apiKey,
+          });
       const asset = await createAsset({ name: `voiceover-${Date.now()}.mp3`, type: "audio" }, { apiKey: hedraProvider?.apiKey });
       await uploadAsset(
         asset.id,
@@ -374,6 +386,7 @@ export async function POST(req: Request) {
     meta.provider = "hedra";
     Object.assign(meta, profileMetadata(hedraProvider));
     if (hedraProvider?.profileId) meta.hedraProfileId = hedraProvider.profileId;
+    if (voiceoverAudioProvider?.profileId) meta.audioProfileId = voiceoverAudioProvider.profileId;
     if (voiceoverProvider?.profileId) meta.elevenlabsProfileId = voiceoverProvider.profileId;
     if (prof) { meta.styleRound = prof.rounds; meta.styleKnobs = prof.knobs; }
 

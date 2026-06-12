@@ -42,35 +42,68 @@ function AudioActions({ text, label = "text", filename = "audio.mp3", pieceId = 
     const body = readText();
     if (!body || saving) return;
     setSaving(true);
-    setMsg("Preparing ElevenLabs audio...");
+    setMsg("Preparing audio...");
     try {
-      const voiceRes = await fetch("/api/eleven/voices", { headers: { Accept: "application/json" } });
-      const voiceJson = await voiceRes.json().catch(() => null);
-      if (!voiceRes.ok) throw new Error((voiceJson && voiceJson.error) || "Connect ElevenLabs to save audio.");
-      const voices = voiceJson && (voiceJson.voices || voiceJson);
-      const voice = Array.isArray(voices) && voices[0];
-      const voiceId = voice && (voice.id || voice.voice_id || voice.voiceId);
-      if (!voiceId) throw new Error("No ElevenLabs voices were found.");
-
       const activeCampaign = window.Store && window.Store.activeCampaign && window.Store.activeCampaign();
-      const res = await fetch("/api/hedra/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({
+      const providerRes = await fetch("/api/media/providers", { headers: { Accept: "application/json" } });
+      const providerJson = await providerRes.json().catch(() => null);
+      const providers = providerJson && Array.isArray(providerJson.providers) ? providerJson.providers : [];
+      const openai = providers.find((p) => p && p.id === "openai" && p.configured);
+      const openaiAudioModel = openai && Array.isArray(openai.models)
+        ? openai.models.find((m) => m && m.type === "audio")
+        : null;
+      const openaiProfileId = openaiAudioModel && openaiAudioModel.profileId
+        ? openaiAudioModel.profileId
+        : openai && Array.isArray(openai.profileIds)
+          ? openai.profileIds[0]
+          : null;
+      let requestBody;
+      let voiceName = "";
+      if (openai && openaiAudioModel) {
+        requestBody = {
           type: "audio",
+          provider: "openai",
+          mediaProfileId: openaiProfileId || undefined,
+          modelId: openaiAudioModel.id || "gpt-4o-mini-tts",
+          script: body,
+          prompt: body.slice(0, 2000),
+          voiceId: "alloy",
+          pieceId,
+          campaignId: campaignId || (activeCampaign && activeCampaign.id) || undefined,
+        };
+        voiceName = "OpenAI";
+      } else {
+        const voiceRes = await fetch("/api/eleven/voices", { headers: { Accept: "application/json" } });
+        const voiceJson = await voiceRes.json().catch(() => null);
+        if (!voiceRes.ok) throw new Error((voiceJson && voiceJson.error) || "Connect OpenAI media or ElevenLabs to save audio.");
+        const voices = voiceJson && (voiceJson.voices || voiceJson);
+        const voice = Array.isArray(voices) && voices[0];
+        const voiceId = voice && (voice.id || voice.voice_id || voice.voiceId);
+        if (!voiceId) throw new Error("No saved audio voices were found.");
+        const eleven = providers.find((p) => p && p.id === "elevenlabs" && p.configured);
+        requestBody = {
+          type: "audio",
+          provider: "elevenlabs",
+          mediaProfileId: eleven && Array.isArray(eleven.profileIds) ? eleven.profileIds[0] : undefined,
           modelId: "eleven_multilingual_v2",
           script: body,
           prompt: body.slice(0, 2000),
           voiceId,
           pieceId,
           campaignId: campaignId || (activeCampaign && activeCampaign.id) || undefined,
-        }),
+        };
+        voiceName = voice.name || "ElevenLabs";
+      }
+      const res = await fetch("/api/hedra/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(requestBody),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) throw new Error((data && data.error) || "Could not save audio.");
       const job = data && data.job;
       const outputUrl = job && (job.downloadUrl || job.outputUrl);
-      setMsg("Audio saved" + (voice.name ? " with " + voice.name : "") + ".");
+      setMsg("Audio saved" + (voiceName ? " with " + voiceName : "") + ".");
       if (outputUrl) {
         const a = document.createElement("a");
         a.href = outputUrl;
