@@ -162,6 +162,12 @@ function normalizeNumber(value: unknown) {
   return 0;
 }
 
+function jsonObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
 export async function getEntitlementForPlan(planId: string) {
   return entitlementForPlan(planId);
 }
@@ -684,6 +690,15 @@ export async function completeUsageReservation(
   } = {},
 ) {
   if (!reservation) return;
+  const [existing] = await db
+    .select({ metadata: usageEvents.metadata })
+    .from(usageEvents)
+    .where(eq(usageEvents.id, reservation.id))
+    .limit(1);
+  const metadata = {
+    ...jsonObject(existing?.metadata),
+    ...jsonObject(input.metadata),
+  };
   await db
     .update(usageEvents)
     .set({
@@ -692,7 +707,7 @@ export async function completeUsageReservation(
       inputTokens: input.inputTokens ?? null,
       outputTokens: input.outputTokens ?? null,
       providerRequestId: input.providerRequestId ?? null,
-      metadata: input.metadata ?? {},
+      metadata,
       completedAt: new Date(),
       updatedAt: new Date(),
     })

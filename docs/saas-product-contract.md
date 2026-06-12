@@ -507,6 +507,11 @@ Stage 3 is complete only when:
 - Provider failure records failed usage without double-charging. **Started:**
   the first gated routes mark reserved usage as failed when downstream work
   throws.
+- Usage event metadata remains attributable after success. **Implemented:** the
+  usage completion helper merges successful provider response metadata into the
+  original reservation metadata instead of replacing it, so fields like
+  `providerSource`, `profileId`, and BYOK/managed provenance survive for billing
+  reports and support audits.
 - Idempotency keys prevent duplicate reservations. **Started:** reservations
   use the workspace/idempotency unique key and reuse existing reservations when
   a request key is repeated.

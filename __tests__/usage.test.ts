@@ -437,6 +437,43 @@ describe("hosted usage reservations", () => {
     }));
   });
 
+  it("preserves reservation metadata when marking usage succeeded", async () => {
+    const existingMetadata = {
+      providerSource: "byok",
+      profileId: "openai-gpt",
+    };
+    const set = vi.fn(() => ({ where: vi.fn(async () => undefined) }));
+    const update = vi.fn(() => ({ set }));
+    const limit = vi.fn(async () => [{ metadata: existingMetadata }]);
+    const where = vi.fn(() => ({ limit }));
+    const from = vi.fn(() => ({ where }));
+    const select = vi.fn(() => ({ from }));
+
+    vi.doMock("@/lib/db", async () => {
+      const actual = await vi.importActual<any>("@/lib/db");
+      return { ...actual, db: { select, update } };
+    });
+
+    const { completeUsageReservation } = await import("@/lib/billing/usage");
+    await completeUsageReservation(
+      { id: "usage_1", workspaceId: "workspace_1", idempotencyKey: "usage-key" },
+      {
+        actualCredits: 2,
+        metadata: { providerResponseId: "img_1" },
+      },
+    );
+
+    expect(set).toHaveBeenCalledWith(expect.objectContaining({
+      status: "succeeded",
+      actualCredits: 2,
+      metadata: {
+        providerSource: "byok",
+        profileId: "openai-gpt",
+        providerResponseId: "img_1",
+      },
+    }));
+  });
+
   it("blocks hosted BYOK reservations when the plan disallows BYOK providers", async () => {
     class MockBillingError extends Error {
       status: number;
