@@ -270,6 +270,9 @@ Important fields:
 Implemented events:
 - `started`: created when the hosted workspace first receives a trial
   subscription.
+- `ending_reminder`: created once when billing status first observes that a
+  trial is inside the ending-soon upgrade window. Metadata is limited to the
+  source, local subscription id, and days remaining.
 - `converted`: created when Stripe syncs an active/trialing paid subscription
   from Checkout completion or subscription webhooks. Metadata is limited to
   Stripe/local ids needed for support reconciliation and does not include emails,

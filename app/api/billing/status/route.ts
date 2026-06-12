@@ -9,6 +9,7 @@ import {
   billingAccessForSubscription,
   billingLifecycleForSubscription,
   getEntitlementForPlan,
+  safeRecordTrialEndingReminderEvent,
   safeRecordTrialExpirationEvent,
   usageSummaryForSubscription,
 } from "@/lib/billing/usage";
@@ -35,6 +36,13 @@ export async function GET() {
         user,
         subscription,
         source: "billing_status",
+      });
+    } else if (lifecycle.trial.endsSoon) {
+      await safeRecordTrialEndingReminderEvent({
+        user,
+        subscription,
+        source: "billing_status",
+        daysRemaining: lifecycle.trial.daysRemaining,
       });
     }
 

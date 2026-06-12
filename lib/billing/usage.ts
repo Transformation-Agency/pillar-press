@@ -396,6 +396,27 @@ export function trialExpirationEventValues(input: {
   };
 }
 
+export function trialEndingReminderEventValues(input: {
+  user: Pick<SessionUser, "id">;
+  subscription: Pick<Subscription, "id" | "workspaceId" | "planId" | "trialStart" | "trialEnd">;
+  source: string;
+  daysRemaining: number | null;
+}) {
+  return {
+    workspaceId: input.subscription.workspaceId,
+    userId: input.user.id,
+    event: "ending_reminder",
+    planId: input.subscription.planId,
+    trialStart: input.subscription.trialStart ?? null,
+    trialEnd: input.subscription.trialEnd ?? null,
+    metadata: {
+      source: input.source,
+      localSubscriptionId: input.subscription.id,
+      daysRemaining: input.daysRemaining,
+    },
+  };
+}
+
 async function trialLifecycleEventExists(input: {
   workspaceId: string;
   event: string;
@@ -439,6 +460,36 @@ export async function safeRecordTrialExpirationEvent(input: {
     await db.insert(trialEvents).values(values);
   } catch (err) {
     console.warn("trial_expiration_event_failed", err instanceof Error ? err.message : String(err));
+  }
+}
+
+export async function safeRecordTrialEndingReminderEvent(input: {
+  user: Pick<SessionUser, "id">;
+  subscription: Subscription | null;
+  source: string;
+  daysRemaining: number | null;
+}) {
+  if (isLocalFirstMode() || !input.subscription) return;
+  if (input.subscription.status !== "trialing" || !input.subscription.trialEnd) return;
+  if (input.subscription.trialEnd.getTime() <= Date.now()) return;
+  if (input.daysRemaining === null || input.daysRemaining > 2) return;
+  const values = trialEndingReminderEventValues({
+    user: input.user,
+    subscription: input.subscription,
+    source: input.source,
+    daysRemaining: input.daysRemaining,
+  });
+  try {
+    if (await trialLifecycleEventExists({
+      workspaceId: values.workspaceId,
+      event: values.event,
+      planId: values.planId,
+    })) {
+      return;
+    }
+    await db.insert(trialEvents).values(values);
+  } catch (err) {
+    console.warn("trial_ending_reminder_event_failed", err instanceof Error ? err.message : String(err));
   }
 }
 

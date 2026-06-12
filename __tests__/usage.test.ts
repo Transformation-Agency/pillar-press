@@ -20,6 +20,7 @@ describe("hosted usage reservations", () => {
       quotaErrorMessage,
       storageQuotaBytes,
       subscriptionAllowsUsage,
+      trialEndingReminderEventValues,
       trialExpirationEventValues,
       usageDimensionForTask,
     } = await import("@/lib/billing/usage");
@@ -58,6 +59,30 @@ describe("hosted usage reservations", () => {
       metadata: {
         source: "billing_status",
         localSubscriptionId: "sub_trial",
+      },
+    });
+    expect(trialEndingReminderEventValues({
+      user: { id: "user_1" },
+      subscription: {
+        id: "sub_trial",
+        workspaceId: "workspace_1",
+        planId: "trial",
+        trialStart: new Date("2026-06-01T00:00:00.000Z"),
+        trialEnd: new Date("2026-06-13T00:00:00.000Z"),
+      } as any,
+      source: "billing_status",
+      daysRemaining: 2,
+    })).toEqual({
+      workspaceId: "workspace_1",
+      userId: "user_1",
+      event: "ending_reminder",
+      planId: "trial",
+      trialStart: new Date("2026-06-01T00:00:00.000Z"),
+      trialEnd: new Date("2026-06-13T00:00:00.000Z"),
+      metadata: {
+        source: "billing_status",
+        localSubscriptionId: "sub_trial",
+        daysRemaining: 2,
       },
     });
     expect(billingAccessForSubscription(null)).toMatchObject({ allowed: false, code: "subscription_required" });

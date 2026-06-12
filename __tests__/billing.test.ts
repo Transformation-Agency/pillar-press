@@ -424,6 +424,7 @@ describe("hosted billing status API", () => {
         },
       })),
       getEntitlementForPlan: vi.fn(async () => entitlement),
+      safeRecordTrialEndingReminderEvent: vi.fn(),
       safeRecordTrialExpirationEvent: vi.fn(),
       usageSummaryForSubscription: vi.fn(async () => usage),
     }));
@@ -495,6 +496,7 @@ describe("hosted billing status API", () => {
         },
       })),
       getEntitlementForPlan: vi.fn(async () => ({ planId: "trial" })),
+      safeRecordTrialEndingReminderEvent: vi.fn(),
       safeRecordTrialExpirationEvent,
       usageSummaryForSubscription: vi.fn(async () => ({
         periodStart: "2026-06-01T00:00:00.000Z",
@@ -518,6 +520,66 @@ describe("hosted billing status API", () => {
       subscription,
       source: "billing_status",
     });
+  });
+
+  it("records an ending reminder event when billing status detects a trial ending soon", async () => {
+    const user = { id: "user_1", workspaceId: "workspace_1", role: "author" };
+    const subscription = {
+      id: "sub_trial",
+      workspaceId: "workspace_1",
+      planId: "trial",
+      status: "trialing",
+      trialStart: new Date("2026-06-01T00:00:00.000Z"),
+      trialEnd: new Date("2026-06-13T00:00:00.000Z"),
+    };
+    const safeRecordTrialEndingReminderEvent = vi.fn();
+    const safeRecordTrialExpirationEvent = vi.fn();
+
+    vi.doMock("@/lib/billing/stripe", () => ({
+      BillingError: class BillingError extends Error {},
+      requireBillingUser: vi.fn(async () => user),
+      listPublicPlans: vi.fn(async () => [{ id: "starter", name: "Starter", stripeConfigured: true }]),
+      getOrCreateTrialSubscription: vi.fn(async () => subscription),
+    }));
+    vi.doMock("@/lib/billing/usage", () => ({
+      billingAccessForSubscription: vi.fn(() => ({ allowed: true })),
+      billingLifecycleForSubscription: vi.fn(() => ({
+        planId: "trial",
+        status: "trialing",
+        accessCode: null,
+        primaryAction: "choose_plan",
+        upgradeRecommended: true,
+        trial: {
+          startedAt: new Date("2026-06-01T00:00:00.000Z"),
+          endsAt: new Date("2026-06-13T00:00:00.000Z"),
+          daysRemaining: 2,
+          expired: false,
+          endsSoon: true,
+        },
+      })),
+      getEntitlementForPlan: vi.fn(async () => ({ planId: "trial" })),
+      safeRecordTrialEndingReminderEvent,
+      safeRecordTrialExpirationEvent,
+      usageSummaryForSubscription: vi.fn(async () => ({
+        periodStart: "2026-06-01T00:00:00.000Z",
+        periodEnd: "2026-06-13T00:00:00.000Z",
+        dimensions: {},
+      })),
+    }));
+
+    const { GET } = await import("../app/api/billing/status/route");
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.lifecycle.trial.endsSoon).toBe(true);
+    expect(safeRecordTrialEndingReminderEvent).toHaveBeenCalledWith({
+      user,
+      subscription,
+      source: "billing_status",
+      daysRemaining: 2,
+    });
+    expect(safeRecordTrialExpirationEvent).not.toHaveBeenCalled();
   });
 });
 
