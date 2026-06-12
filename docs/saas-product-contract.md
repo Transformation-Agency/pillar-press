@@ -261,6 +261,14 @@ Important fields:
 - `trial_end`
 - `metadata`
 
+Implemented events:
+- `started`: created when the hosted workspace first receives a trial
+  subscription.
+- `converted`: created when a Stripe Checkout completion syncs a paid
+  subscription for the workspace. Metadata is limited to Stripe/local ids needed
+  for support reconciliation and does not include emails, raw Stripe payloads, or
+  secrets.
+
 ### `audit_events`
 
 Security/support log for important hosted mutations.
@@ -392,6 +400,9 @@ Stage 2 is complete only when:
 - Webhooks verify signatures and sync DB state. **Implemented:**
   `POST /api/billing/webhook` verifies the raw Stripe payload and syncs
   subscription created/updated/deleted plus Checkout completion events.
+- Trial-to-paid conversion is trackable. **Started:** Checkout completion for a
+  non-trial plan records a secret-free `trial_events.converted` row, idempotent
+  per workspace/plan for webhook retries.
 - Subscription state survives browser redirects and refreshes. **Implemented:**
   subscription rows are stored in Postgres; `GET /api/billing/status` returns
   the current workspace subscription and public plan catalog.

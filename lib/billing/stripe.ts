@@ -369,6 +369,66 @@ export function stripeAuditEventValues(input: {
   };
 }
 
+export function trialConversionEventValues(input: {
+  workspaceId: string;
+  userId?: string | null;
+  planId: string;
+  trialStart?: Date | null;
+  trialEnd?: Date | null;
+  stripeSessionId?: string | null;
+  stripeSubscriptionId?: string | null;
+  localSubscriptionId?: string | null;
+}) {
+  return {
+    workspaceId: input.workspaceId,
+    userId: input.userId ?? null,
+    event: "converted",
+    planId: input.planId,
+    trialStart: input.trialStart ?? null,
+    trialEnd: input.trialEnd ?? null,
+    metadata: {
+      source: "checkout.session.completed",
+      stripeSessionId: input.stripeSessionId ?? null,
+      stripeSubscriptionId: input.stripeSubscriptionId ?? null,
+      localSubscriptionId: input.localSubscriptionId ?? null,
+    },
+  };
+}
+
+async function trialEventExists(input: {
+  workspaceId: string;
+  event: string;
+  planId: string;
+}) {
+  const [existing] = await db
+    .select({ id: trialEvents.id })
+    .from(trialEvents)
+    .where(
+      and(
+        eq(trialEvents.workspaceId, input.workspaceId),
+        eq(trialEvents.event, input.event),
+        eq(trialEvents.planId, input.planId),
+      ),
+    )
+    .limit(1);
+  return Boolean(existing);
+}
+
+async function safeRecordTrialEventOnce(values: ReturnType<typeof trialConversionEventValues>) {
+  try {
+    if (await trialEventExists({
+      workspaceId: values.workspaceId,
+      event: values.event,
+      planId: values.planId,
+    })) {
+      return;
+    }
+    await db.insert(trialEvents).values(values);
+  } catch (err) {
+    console.warn("trial_event_record_failed", err instanceof Error ? err.message : String(err));
+  }
+}
+
 async function recordStripeAuditEvent(input: Parameters<typeof stripeAuditEventValues>[0]) {
   await db.insert(auditEvents).values(stripeAuditEventValues(input));
 }
@@ -391,6 +451,18 @@ export async function handleStripeWebhookEvent(event: Stripe.Event) {
     if (subscriptionId) {
       const subscription = await stripe.subscriptions.retrieve(subscriptionId);
       synced = await syncStripeSubscription(subscription);
+    }
+    if (synced && synced.planId !== "trial") {
+      await safeRecordTrialEventOnce(trialConversionEventValues({
+        workspaceId: synced.workspaceId,
+        userId: typeof session.metadata?.userId === "string" ? session.metadata.userId : null,
+        planId: synced.planId,
+        trialStart: synced.trialStart,
+        trialEnd: synced.trialEnd,
+        stripeSessionId: session.id,
+        stripeSubscriptionId: subscriptionId,
+        localSubscriptionId: synced.id,
+      }));
     }
     await safeRecordStripeAuditEvent({
       event,

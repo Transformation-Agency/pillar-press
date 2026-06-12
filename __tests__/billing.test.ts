@@ -165,6 +165,37 @@ describe("hosted billing helpers", () => {
     });
     expect(JSON.stringify(values)).not.toContain("private@example.com");
   });
+
+  it("builds sanitized trial conversion event rows", async () => {
+    const { trialConversionEventValues } = await import("@/lib/billing/stripe");
+
+    const values = trialConversionEventValues({
+      workspaceId: "workspace_1",
+      userId: "user_1",
+      planId: "pro",
+      trialStart: new Date("2026-06-01T00:00:00.000Z"),
+      trialEnd: new Date("2026-06-08T00:00:00.000Z"),
+      stripeSessionId: "cs_123",
+      stripeSubscriptionId: "sub_123",
+      localSubscriptionId: "local_sub_1",
+    });
+
+    expect(values).toEqual({
+      workspaceId: "workspace_1",
+      userId: "user_1",
+      event: "converted",
+      planId: "pro",
+      trialStart: new Date("2026-06-01T00:00:00.000Z"),
+      trialEnd: new Date("2026-06-08T00:00:00.000Z"),
+      metadata: {
+        source: "checkout.session.completed",
+        stripeSessionId: "cs_123",
+        stripeSubscriptionId: "sub_123",
+        localSubscriptionId: "local_sub_1",
+      },
+    });
+    expect(JSON.stringify(values)).not.toContain("private@example.com");
+  });
 });
 
 describe("hosted billing status API", () => {
