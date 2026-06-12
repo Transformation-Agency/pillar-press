@@ -128,6 +128,71 @@ describe("hosted background jobs", () => {
       errorMessage: null,
     }));
   });
+
+  it("recovers stale processing jobs by requeueing retryable jobs and failing exhausted jobs", async () => {
+    const candidates = [{
+      id: "job_retry",
+      kind: "gather_run",
+      status: "processing",
+      lockedAt: new Date("2026-06-11T00:00:00.000Z"),
+      attempts: 1,
+      maxAttempts: 3,
+    }, {
+      id: "job_exhausted",
+      kind: "gather_run",
+      status: "processing",
+      lockedAt: new Date("2026-06-11T00:01:00.000Z"),
+      attempts: 3,
+      maxAttempts: 3,
+    }];
+    const limit = vi.fn(async () => candidates);
+    const orderBy = vi.fn(() => ({ limit }));
+    const whereSelect = vi.fn(() => ({ orderBy }));
+    const from = vi.fn(() => ({ where: whereSelect }));
+    const select = vi.fn(() => ({ from }));
+    let lastSet: Record<string, unknown> = {};
+    const returning = vi.fn(async () => [{ id: "updated", status: lastSet.status }]);
+    const whereUpdate = vi.fn(() => ({ returning }));
+    const set = vi.fn((value) => {
+      lastSet = value;
+      return { where: whereUpdate };
+    });
+    const update = vi.fn(() => ({ set }));
+
+    vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => false }));
+    vi.doMock("@/lib/db", async () => {
+      const actual = await vi.importActual<any>("@/db/schema");
+      return { ...actual, db: { select, update } };
+    });
+
+    const { recoverStaleBackgroundJobs } = await import("@/lib/jobs/background");
+    const result = await recoverStaleBackgroundJobs({
+      now: new Date("2026-06-11T00:20:00.000Z"),
+      staleAfterMs: 15 * 60 * 1000,
+      limit: 25,
+    });
+
+    expect(result).toEqual({ requeued: 1, failed: 1 });
+    expect(select).toHaveBeenCalledTimes(1);
+    expect(limit).toHaveBeenCalledWith(25);
+    expect(update).toHaveBeenCalledTimes(2);
+    expect(set).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      status: "queued",
+      lockedBy: null,
+      lockedAt: null,
+      errorCode: "stale_lock_recovered",
+      errorMessage: "Background job lock expired and was requeued.",
+      completedAt: null,
+    }));
+    expect(set).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      status: "failed",
+      lockedBy: null,
+      lockedAt: null,
+      errorCode: "stale_lock_recovered",
+      errorMessage: "Background job lock expired after max attempts.",
+      completedAt: new Date("2026-06-11T00:20:00.000Z"),
+    }));
+  });
 });
 
 describe("hosted background job runner", () => {

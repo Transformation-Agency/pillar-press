@@ -24,6 +24,17 @@ export type ClaimBackgroundJobInput = {
   now?: Date;
 };
 
+export type RecoverStaleBackgroundJobsInput = {
+  now?: Date;
+  staleAfterMs?: number;
+  limit?: number;
+};
+
+export type RecoverStaleBackgroundJobsResult = {
+  requeued: number;
+  failed: number;
+};
+
 const SECRET_KEY_PATTERN = /(api[_-]?key|token|secret|password|authorization|credential)/i;
 
 function cleanOptionalText(value: string | null | undefined, max = 500) {
@@ -53,6 +64,11 @@ function errorInfo(err: unknown) {
     code: code.slice(0, 120),
     message: message.slice(0, 1000),
   };
+}
+
+function cleanPositiveInteger(value: number | undefined, fallback: number, min: number, max: number) {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.max(min, Math.min(max, Math.trunc(value ?? fallback)));
 }
 
 export async function enqueueBackgroundJob(input: EnqueueBackgroundJobInput): Promise<BackgroundJob | null> {
@@ -131,6 +147,47 @@ export async function claimNextBackgroundJob(input: ClaimBackgroundJobInput): Pr
     if (claimed) return claimed;
   }
   return null;
+}
+
+export async function recoverStaleBackgroundJobs(
+  input: RecoverStaleBackgroundJobsInput = {},
+): Promise<RecoverStaleBackgroundJobsResult> {
+  const empty = { requeued: 0, failed: 0 };
+  if (isLocalFirstMode()) return empty;
+  const now = input.now ?? new Date();
+  const staleAfterMs = cleanPositiveInteger(input.staleAfterMs, 15 * 60 * 1000, 60_000, 24 * 60 * 60 * 1000);
+  const staleBefore = new Date(now.getTime() - staleAfterMs);
+  const limit = cleanPositiveInteger(input.limit, 50, 1, 200);
+  const candidates = await db
+    .select()
+    .from(backgroundJobs)
+    .where(and(eq(backgroundJobs.status, "processing"), lte(backgroundJobs.lockedAt, staleBefore)))
+    .orderBy(asc(backgroundJobs.lockedAt), asc(backgroundJobs.createdAt))
+    .limit(limit);
+
+  const result = { ...empty };
+  for (const candidate of candidates) {
+    const exhausted = candidate.attempts >= candidate.maxAttempts;
+    const [updated] = await db
+      .update(backgroundJobs)
+      .set({
+        status: exhausted ? "failed" : "queued",
+        runAfter: now,
+        lockedBy: null,
+        lockedAt: null,
+        errorCode: "stale_lock_recovered",
+        errorMessage: exhausted
+          ? "Background job lock expired after max attempts."
+          : "Background job lock expired and was requeued.",
+        completedAt: exhausted ? now : null,
+        updatedAt: now,
+      })
+      .where(and(eq(backgroundJobs.id, candidate.id), eq(backgroundJobs.status, "processing")))
+      .returning();
+    if (updated?.status === "failed") result.failed += 1;
+    if (updated?.status === "queued") result.requeued += 1;
+  }
+  return result;
 }
 
 export async function completeBackgroundJob(

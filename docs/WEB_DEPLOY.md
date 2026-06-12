@@ -203,7 +203,14 @@ curl -X POST "https://your-domain.example/api/jobs/run" \
 ```
 
 The endpoint returns how many jobs were processed. It does not accept provider
-keys or user secrets.
+keys or user secrets. Each worker call also recovers stale `processing` jobs
+whose lock is older than 15 minutes by default, requeueing retryable jobs and
+marking exhausted jobs failed. Override the timeout only for a specific worker
+call with:
+
+```json
+{ "workerId": "hosted-cron-1", "limit": 3, "recoverStaleAfterSeconds": 900 }
+```
 
 ## Hetzner Or Any VPS
 

@@ -582,7 +582,9 @@ Stage 3 is complete only when:
    define the hosted queue and a secret-protected worker entry point. Hosted
    `POST /api/gather/run` now enqueues manual Gather jobs, returns `202`, and
    exposes scoped polling through `GET /api/gather/run/:jobId`; local-first
-   Gather remains synchronous.
+   Gather remains synchronous. The worker endpoint also recovers stale
+   `processing` locks before claiming new jobs, requeueing retryable jobs and
+   failing exhausted jobs so a crashed worker cannot strand hosted work forever.
 10. Stage 6: add admin/support tooling and production observability.
     **Started:** `GET /api/admin/support/workspaces` is available when
     `KINGS_PRESS_ADMIN_SECRET` or `KINGS_PRESS_SUPPORT_SECRET` is configured.
