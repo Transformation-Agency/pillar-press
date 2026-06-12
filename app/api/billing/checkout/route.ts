@@ -4,6 +4,8 @@ import { toErrorResponse } from "@/lib/errors";
 import { safeRecordAuditEvent } from "@/lib/audit";
 import {
   appBaseUrl,
+  BillingError,
+  getLatestSubscription,
   getOrCreateBillingCustomer,
   getStripe,
   requireBillingUser,
@@ -17,11 +19,28 @@ const CheckoutBody = z.object({
   email: z.string().email().optional(),
 });
 
+const PORTAL_MANAGED_STATUSES = new Set(["active", "trialing", "past_due", "unpaid", "paused"]);
+
 export async function POST(req: Request) {
   try {
     const user = await requireBillingUser();
     const body = CheckoutBody.parse(await req.json());
     const { plan, priceId } = await requireCheckoutPlan(body.planId);
+    const currentSubscription = await getLatestSubscription(user.workspaceId);
+    const hasPaidSubscription = Boolean(
+      currentSubscription &&
+      (currentSubscription.planId !== "trial" || currentSubscription.stripeSubscriptionId) &&
+      PORTAL_MANAGED_STATUSES.has(currentSubscription.status),
+    );
+
+    if (hasPaidSubscription && currentSubscription?.planId === plan.id) {
+      throw new BillingError(409, "plan_already_active", "You are already on this plan.");
+    }
+
+    if (hasPaidSubscription) {
+      throw new BillingError(409, "billing_portal_required", "Manage billing to change your plan.");
+    }
+
     const customer = await getOrCreateBillingCustomer({
       workspaceId: user.workspaceId,
       userId: user.id,

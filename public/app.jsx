@@ -1219,7 +1219,14 @@ function BillingPanel({ open, onClose, billing, notice }) {
     setBusy("checkout-" + plan.id);
     setError("");
     try { await window.Store.startCheckout(plan.id); }
-    catch (e) { setError((e && e.message) || "Could not start checkout."); setBusy(""); }
+    catch (e) {
+      if (e && e.code === "billing_portal_required") {
+        setError("Use Manage billing to change your current plan.");
+      } else {
+        setError((e && e.message) || "Could not start checkout.");
+      }
+      setBusy("");
+    }
   };
   const portal = async () => {
     setBusy("portal");

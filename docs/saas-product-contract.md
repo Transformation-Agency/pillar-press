@@ -447,7 +447,10 @@ Stage 1 is complete only when:
 Stage 2 is complete only when:
 - Stripe Checkout creates or updates a workspace subscription. **Implemented:**
   `POST /api/billing/checkout` creates subscription-mode Checkout Sessions and
-  stores workspace/user/plan metadata for reconciliation.
+  stores workspace/user/plan metadata for reconciliation. It now refuses to
+  create duplicate Checkout sessions for an already active paid subscription;
+  existing paid subscribers must use the Customer Portal until an explicit
+  in-app plan-change flow is added.
 - Stripe Customer Portal opens for the workspace billing customer.
   **Implemented:** `POST /api/billing/portal` returns a hosted portal URL.
 - Webhooks verify signatures and sync DB state. **Implemented:**
@@ -546,7 +549,9 @@ Stage 3 is complete only when:
    topbar Billing panel calls `/api/billing/status`, `/api/billing/checkout`,
    and `/api/billing/portal`; `/api/billing/status` returns a normalized
    `lifecycle` object for trial ending/expired/upgrade actions; hosted API
-   billing-blocked responses open the same panel with context.
+   billing-blocked responses open the same panel with context; Checkout is
+   server-guarded against duplicate paid subscriptions and directs changes to
+   Customer Portal.
 9. Stage 5: introduce a worker/job runner for long operations. **Started:**
    `db/migrations/0009_background_jobs.sql`, `db/schema.ts`,
    `lib/jobs/background.ts`, `lib/jobs/runner.ts`, and `POST /api/jobs/run`

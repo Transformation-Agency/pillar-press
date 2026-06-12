@@ -6,6 +6,18 @@ beforeEach(() => {
   delete process.env.STRIPE_PRICE_PRO;
 });
 
+class TestBillingError extends Error {
+  status: number;
+  code: string;
+
+  constructor(status: number, code: string, message: string) {
+    super(message);
+    this.name = "BillingError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
 describe("hosted billing helpers", () => {
   it("resolves Stripe price ids from env fallbacks without exposing keys", async () => {
     process.env.STRIPE_PRICE_PRO = "price_pro_test";
@@ -516,10 +528,16 @@ describe("hosted billing session audit events", () => {
 
     vi.doMock("@/lib/audit", () => ({ safeRecordAuditEvent }));
     vi.doMock("@/lib/billing/stripe", () => ({
+      BillingError: TestBillingError,
       requireBillingUser: vi.fn(async () => ({ id: "user_1", workspaceId: "workspace_1", role: "author" })),
       requireCheckoutPlan: vi.fn(async () => ({
         plan: { id: "pro" },
         priceId: "price_pro",
+      })),
+      getLatestSubscription: vi.fn(async () => ({
+        planId: "trial",
+        status: "trialing",
+        stripeSubscriptionId: null,
       })),
       getOrCreateBillingCustomer: vi.fn(async () => ({
         stripeCustomerId: "cus_123",
@@ -560,6 +578,94 @@ describe("hosted billing session audit events", () => {
       },
     });
     expect(JSON.stringify(safeRecordAuditEvent.mock.calls)).not.toContain("private@example.com");
+  });
+
+  it("does not create a duplicate Checkout session for the active current plan", async () => {
+    const createCheckout = vi.fn(async () => ({ id: "cs_123", url: "https://checkout.stripe.test/session" }));
+
+    vi.doMock("@/lib/audit", () => ({ safeRecordAuditEvent: vi.fn() }));
+    vi.doMock("@/lib/billing/stripe", () => ({
+      BillingError: TestBillingError,
+      requireBillingUser: vi.fn(async () => ({ id: "user_1", workspaceId: "workspace_1", role: "author" })),
+      requireCheckoutPlan: vi.fn(async () => ({
+        plan: { id: "pro" },
+        priceId: "price_pro",
+      })),
+      getLatestSubscription: vi.fn(async () => ({
+        planId: "pro",
+        status: "active",
+        stripeSubscriptionId: "sub_123",
+      })),
+      getOrCreateBillingCustomer: vi.fn(async () => {
+        throw new Error("customer should not be created");
+      }),
+      appBaseUrl: vi.fn(() => "https://kingspress.test"),
+      getStripe: vi.fn(() => ({
+        checkout: {
+          sessions: {
+            create: createCheckout,
+          },
+        },
+      })),
+    }));
+
+    const { POST } = await import("../app/api/billing/checkout/route");
+    const res = await POST(new Request("https://kingspress.test/api/billing/checkout", {
+      method: "POST",
+      body: JSON.stringify({ planId: "pro" }),
+    }));
+    const body = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(body).toEqual({
+      error: "You are already on this plan.",
+      code: "plan_already_active",
+    });
+    expect(createCheckout).not.toHaveBeenCalled();
+  });
+
+  it("sends active paid subscribers to the billing portal for plan changes", async () => {
+    const createCheckout = vi.fn(async () => ({ id: "cs_123", url: "https://checkout.stripe.test/session" }));
+
+    vi.doMock("@/lib/audit", () => ({ safeRecordAuditEvent: vi.fn() }));
+    vi.doMock("@/lib/billing/stripe", () => ({
+      BillingError: TestBillingError,
+      requireBillingUser: vi.fn(async () => ({ id: "user_1", workspaceId: "workspace_1", role: "author" })),
+      requireCheckoutPlan: vi.fn(async () => ({
+        plan: { id: "team" },
+        priceId: "price_team",
+      })),
+      getLatestSubscription: vi.fn(async () => ({
+        planId: "pro",
+        status: "active",
+        stripeSubscriptionId: "sub_123",
+      })),
+      getOrCreateBillingCustomer: vi.fn(async () => {
+        throw new Error("customer should not be created");
+      }),
+      appBaseUrl: vi.fn(() => "https://kingspress.test"),
+      getStripe: vi.fn(() => ({
+        checkout: {
+          sessions: {
+            create: createCheckout,
+          },
+        },
+      })),
+    }));
+
+    const { POST } = await import("../app/api/billing/checkout/route");
+    const res = await POST(new Request("https://kingspress.test/api/billing/checkout", {
+      method: "POST",
+      body: JSON.stringify({ planId: "team" }),
+    }));
+    const body = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(body).toEqual({
+      error: "Manage billing to change your plan.",
+      code: "billing_portal_required",
+    });
+    expect(createCheckout).not.toHaveBeenCalled();
   });
 
   it("records sanitized audit metadata when creating a Customer Portal session", async () => {
