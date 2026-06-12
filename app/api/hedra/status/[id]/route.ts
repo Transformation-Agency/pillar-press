@@ -4,7 +4,7 @@ import { requireUser } from "@/lib/auth";
 import { db, mediaJobs } from "@/lib/db";
 import { getLocalMediaJob, updateLocalMediaJob } from "@/lib/local/database";
 import { isLocalFirstMode } from "@/lib/local/mode";
-import { getGenerationStatus, getAssetUrls } from "@/lib/hedra";
+import { HedraError, getGenerationStatus, getAssetUrls } from "@/lib/hedra";
 import { persistRemoteImage, persistRemoteVideo } from "@/lib/storage";
 import { toErrorResponse } from "@/lib/errors";
 import { getHostedMediaProviderProfile } from "@/lib/mediaProviderSettings";
@@ -20,6 +20,30 @@ function hedraProfileIdFromMeta(meta: unknown): string | undefined {
   const record = metaRecord(meta);
   if (typeof record.hedraProfileId === "string") return record.hedraProfileId;
   if (record.provider === "hedra" && typeof record.profileId === "string") return record.profileId;
+  return undefined;
+}
+
+function expectsByokHedra(meta: unknown): boolean {
+  const record = metaRecord(meta);
+  return record.providerSource === "byok"
+    || typeof record.hedraProfileId === "string"
+    || (record.provider === "hedra" && typeof record.profileId === "string");
+}
+
+async function hedraApiKeyForJob(user: Awaited<ReturnType<typeof requireUser>>, meta: unknown): Promise<string | undefined> {
+  if (isLocalFirstMode()) return undefined;
+  const hedraProfileId = hedraProfileIdFromMeta(meta);
+  if (!hedraProfileId) return undefined;
+  const profile = await getHostedMediaProviderProfile(user, hedraProfileId);
+  const apiKey = profile?.provider === "hedra" ? profile.apiKey?.trim() : "";
+  if (apiKey) return apiKey;
+  if (expectsByokHedra(meta)) {
+    throw new HedraError(
+      409,
+      "media_provider_unavailable",
+      "Reconnect the Hedra media provider for this generation.",
+    );
+  }
   return undefined;
 }
 
@@ -46,11 +70,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       return NextResponse.json({ job });
     }
 
-    const hedraProfileId = hedraProfileIdFromMeta(job.meta);
-    const hedraProfile = !isLocalFirstMode() && hedraProfileId
-      ? await getHostedMediaProviderProfile(user, hedraProfileId)
-      : null;
-    const s = await getGenerationStatus(job.hedraGenerationId, { apiKey: hedraProfile?.apiKey });
+    const hedraApiKey = await hedraApiKeyForJob(user, job.meta);
+    const s = await getGenerationStatus(job.hedraGenerationId, { apiKey: hedraApiKey });
     const terminal = ["completed", "failed", "canceled"].includes(s.status);
 
     // Hedra's status endpoint returns a null url for completed images/videos —
@@ -60,7 +81,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     let dl = s.download_url ?? undefined;
     if (terminal && s.status === "completed" && !outUrl && s.asset_id) {
       try {
-        const a = await getAssetUrls(s.asset_id, job.type === "image" ? "image" : "video", { apiKey: hedraProfile?.apiKey });
+        const a = await getAssetUrls(s.asset_id, job.type === "image" ? "image" : "video", { apiKey: hedraApiKey });
         outUrl = a.url ?? outUrl;
         thumb = thumb ?? a.thumbnailUrl;
         dl = dl ?? a.url;

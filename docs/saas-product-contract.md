@@ -414,9 +414,12 @@ Rules:
   image endpoints through `GET/PUT /api/media/provider-settings`; Studio media
   generation, provider status, Hedra model/status/asset calls, OpenAI-compatible
   media calls, and ElevenLabs TTS now resolve those hosted BYOK profiles
-  server-side before falling back to managed keys. First-run setup, full-screen
-  model setup, and Studio provider settings now write hosted media keys through
-  the encrypted media provider settings route instead of requiring env vars.
+  server-side before falling back to managed keys. Queued Hedra jobs persist the
+  selected Hedra profile id and status polling refuses to use a missing or
+  non-Hedra saved profile, preventing silent managed-key fallback or accidental
+  use of another media provider key. First-run setup, full-screen model setup,
+  and Studio provider settings now write hosted media keys through the encrypted
+  media provider settings route instead of requiring env vars.
 - Hosted BYOK base URLs must be public provider endpoints, not arbitrary server
   fetch targets. **Implemented:** hosted LLM/media provider saves plus live
   test/list/runtime resolution require public HTTPS URLs and reject embedded

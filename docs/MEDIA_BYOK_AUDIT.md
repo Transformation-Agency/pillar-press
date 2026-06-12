@@ -2,8 +2,9 @@
 
 Status: audit complete, hosted media BYOK server plumbing implemented, live provider smoke not complete.
 
-This audit covers `POST /api/hedra/generate` and the media provider helpers that
-power Studio image, audio, video, and avatar generation in hosted web mode.
+This audit covers Studio media provider settings plus the Hedra/OpenAI-
+compatible/ElevenLabs routes that power image, audio, video, and avatar
+generation in hosted web mode.
 
 ## Current Verdict
 
@@ -70,6 +71,12 @@ flowchart TD
   uploading provider assets.
 - Hedra model/status/asset operations and ElevenLabs TTS accept per-request API
   key overrides.
+- Hedra status polling recovers the saved Hedra profile id from persisted media
+  job metadata, verifies that the saved profile is still a Hedra profile, and
+  uses that BYOK key for generation status plus asset URL lookup. If the saved
+  BYOK profile is missing or points at another provider, the poller returns a
+  reconnect error instead of silently falling back to a managed key or sending
+  another saved media key to Hedra.
 - `GET /api/media/providers` merges managed availability with hosted saved BYOK
   media provider status and compatible hosted LLM BYOK OpenAI/xAI profile
   status.
@@ -158,6 +165,9 @@ experience still needs live-provider validation before broad self-serve launch.
    - ElevenLabs voiceover paths use hosted BYOK ElevenLabs key when selected.
    - All usage reservations include `providerSource`, `provider`, `model`, and
      `profileId`.
+   - Queued Hedra jobs persist secret-free `hedraProfileId` metadata so later
+     status polling and asset URL resolution continue through the same hosted
+     BYOK Hedra profile.
 
 6. Update provider status and setup UI. **Started.**
    - `GET /api/media/providers` should merge managed availability with
@@ -182,10 +192,12 @@ experience still needs live-provider validation before broad self-serve launch.
      keys only after BYOK access is allowed.
    - Route tests proving saved hosted media profiles can be tested without
      returning raw keys.
-- Regression tests proving secrets never appear in status responses, errors,
-  or media job metadata.
-- Hosted provider URL guard tests proving hosted media/LLM settings cannot
-  persist localhost, private-network, non-HTTPS, or credentialed base URLs.
+   - Route tests proving Hedra status polling uses the persisted BYOK Hedra
+     profile id for status and asset URL lookup.
+   - Regression tests proving secrets never appear in status responses, errors,
+     or media job metadata.
+   - Hosted provider URL guard tests proving hosted media/LLM settings cannot
+     persist localhost, private-network, non-HTTPS, or credentialed base URLs.
 
 ## Acceptance Criteria
 
@@ -205,6 +217,8 @@ experience still needs live-provider validation before broad self-serve launch.
   when a dedicated media key has not been saved.
 - Hedra image/video/avatar generation can run from a hosted user-saved Hedra
   key.
+- Hedra status polling for queued image/video/avatar jobs continues to use the
+  same hosted user-saved Hedra key selected at generation time.
 - Hedra avatar/video voiceover can combine hosted user-saved ElevenLabs and
   Hedra keys.
 - Follow-up audit update: profile ids now propagate to the non-generate media
