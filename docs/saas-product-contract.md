@@ -589,7 +589,8 @@ Stage 3 is complete only when:
     **Started:** `GET /api/admin/support/workspaces` is available when
     `KINGS_PRESS_ADMIN_SECRET` or `KINGS_PRESS_SUPPORT_SECRET` is configured.
     It supports list and per-workspace diagnostics for support investigations
-    and records admin audit events for support reads. `POST
-    /api/admin/support/trials/extend` lets support extend trial subscriptions
-    by 1-90 days, records `trial_events.extended`, refuses paid subscriptions,
-    and scrubs support reasons before persistence.
+    and records admin audit events for support reads. `KINGS_PRESS_SUPPORT_SECRET`
+    is intentionally read-only. `POST /api/admin/support/trials/extend` requires
+    `KINGS_PRESS_ADMIN_SECRET`, extends trial subscriptions by 1-90 days, records
+    `trial_events.extended`, refuses paid subscriptions, and scrubs support
+    reasons before persistence.

@@ -14,19 +14,47 @@ function rowsOf<T = Record<string, unknown>>(result: QueryResult): T[] {
 }
 
 function adminSecret() {
-  return process.env.KINGS_PRESS_ADMIN_SECRET?.trim() || process.env.KINGS_PRESS_SUPPORT_SECRET?.trim() || "";
+  return process.env.KINGS_PRESS_ADMIN_SECRET?.trim() || "";
+}
+
+function supportSecret() {
+  return process.env.KINGS_PRESS_SUPPORT_SECRET?.trim() || "";
+}
+
+function presentedSecrets(req: Request) {
+  const bearer = req.headers.get("authorization")?.replace(/^bearer\s+/i, "").trim();
+  const header = req.headers.get("x-kings-press-admin-secret")?.trim();
+  return [bearer, header].filter((value): value is string => Boolean(value));
+}
+
+function hasPresentedSecret(tokens: string[], secret: string) {
+  return Boolean(secret) && tokens.includes(secret);
 }
 
 export function requireAdminSupportAccess(req: Request) {
-  const secret = adminSecret();
-  if (!secret) {
+  const admin = adminSecret();
+  const support = supportSecret();
+  if (!admin && !support) {
     throw new BillingError(503, "admin_not_configured", "Admin support tools are not configured.");
   }
-  const bearer = req.headers.get("authorization")?.replace(/^bearer\s+/i, "").trim();
-  const header = req.headers.get("x-kings-press-admin-secret")?.trim();
-  if (bearer !== secret && header !== secret) {
+  const tokens = presentedSecrets(req);
+  if (!hasPresentedSecret(tokens, admin) && !hasPresentedSecret(tokens, support)) {
     throw new BillingError(401, "unauthorized", "Unauthorized.");
   }
+}
+
+export function requireAdminMutationAccess(req: Request) {
+  const admin = adminSecret();
+  if (!admin) {
+    throw new BillingError(503, "admin_not_configured", "Admin mutation tools are not configured.");
+  }
+  const tokens = presentedSecrets(req);
+  if (hasPresentedSecret(tokens, admin)) return;
+  const support = supportSecret();
+  if (hasPresentedSecret(tokens, support)) {
+    throw new BillingError(403, "admin_required", "Admin access is required.");
+  }
+  throw new BillingError(401, "unauthorized", "Unauthorized.");
 }
 
 function redactString(value: string) {
@@ -78,7 +106,7 @@ export async function extendSupportTrial(input: {
   days: number;
   reason?: string | null;
 }) {
-  requireAdminSupportAccess(input.req);
+  requireAdminMutationAccess(input.req);
   const days = normalizeTrialExtensionDays(input.days);
   const subscription = await getLatestSubscription(input.workspaceId);
   if (!subscription) {

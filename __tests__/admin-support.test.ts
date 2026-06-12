@@ -156,7 +156,7 @@ describe("GET /api/admin/support/workspaces", () => {
 });
 
 describe("POST /api/admin/support/trials/extend", () => {
-  it("requires the admin support secret", async () => {
+  it("requires the admin mutation secret", async () => {
     const getLatestSubscription = vi.fn();
     vi.doMock("@/lib/billing/stripe", async () => {
       const actual = await vi.importActual<any>("@/lib/billing/stripe");
@@ -177,8 +177,38 @@ describe("POST /api/admin/support/trials/extend", () => {
 
     expect(res.status).toBe(503);
     expect(body).toEqual({
-      error: "Admin support tools are not configured.",
+      error: "Admin mutation tools are not configured.",
       code: "admin_not_configured",
+    });
+    expect(getLatestSubscription).not.toHaveBeenCalled();
+  });
+
+  it("does not allow the read-only support secret to extend trials", async () => {
+    process.env.KINGS_PRESS_SUPPORT_SECRET = "support-secret";
+    process.env.KINGS_PRESS_ADMIN_SECRET = "admin-secret";
+    const getLatestSubscription = vi.fn();
+    vi.doMock("@/lib/billing/stripe", async () => {
+      const actual = await vi.importActual<any>("@/lib/billing/stripe");
+      return { ...actual, getLatestSubscription };
+    });
+    vi.doMock("@/lib/db", async () => {
+      const actual = await vi.importActual<any>("@/lib/db");
+      return { ...actual, db: { update: vi.fn(), insert: vi.fn() } };
+    });
+    vi.doMock("@/lib/audit", () => ({ safeRecordAuditEvent: vi.fn() }));
+
+    const { POST } = await import("../app/api/admin/support/trials/extend/route");
+    const res = await POST(new Request("http://test.local/api/admin/support/trials/extend", {
+      method: "POST",
+      headers: { Authorization: "Bearer support-secret" },
+      body: JSON.stringify({ workspaceId: "workspace_1", days: 7 }),
+    }));
+    const body = await res.json();
+
+    expect(res.status).toBe(403);
+    expect(body).toEqual({
+      error: "Admin access is required.",
+      code: "admin_required",
     });
     expect(getLatestSubscription).not.toHaveBeenCalled();
   });
@@ -277,7 +307,7 @@ describe("POST /api/admin/support/trials/extend", () => {
   });
 
   it("does not extend a paid subscription", async () => {
-    process.env.KINGS_PRESS_SUPPORT_SECRET = "support-secret";
+    process.env.KINGS_PRESS_ADMIN_SECRET = "admin-secret";
     const getLatestSubscription = vi.fn(async () => ({
       id: "sub_paid",
       workspaceId: "workspace_1",
@@ -299,7 +329,7 @@ describe("POST /api/admin/support/trials/extend", () => {
     const { POST } = await import("../app/api/admin/support/trials/extend/route");
     const res = await POST(new Request("http://test.local/api/admin/support/trials/extend", {
       method: "POST",
-      headers: { "x-kings-press-admin-secret": "support-secret" },
+      headers: { "x-kings-press-admin-secret": "admin-secret" },
       body: JSON.stringify({ workspaceId: "workspace_1", days: 7 }),
     }));
     const body = await res.json();
