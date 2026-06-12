@@ -11,6 +11,8 @@ to the old Pillar Press code. The hosted runtime uses:
   production for clarity.
 - The current King’s Press static workspace UI.
 - Optional Basic Auth only for temporary private previews while `AUTH_DISABLED=true`.
+  In hosted SaaS mode with account auth enabled, `SITE_PASSWORD` is ignored so
+  it cannot block the Supabase sign-in/create-account flow.
 
 ## Required Environment
 
@@ -116,6 +118,11 @@ Set `SITE_USERS` to your own comma-separated usernames if you do not want the
 default `king,pillar` aliases. The password is the secret; usernames are only an
 allow-list. If the browser keeps sending old credentials, open a private window
 or fully close the browser tab.
+
+When `KINGS_PRESS_HOSTED_WEB=true` or `KINGS_PRESS_RUNTIME=hosted` and
+`AUTH_DISABLED` is not `true`, Basic Auth is disabled even if `SITE_PASSWORD`
+exists in the environment. Public SaaS deployments should rely on Supabase Auth
+and Stripe billing instead of the shared preview gate.
 
 ## Vercel
 

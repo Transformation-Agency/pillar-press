@@ -417,8 +417,9 @@ Stage 1 is complete only when:
   runtime now requires account auth by default when `AUTH_DISABLED` is omitted;
   `.env.hosted.example` and `docs/WEB_DEPLOY.md` still set
   `AUTH_DISABLED=false` explicitly for operator clarity.
-- Basic Auth is no longer the product auth path. **Started:** Basic Auth remains
-  documented only as a temporary private-preview gate while `AUTH_DISABLED=true`.
+- Basic Auth is no longer the product auth path. **Implemented:** Basic Auth is
+  ignored in hosted SaaS mode when account auth is active, and remains available
+  only as a temporary private-preview gate while `AUTH_DISABLED=true`.
 - A new user can sign up and get a workspace. **Started:** the static web app now
   has a hosted sign-in/sign-up gate, and `/api/auth/session` bootstraps a
   workspace for authenticated Supabase users with no membership.

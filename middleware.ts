@@ -4,14 +4,16 @@ import type { NextRequest } from "next/server";
 /**
  * Site-wide HTTP Basic Auth gate.
  *
- * While the app runs with AUTH_DISABLED (single shared dev user), a public URL
- * would let anyone spend the workspace's AI/media credits. Vercel's built-in
- * Password Protection / Vercel Authentication require a paid plan, so we gate at
- * the app level instead:
+ * While a private preview runs with AUTH_DISABLED (single shared dev user), a
+ * public URL would let anyone spend the workspace's AI/media credits. Vercel's
+ * built-in Password Protection / Vercel Authentication require a paid plan, so
+ * we gate at the app level instead:
  *
  *  - Set SITE_PASSWORD (and optionally SITE_USER or SITE_USERS) in the
  *    environment → every request must present matching Basic credentials.
  *  - Leave SITE_PASSWORD unset (e.g. local dev) → no gate.
+ *  - In hosted SaaS mode with real account auth enabled, SITE_PASSWORD is
+ *    ignored so Basic Auth cannot shadow the Supabase sign-in screen.
  *
  * Runs on the Edge runtime, so use atob() (Buffer isn't guaranteed there). The
  * browser caches the credentials after the first prompt and resends them on the
@@ -24,6 +26,31 @@ function configuredUsers(): string[] {
     .map((user) => user.trim())
     .filter(Boolean);
   return users.length ? users : ["king", "pillar"];
+}
+
+function truthyEnv(value: string | undefined): boolean {
+  return /^(1|true|yes)$/i.test((value ?? "").trim());
+}
+
+type SiteBasicAuthEnv = Record<string, string | undefined>;
+
+function hostedWebEnv(env: SiteBasicAuthEnv): boolean {
+  return truthyEnv(env.KINGS_PRESS_HOSTED_WEB) || env.KINGS_PRESS_RUNTIME === "hosted";
+}
+
+function hostedAuthDisabled(env: SiteBasicAuthEnv): boolean {
+  return truthyEnv(env.AUTH_DISABLED);
+}
+
+export function isSiteBasicAuthEnabled(env: SiteBasicAuthEnv = process.env): boolean {
+  const password = env.SITE_PASSWORD?.trim();
+  if (!password) return false;
+
+  // Hosted SaaS uses Supabase Auth as the product auth path. Keep Basic Auth
+  // available only for explicit shared-workspace private previews.
+  if (hostedWebEnv(env) && !hostedAuthDisabled(env)) return false;
+
+  return true;
 }
 
 export function isSiteBasicAuthAuthorized(
@@ -51,7 +78,7 @@ export function isSiteBasicAuthAuthorized(
 
 export function middleware(req: NextRequest) {
   const password = process.env.SITE_PASSWORD;
-  if (!password) return NextResponse.next(); // gate disabled when unconfigured
+  if (!isSiteBasicAuthEnabled()) return NextResponse.next(); // gate disabled when unconfigured
 
   if (isSiteBasicAuthAuthorized(req.headers.get("authorization"), password)) {
     return NextResponse.next();
