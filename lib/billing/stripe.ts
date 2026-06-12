@@ -403,6 +403,7 @@ export function trialConversionEventValues(input: {
   stripeSessionId?: string | null;
   stripeSubscriptionId?: string | null;
   localSubscriptionId?: string | null;
+  source?: string;
 }) {
   return {
     workspaceId: input.workspaceId,
@@ -412,7 +413,7 @@ export function trialConversionEventValues(input: {
     trialStart: input.trialStart ?? null,
     trialEnd: input.trialEnd ?? null,
     metadata: {
-      source: "checkout.session.completed",
+      source: input.source ?? "checkout.session.completed",
       stripeSessionId: input.stripeSessionId ?? null,
       stripeSubscriptionId: input.stripeSubscriptionId ?? null,
       localSubscriptionId: input.localSubscriptionId ?? null,
@@ -454,6 +455,30 @@ async function safeRecordTrialEventOnce(values: ReturnType<typeof trialConversio
   }
 }
 
+export async function recordTrialConversionForSubscription(input: {
+  subscription: Subscription | null;
+  userId?: string | null;
+  source: string;
+  stripeSessionId?: string | null;
+  stripeSubscriptionId?: string | null;
+}) {
+  const subscription = input.subscription;
+  if (!subscription || subscription.planId === "trial") return;
+  if (subscription.status !== "active" && subscription.status !== "trialing") return;
+
+  await safeRecordTrialEventOnce(trialConversionEventValues({
+    workspaceId: subscription.workspaceId,
+    userId: input.userId,
+    planId: subscription.planId,
+    trialStart: subscription.trialStart,
+    trialEnd: subscription.trialEnd,
+    stripeSessionId: input.stripeSessionId,
+    stripeSubscriptionId: input.stripeSubscriptionId ?? subscription.stripeSubscriptionId,
+    localSubscriptionId: subscription.id,
+    source: input.source,
+  }));
+}
+
 async function recordStripeAuditEvent(input: Parameters<typeof stripeAuditEventValues>[0]) {
   await db.insert(auditEvents).values(stripeAuditEventValues(input));
 }
@@ -477,18 +502,13 @@ export async function handleStripeWebhookEvent(event: Stripe.Event) {
       const subscription = await stripe.subscriptions.retrieve(subscriptionId);
       synced = await syncStripeSubscription(subscription);
     }
-    if (synced && synced.planId !== "trial") {
-      await safeRecordTrialEventOnce(trialConversionEventValues({
-        workspaceId: synced.workspaceId,
-        userId: typeof session.metadata?.userId === "string" ? session.metadata.userId : null,
-        planId: synced.planId,
-        trialStart: synced.trialStart,
-        trialEnd: synced.trialEnd,
-        stripeSessionId: session.id,
-        stripeSubscriptionId: subscriptionId,
-        localSubscriptionId: synced.id,
-      }));
-    }
+    await recordTrialConversionForSubscription({
+      subscription: synced,
+      userId: typeof session.metadata?.userId === "string" ? session.metadata.userId : null,
+      source: event.type,
+      stripeSessionId: session.id,
+      stripeSubscriptionId: subscriptionId,
+    });
     await safeRecordStripeAuditEvent({
       event,
       handled: true,
@@ -508,7 +528,16 @@ export async function handleStripeWebhookEvent(event: Stripe.Event) {
     event.type === "customer.subscription.updated" ||
     event.type === "customer.subscription.deleted"
   ) {
-    const synced = await syncStripeSubscription(event.data.object as Stripe.Subscription);
+    const stripeSubscription = event.data.object as Stripe.Subscription;
+    const synced = await syncStripeSubscription(stripeSubscription);
+    await recordTrialConversionForSubscription({
+      subscription: synced,
+      userId: typeof stripeSubscription.metadata?.userId === "string"
+        ? stripeSubscription.metadata.userId
+        : null,
+      source: event.type,
+      stripeSubscriptionId: synced.stripeSubscriptionId,
+    });
     await safeRecordStripeAuditEvent({
       event,
       handled: true,

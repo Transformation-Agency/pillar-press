@@ -280,6 +280,91 @@ describe("hosted billing helpers", () => {
     });
     expect(JSON.stringify(values)).not.toContain("private@example.com");
   });
+
+  it("records paid subscription webhook conversions without requiring checkout session context", async () => {
+    const inserted: unknown[] = [];
+    const values = vi.fn((row: unknown) => {
+      inserted.push(row);
+      return {};
+    });
+    const insert = vi.fn(() => ({ values }));
+    const limit = vi.fn(async () => []);
+    const where = vi.fn(() => ({ limit }));
+    const from = vi.fn(() => ({ where }));
+    const select = vi.fn(() => ({ from }));
+
+    vi.doMock("@/lib/db", async () => {
+      const actual = await vi.importActual<any>("@/lib/db");
+      return { ...actual, db: { select, insert } };
+    });
+
+    const { recordTrialConversionForSubscription } = await import("@/lib/billing/stripe");
+
+    await recordTrialConversionForSubscription({
+      subscription: {
+        id: "local_sub_1",
+        workspaceId: "workspace_1",
+        planId: "pro",
+        status: "active",
+        stripeSubscriptionId: "sub_123",
+        trialStart: new Date("2026-06-01T00:00:00.000Z"),
+        trialEnd: new Date("2026-06-08T00:00:00.000Z"),
+      } as any,
+      userId: "user_1",
+      source: "customer.subscription.updated",
+    });
+
+    expect(values).toHaveBeenCalledWith(expect.objectContaining({
+      workspaceId: "workspace_1",
+      userId: "user_1",
+      event: "converted",
+      planId: "pro",
+      metadata: {
+        source: "customer.subscription.updated",
+        stripeSessionId: null,
+        stripeSubscriptionId: "sub_123",
+        localSubscriptionId: "local_sub_1",
+      },
+    }));
+    expect(JSON.stringify(inserted)).not.toContain("@");
+  });
+
+  it("does not record trial or inactive subscription webhook conversions", async () => {
+    const values = vi.fn();
+    const insert = vi.fn(() => ({ values }));
+    const limit = vi.fn(async () => []);
+    const where = vi.fn(() => ({ limit }));
+    const from = vi.fn(() => ({ where }));
+    const select = vi.fn(() => ({ from }));
+
+    vi.doMock("@/lib/db", async () => {
+      const actual = await vi.importActual<any>("@/lib/db");
+      return { ...actual, db: { select, insert } };
+    });
+
+    const { recordTrialConversionForSubscription } = await import("@/lib/billing/stripe");
+
+    await recordTrialConversionForSubscription({
+      subscription: {
+        id: "local_sub_trial",
+        workspaceId: "workspace_1",
+        planId: "trial",
+        status: "trialing",
+      } as any,
+      source: "customer.subscription.updated",
+    });
+    await recordTrialConversionForSubscription({
+      subscription: {
+        id: "local_sub_inactive",
+        workspaceId: "workspace_1",
+        planId: "pro",
+        status: "past_due",
+      } as any,
+      source: "customer.subscription.updated",
+    });
+
+    expect(insert).not.toHaveBeenCalled();
+  });
 });
 
 describe("hosted billing status API", () => {
