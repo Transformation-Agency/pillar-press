@@ -74,6 +74,10 @@ flowchart TD
 - Studio's provider dialog can add, replace, or remove hosted media keys through
   `/api/media/provider-settings`, with delete operations entitlement-gated and
   audited without secrets.
+- Studio's saved media profiles can be tested without re-entering the key:
+  Hedra checks credits, ElevenLabs lists voices, and OpenAI/xAI/custom
+  OpenAI-compatible media profiles list models through the saved encrypted
+  profile.
 
 ## Gaps
 
@@ -90,9 +94,9 @@ URL expiry.
 ### 2. Hosted media provider management still needs richer defaults
 
 First-run setup and Studio now write hosted media keys through the encrypted
-settings route, and Studio can remove saved profiles. A production SaaS should
-still add richer provider-specific help, profile test buttons for saved keys,
-and clearer model/capability defaults per media task.
+settings route, Studio can remove saved profiles, and saved profiles can be
+tested without exposing keys. A production SaaS should still add richer
+provider-specific help and clearer model/capability defaults per media task.
 
 Impact: hosted BYOK media can be configured without env vars, but the management
 experience still needs polish before broad self-serve launch.
@@ -107,10 +111,13 @@ experience still needs polish before broad self-serve launch.
      API key.
 
 2. Add server routes for hosted media settings. **Implemented.**
-   - Recommended route: `GET/PUT/DELETE /api/media/provider-settings`.
+   - Recommended routes: `GET/PUT/DELETE /api/media/provider-settings` and
+     `POST /api/media/provider-settings/test`.
    - Browser must receive only secret-free metadata.
    - PUT and DELETE must require authenticated hosted user and BYOK-provider
      entitlement.
+   - Saved-profile tests must require authenticated hosted user and
+     BYOK-provider entitlement before touching a user key.
 
 3. Add a user-scoped media resolver. **Implemented.**
    - Recommended API:
@@ -141,6 +148,8 @@ experience still needs polish before broad self-serve launch.
      route when not running in desktop local-first mode.
    - Studio should list and remove saved hosted media profiles without exposing
      keys. **Implemented.**
+   - Studio should test saved hosted media profiles without asking the user to
+     paste the key again. **Implemented.**
 
 7. Add tests. **Started.**
    - Media settings encryption tests for `kind = "media"`.
@@ -151,6 +160,8 @@ experience still needs polish before broad self-serve launch.
    - Route tests proving BYOK media generation requires BYOK-provider access.
    - Route tests proving Hedra model and credit lookups use saved hosted BYOK
      keys only after BYOK access is allowed.
+   - Route tests proving saved hosted media profiles can be tested without
+     returning raw keys.
    - Regression tests proving secrets never appear in status responses, errors,
      or media job metadata.
 
@@ -161,6 +172,8 @@ experience still needs polish before broad self-serve launch.
   browser after save.
 - A hosted user can remove a saved media provider profile without exposing the
   key and without touching other users or workspaces.
+- A hosted user can test a saved media provider profile without re-pasting the
+  key or exposing it to the browser.
 - Studio status reflects those saved providers.
 - Image generation can run from a hosted user-saved OpenAI/xAI/custom key.
 - Audio generation can run from a hosted user-saved OpenAI or ElevenLabs key.

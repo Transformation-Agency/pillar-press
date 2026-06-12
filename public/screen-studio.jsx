@@ -116,6 +116,34 @@ function MediaProvidersDialog({ status, onClose }) {
     }
   }
 
+  async function testSavedProvider(profile) {
+    if (!profile || !profile.id) return;
+    setBusy("test-" + profile.id);
+    setMessage("Testing " + (profile.label || providerLabels[profile.provider] || "media profile") + ".");
+    try {
+      const response = await fetch("/api/media/provider-settings/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ profileId: profile.id }),
+      });
+      const body = await response.json().catch(() => null);
+      if (!response.ok) throw new Error((body && body.error) || "Could not test media provider.");
+      const check = body && body.check;
+      const detail = check && check.kind === "credits"
+        ? " Credits visible."
+        : check && check.kind === "voices"
+          ? " Voices visible."
+          : check && check.kind === "models"
+            ? " Models visible."
+            : "";
+      setMessage((body && body.label ? body.label : "Provider") + " works." + detail);
+    } catch (error) {
+      setMessage((error && error.message) || "Could not test media provider.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "oklch(0 0 0 / 0.4)", display: "grid", placeItems: "center", zIndex: 80 }}>
       <div className="card" onClick={(e) => e.stopPropagation()} style={{ width: 720, maxWidth: "92vw", padding: "26px 28px", maxHeight: "86vh", overflowY: "auto" }}>
@@ -200,14 +228,24 @@ function MediaProvidersDialog({ status, onClose }) {
                       {profile.id === settings.defaultProfileId ? " · default" : ""}
                     </div>
                   </div>
-                  <button
-                    className="btn ghost"
-                    onClick={() => deleteProvider(profile)}
-                    disabled={!!busy}
-                    title="Remove this hosted media profile"
-                  >
-                    {busy === "delete-" + profile.id ? <Spinner size={14} /> : "Remove"}
-                  </button>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <button
+                      className="btn"
+                      onClick={() => testSavedProvider(profile)}
+                      disabled={!!busy}
+                      title="Test this saved hosted media profile"
+                    >
+                      {busy === "test-" + profile.id ? <Spinner size={14} /> : "Test"}
+                    </button>
+                    <button
+                      className="btn ghost"
+                      onClick={() => deleteProvider(profile)}
+                      disabled={!!busy}
+                      title="Remove this hosted media profile"
+                    >
+                      {busy === "delete-" + profile.id ? <Spinner size={14} /> : "Remove"}
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
