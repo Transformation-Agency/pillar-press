@@ -89,6 +89,11 @@ flowchart TD
   key labels, help URLs, default base URLs, default models, and model
   placeholders. Studio uses that server catalog instead of hard-coded provider
   defaults.
+- Hosted BYOK provider base URLs are guarded before save and before live
+  test/list/runtime calls: hosted web requires public HTTPS endpoints, rejects
+  embedded URL credentials, and refuses localhost, link-local, and private
+  network targets. Desktop/local-first remains free to use local providers such
+  as Ollama or Docker Model Runner.
 
 ## Gaps
 
@@ -177,8 +182,10 @@ experience still needs live-provider validation before broad self-serve launch.
      keys only after BYOK access is allowed.
    - Route tests proving saved hosted media profiles can be tested without
      returning raw keys.
-   - Regression tests proving secrets never appear in status responses, errors,
-     or media job metadata.
+- Regression tests proving secrets never appear in status responses, errors,
+  or media job metadata.
+- Hosted provider URL guard tests proving hosted media/LLM settings cannot
+  persist localhost, private-network, non-HTTPS, or credentialed base URLs.
 
 ## Acceptance Criteria
 
@@ -210,3 +217,6 @@ experience still needs live-provider validation before broad self-serve launch.
 - Usage events distinguish managed media generation from BYOK media generation.
 - Plans can allow BYOK media while denying managed media.
 - Desktop/local-first media behavior remains unchanged.
+- Hosted custom/OpenAI-compatible media endpoints must be public HTTPS provider
+  endpoints; local/private endpoints are supported only by the desktop/local-
+  first runtime.

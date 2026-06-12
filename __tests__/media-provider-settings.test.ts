@@ -7,6 +7,34 @@ beforeEach(() => {
 });
 
 describe("hosted media provider settings", () => {
+  it("rejects hosted media provider base URLs that target local or private services", async () => {
+    const limit = vi.fn(async () => []);
+    const where = vi.fn(() => ({ limit }));
+    const insert = vi.fn();
+    const select = vi.fn(() => ({ from: () => ({ where }) }));
+
+    vi.doMock("@/lib/db", async () => {
+      const actual = await vi.importActual<any>("@/lib/db");
+      return { ...actual, db: { select, insert } };
+    });
+
+    const { saveHostedMediaProviderSettings } = await import("@/lib/mediaProviderSettings");
+    await expect(saveHostedMediaProviderSettings(
+      { id: "user_1", workspaceId: "workspace_1" },
+      {
+        profiles: [{
+          id: "internal-image",
+          label: "Internal image endpoint",
+          provider: "custom-image",
+          model: "image-model",
+          baseUrl: "https://169.254.169.254/latest",
+          apiKey: "media-secret",
+        }],
+      },
+    )).rejects.toMatchObject({ code: "invalid_provider_base_url", status: 422 });
+    expect(insert).not.toHaveBeenCalled();
+  });
+
   it("stores media provider rows as kind media and returns only sanitized metadata", async () => {
     const encryptedValues: Array<Record<string, unknown>> = [];
     const returning = vi.fn(async () => []);

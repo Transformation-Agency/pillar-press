@@ -411,6 +411,11 @@ Rules:
   server-side before falling back to managed keys. First-run setup, full-screen
   model setup, and Studio provider settings now write hosted media keys through
   the encrypted media provider settings route instead of requiring env vars.
+- Hosted BYOK base URLs must be public provider endpoints, not arbitrary server
+  fetch targets. **Implemented:** hosted LLM/media provider saves plus live
+  test/list/runtime resolution require public HTTPS URLs and reject embedded
+  credentials, localhost, link-local, and private-network targets. Desktop/
+  local-first remains able to use local endpoints.
 - Trial workspaces can use managed keys only within tight usage caps.
 
 ## Stage 1 Success Gate

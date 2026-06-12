@@ -23,6 +23,35 @@ describe("hosted provider setting encryption", () => {
 });
 
 describe("hosted provider settings API", () => {
+  it("rejects hosted LLM provider base URLs that target local or private services", async () => {
+    process.env.KINGS_PRESS_HOSTED_SECRET_KEY = "test-hosted-secret";
+    const limit = vi.fn(async () => []);
+    const where = vi.fn(() => ({ limit }));
+    const insert = vi.fn();
+    const select = vi.fn(() => ({ from: () => ({ where }) }));
+
+    vi.doMock("@/lib/db", async () => {
+      const actual = await vi.importActual<any>("@/lib/db");
+      return { ...actual, db: { select, insert } };
+    });
+
+    const { saveHostedProviderSettings } = await import("@/lib/providerSettings");
+    await expect(saveHostedProviderSettings(
+      { id: "user_1", workspaceId: "workspace_1" },
+      {
+        profiles: [{
+          id: "local-ollama",
+          label: "Local Ollama",
+          provider: "ollama",
+          model: "llama3.1",
+          baseUrl: "http://127.0.0.1:11434",
+          apiKey: "not-needed",
+        }],
+      },
+    )).rejects.toMatchObject({ code: "invalid_provider_base_url", status: 422 });
+    expect(insert).not.toHaveBeenCalled();
+  });
+
   it("saves provider settings and returns only sanitized metadata", async () => {
     const savedSettings = {
       profiles: [{

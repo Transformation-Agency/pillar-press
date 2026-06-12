@@ -1,6 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { db, providerSecrets, type ProviderSecret } from "@/lib/db";
 import type { SessionUser } from "@/lib/auth";
+import { normalizeHostedProviderBaseUrl } from "@/lib/hostedProviderUrls";
 import { decryptHostedSecret, encryptHostedSecret } from "@/lib/providerSettings";
 
 const MEDIA_PROVIDERS = ["hedra", "elevenlabs", "openai", "xai", "custom-image"] as const;
@@ -142,6 +143,7 @@ export async function saveHostedMediaProviderSettings(
       ? encryptHostedSecret(profile.apiKey!)
       : existing?.encryptedApiKey ?? null;
     const hasApiKey = Boolean(encryptedApiKey);
+    const baseUrl = normalizeHostedProviderBaseUrl(profile.baseUrl);
     const values = {
       workspaceId: user.workspaceId,
       userId: user.id,
@@ -150,7 +152,7 @@ export async function saveHostedMediaProviderSettings(
       label: trim(profile.label) ?? null,
       provider: profile.provider,
       model: trim(profile.model) ?? null,
-      baseUrl: trim(profile.baseUrl) ?? null,
+      baseUrl: baseUrl ?? null,
       encryptedApiKey,
       hasApiKey,
       isDefault: id === defaultProfileId,

@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireUser } from "@/lib/auth";
 import { toErrorResponse } from "@/lib/errors";
+import { normalizeHostedProviderBaseUrl } from "@/lib/hostedProviderUrls";
+import { isLocalFirstMode } from "@/lib/local/mode";
 import { getHostedProviderProfile } from "@/lib/providerSettings";
 import {
   DEFAULT_GEMINI_BASE_URL,
@@ -31,7 +33,10 @@ function defaultBaseUrl(provider: LLMProvider): string | undefined {
 
 function normalizeConfig(body: z.infer<typeof Body>) {
   const provider = body.provider;
-  const baseUrl = body.baseUrl?.trim().replace(/\/+$/, "") || defaultBaseUrl(provider);
+  const rawBaseUrl = body.baseUrl?.trim() || defaultBaseUrl(provider);
+  const baseUrl = isLocalFirstMode()
+    ? rawBaseUrl?.replace(/\/+$/, "")
+    : normalizeHostedProviderBaseUrl(rawBaseUrl);
   const apiKey = body.apiKey?.trim() || undefined;
 
   if (provider === "openai-compatible" && !baseUrl) {

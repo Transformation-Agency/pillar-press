@@ -11,6 +11,7 @@ import {
 } from "@/lib/llm/config";
 import type { SessionUser } from "@/lib/auth";
 import { isLocalFirstMode } from "@/lib/local/mode";
+import { normalizeHostedProviderBaseUrl } from "@/lib/hostedProviderUrls";
 import { getHostedProviderProfile, getHostedProviderSettings } from "@/lib/providerSettings";
 import { anthropicProvider } from "@/lib/llm/providers/anthropic";
 import { geminiProvider } from "@/lib/llm/providers/gemini";
@@ -136,7 +137,7 @@ export async function getAIForTaskForUser(task: LLMTask, user: SessionUser): Pro
       const config: LLMConfig = {
         provider: profile.provider,
         model: profile.model,
-        baseUrl: profile.baseUrl,
+        baseUrl: normalizeHostedProviderBaseUrl(profile.baseUrl),
         apiKey: profile.apiKey,
         maxTokens: DEFAULT_MAX_TOKENS,
       };

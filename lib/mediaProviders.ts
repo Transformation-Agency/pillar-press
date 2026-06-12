@@ -1,5 +1,6 @@
 import { desktopMediaProvider } from "@/lib/desktopSettings";
 import type { SessionUser } from "@/lib/auth";
+import { normalizeHostedProviderBaseUrl } from "@/lib/hostedProviderUrls";
 import { isLocalFirstMode } from "@/lib/local/mode";
 import {
   getHostedMediaProviderProfile,
@@ -446,7 +447,7 @@ export async function getImageProviderForUser(
   if (!supportsImageProvider(selectedProvider)) return null;
   if (exact) {
     const apiKey = exact.apiKey?.trim();
-    const baseUrl = (exact.baseUrl || defaultMediaBaseUrl(selectedProvider)).trim().replace(/\/$/, "");
+    const baseUrl = normalizeHostedProviderBaseUrl(exact.baseUrl || defaultMediaBaseUrl(selectedProvider));
     if (apiKey && baseUrl) {
       return { provider: selectedProvider, apiKey, baseUrl, providerSource: "byok", profileId: exact.id };
     }
@@ -455,7 +456,7 @@ export async function getImageProviderForUser(
   if (exactLlm) {
     const mediaProvider = mediaProviderFromLlmProfile(exactLlm);
     const apiKey = exactLlm.apiKey?.trim();
-    const baseUrl = (exactLlm.baseUrl || (mediaProvider ? defaultMediaBaseUrl(mediaProvider) : "")).trim().replace(/\/$/, "");
+    const baseUrl = normalizeHostedProviderBaseUrl(exactLlm.baseUrl || (mediaProvider ? defaultMediaBaseUrl(mediaProvider) : ""));
     if (mediaProvider && supportsImageProvider(mediaProvider) && apiKey && baseUrl) {
       return { provider: mediaProvider, apiKey, baseUrl, providerSource: "byok", profileId: exactLlm.id };
     }
@@ -464,7 +465,7 @@ export async function getImageProviderForUser(
   if (!isLocalFirstMode() && user.workspaceId) {
     const saved = await getHostedMediaProviderProfileForProvider(user, selectedProvider);
     const apiKey = saved?.apiKey?.trim();
-    const baseUrl = (saved?.baseUrl || defaultMediaBaseUrl(selectedProvider)).trim().replace(/\/$/, "");
+    const baseUrl = normalizeHostedProviderBaseUrl(saved?.baseUrl || defaultMediaBaseUrl(selectedProvider));
     if (saved && apiKey && baseUrl) {
       return { provider: selectedProvider, apiKey, baseUrl, providerSource: "byok", profileId: saved.id };
     }
@@ -472,7 +473,7 @@ export async function getImageProviderForUser(
       ? await hostedLlmMediaProfileForProvider(user, selectedProvider)
       : null;
     const llmApiKey = llmSaved?.apiKey?.trim();
-    const llmBaseUrl = (llmSaved?.baseUrl || defaultMediaBaseUrl(selectedProvider)).trim().replace(/\/$/, "");
+    const llmBaseUrl = normalizeHostedProviderBaseUrl(llmSaved?.baseUrl || defaultMediaBaseUrl(selectedProvider));
     if (llmSaved && llmApiKey && llmBaseUrl) {
       return { provider: selectedProvider, apiKey: llmApiKey, baseUrl: llmBaseUrl, providerSource: "byok", profileId: llmSaved.id };
     }
@@ -503,7 +504,7 @@ export async function getAudioProviderForUser(
   if (selectedProvider !== "openai") return null;
   if (exact) {
     const apiKey = exact.apiKey?.trim();
-    const baseUrl = (exact.baseUrl || defaultMediaBaseUrl("openai")).trim().replace(/\/$/, "");
+    const baseUrl = normalizeHostedProviderBaseUrl(exact.baseUrl || defaultMediaBaseUrl("openai"));
     if (apiKey && baseUrl) {
       return { provider: "openai", apiKey, baseUrl, providerSource: "byok", profileId: exact.id };
     }
@@ -511,7 +512,7 @@ export async function getAudioProviderForUser(
   }
   if (exactLlm) {
     const apiKey = exactLlm.apiKey?.trim();
-    const baseUrl = (exactLlm.baseUrl || defaultMediaBaseUrl("openai")).trim().replace(/\/$/, "");
+    const baseUrl = normalizeHostedProviderBaseUrl(exactLlm.baseUrl || defaultMediaBaseUrl("openai"));
     if (apiKey && baseUrl) {
       return { provider: "openai", apiKey, baseUrl, providerSource: "byok", profileId: exactLlm.id };
     }
@@ -520,13 +521,13 @@ export async function getAudioProviderForUser(
   if (!isLocalFirstMode() && user.workspaceId) {
     const saved = await getHostedMediaProviderProfileForProvider(user, "openai");
     const apiKey = saved?.apiKey?.trim();
-    const baseUrl = (saved?.baseUrl || defaultMediaBaseUrl("openai")).trim().replace(/\/$/, "");
+    const baseUrl = normalizeHostedProviderBaseUrl(saved?.baseUrl || defaultMediaBaseUrl("openai"));
     if (saved && apiKey && baseUrl) {
       return { provider: "openai", apiKey, baseUrl, providerSource: "byok", profileId: saved.id };
     }
     const llmSaved = await hostedLlmMediaProfileForProvider(user, "openai");
     const llmApiKey = llmSaved?.apiKey?.trim();
-    const llmBaseUrl = (llmSaved?.baseUrl || defaultMediaBaseUrl("openai")).trim().replace(/\/$/, "");
+    const llmBaseUrl = normalizeHostedProviderBaseUrl(llmSaved?.baseUrl || defaultMediaBaseUrl("openai"));
     if (llmSaved && llmApiKey && llmBaseUrl) {
       return { provider: "openai", apiKey: llmApiKey, baseUrl: llmBaseUrl, providerSource: "byok", profileId: llmSaved.id };
     }

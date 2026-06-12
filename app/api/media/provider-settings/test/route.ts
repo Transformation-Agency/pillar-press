@@ -6,6 +6,7 @@ import { requireByokProviderAccess } from "@/lib/billing/entitlements";
 import { toErrorResponse } from "@/lib/errors";
 import { getCredits } from "@/lib/hedra";
 import { listVoices } from "@/lib/elevenlabs";
+import { normalizeHostedProviderBaseUrl } from "@/lib/hostedProviderUrls";
 import { isLocalFirstMode } from "@/lib/local/mode";
 import {
   getHostedMediaProviderProfile,
@@ -27,7 +28,7 @@ function profileLabel(profile: HostedMediaProviderProfileSecret) {
 }
 
 async function testOpenAICompatibleProfile(profile: HostedMediaProviderProfileSecret) {
-  const baseUrl = (profile.baseUrl || defaultBaseUrl(profile.provider)).trim().replace(/\/+$/, "");
+  const baseUrl = normalizeHostedProviderBaseUrl(profile.baseUrl || defaultBaseUrl(profile.provider));
   if (!baseUrl) {
     return NextResponse.json({
       ok: false,

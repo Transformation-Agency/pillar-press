@@ -2,6 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:
 import { and, eq } from "drizzle-orm";
 import { db, providerSecrets, type ProviderSecret } from "@/lib/db";
 import type { SessionUser } from "@/lib/auth";
+import { normalizeHostedProviderBaseUrl } from "@/lib/hostedProviderUrls";
 import type { LLMProvider, LLMTask } from "@/lib/llm/types";
 import { LLM_TASKS } from "@/lib/llm/config";
 
@@ -206,6 +207,7 @@ export async function saveHostedProviderSettings(
       ? encryptHostedSecret(profile.apiKey!)
       : existing?.encryptedApiKey ?? null;
     const hasApiKey = Boolean(encryptedApiKey);
+    const baseUrl = normalizeHostedProviderBaseUrl(profile.baseUrl);
     const values = {
       workspaceId: user.workspaceId,
       userId: user.id,
@@ -214,7 +216,7 @@ export async function saveHostedProviderSettings(
       label: trim(profile.label) ?? null,
       provider: profile.provider,
       model,
-      baseUrl: trim(profile.baseUrl) ?? null,
+      baseUrl: baseUrl ?? null,
       encryptedApiKey,
       hasApiKey,
       isDefault: id === defaultProfileId,

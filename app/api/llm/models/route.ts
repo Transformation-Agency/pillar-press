@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireUser } from "@/lib/auth";
 import { toErrorResponse } from "@/lib/errors";
+import { normalizeHostedProviderBaseUrl } from "@/lib/hostedProviderUrls";
+import { isLocalFirstMode } from "@/lib/local/mode";
 import { getHostedProviderProfile } from "@/lib/providerSettings";
 import {
   DEFAULT_GEMINI_BASE_URL,
@@ -67,7 +69,10 @@ function headersFor(provider: z.infer<typeof Body>["provider"], apiKey?: string)
 }
 
 function modelsUrl(provider: z.infer<typeof Body>["provider"], baseUrl?: string): string {
-  const root = (baseUrl?.trim() || defaultBaseUrl(provider))?.replace(/\/+$/, "");
+  const rawRoot = baseUrl?.trim() || defaultBaseUrl(provider);
+  const root = isLocalFirstMode()
+    ? rawRoot?.replace(/\/+$/, "")
+    : normalizeHostedProviderBaseUrl(rawRoot);
   if (!root) throw new LLMError(422, "validation", "Add a base URL before listing models.", provider);
   if (provider === "ollama") return `${root}/api/tags`;
   return `${root}/models`;
