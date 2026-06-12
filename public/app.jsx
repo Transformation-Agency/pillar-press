@@ -23,9 +23,18 @@ function HostedAuthScreen({ auth }) {
   const [mode, setMode] = React.useState("signin");
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
+  const [passwordConfirm, setPasswordConfirm] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [message, setMessage] = React.useState("");
   const [error, setError] = React.useState("");
+
+  React.useEffect(() => {
+    if (auth && auth.recovery) {
+      setMode("resetPassword");
+      setError("");
+      setMessage("Choose a new password for your King's Press account.");
+    }
+  }, [auth && auth.recovery]);
 
   const submit = async (event) => {
     event.preventDefault();
@@ -33,6 +42,20 @@ function HostedAuthScreen({ auth }) {
     setError("");
     setMessage("");
     try {
+      if (mode === "resetRequest") {
+        await window.KP_AUTH.requestPasswordReset(email.trim());
+        setMessage("Check your email for a password reset link.");
+        return;
+      }
+
+      if (mode === "resetPassword") {
+        if (password !== passwordConfirm) throw new Error("Passwords do not match.");
+        const result = await window.KP_AUTH.updateRecoveredPassword(password);
+        setMessage("Password updated. Opening your desk.");
+        if (result && result.passwordUpdated) await window.Store.reload();
+        return;
+      }
+
       const result = mode === "signup"
         ? await window.KP_AUTH.signUp(email.trim(), password)
         : await window.KP_AUTH.signIn(email.trim(), password);
@@ -78,49 +101,125 @@ function HostedAuthScreen({ auth }) {
       }}>
         <div className="eyebrow" style={{ marginBottom: 10 }}>King's Press</div>
         <h1 style={{ margin: 0, fontFamily: "var(--font-display)", fontSize: 34, fontWeight: 500 }}>
-          {mode === "signup" ? "Create your account" : "Sign in"}
+          {mode === "signup"
+            ? "Create your account"
+            : mode === "resetRequest"
+              ? "Reset your password"
+              : mode === "resetPassword"
+                ? "Choose a new password"
+                : "Sign in"}
         </h1>
         <p style={{ color: "var(--muted)", lineHeight: 1.5, margin: "10px 0 22px" }}>
-          Your workspace, campaigns, preferences, and writing history stay scoped to your account.
+          {mode === "resetRequest"
+            ? "Enter your account email and King's Press will send a reset link."
+            : mode === "resetPassword"
+              ? "Set a new password to continue into your workspace."
+              : "Your workspace, campaigns, preferences, and writing history stay scoped to your account."}
         </p>
 
-        <label className="eyebrow" style={{ display: "block", marginBottom: 6 }}>Email</label>
-        <input
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          type="email"
-          required
-          autoComplete="email"
-          style={{ width: "100%", marginBottom: 14 }}
-          placeholder="you@example.com"
-        />
+        {mode !== "resetPassword" && (
+          <>
+            <label className="eyebrow" style={{ display: "block", marginBottom: 6 }}>Email</label>
+            <input
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              type="email"
+              required
+              autoComplete="email"
+              style={{ width: "100%", marginBottom: 14 }}
+              placeholder="you@example.com"
+            />
+          </>
+        )}
 
-        <label className="eyebrow" style={{ display: "block", marginBottom: 6 }}>Password</label>
-        <input
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          type="password"
-          required
-          minLength={6}
-          autoComplete={mode === "signup" ? "new-password" : "current-password"}
-          style={{ width: "100%", marginBottom: 18 }}
-          placeholder="Your password"
-        />
+        {mode !== "resetRequest" && (
+          <>
+            <label className="eyebrow" style={{ display: "block", marginBottom: 6 }}>
+              {mode === "resetPassword" ? "New password" : "Password"}
+            </label>
+            <input
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              type="password"
+              required
+              minLength={6}
+              autoComplete={mode === "signin" ? "current-password" : "new-password"}
+              style={{ width: "100%", marginBottom: mode === "resetPassword" ? 14 : 18 }}
+              placeholder={mode === "resetPassword" ? "New password" : "Your password"}
+            />
+          </>
+        )}
+
+        {mode === "resetPassword" && (
+          <>
+            <label className="eyebrow" style={{ display: "block", marginBottom: 6 }}>Confirm password</label>
+            <input
+              value={passwordConfirm}
+              onChange={(e) => setPasswordConfirm(e.target.value)}
+              type="password"
+              required
+              minLength={6}
+              autoComplete="new-password"
+              style={{ width: "100%", marginBottom: 18 }}
+              placeholder="Confirm new password"
+            />
+          </>
+        )}
 
         {error && <p role="alert" style={{ color: "var(--sev-must)", margin: "0 0 12px" }}>{error}</p>}
         {message && <p role="status" style={{ color: "var(--muted)", margin: "0 0 12px" }}>{message}</p>}
 
         <button className="btn primary" type="submit" disabled={busy} style={{ width: "100%", justifyContent: "center" }}>
-          {busy ? <Spinner size={15} /> : (mode === "signup" ? "Create account" : "Sign in")}
+          {busy
+            ? <Spinner size={15} />
+            : mode === "signup"
+              ? "Create account"
+              : mode === "resetRequest"
+                ? "Send reset link"
+                : mode === "resetPassword"
+                  ? "Update password"
+                  : "Sign in"}
         </button>
-        <button
-          className="link"
-          type="button"
-          onClick={() => { setMode(mode === "signup" ? "signin" : "signup"); setError(""); setMessage(""); }}
-          style={{ marginTop: 16, width: "100%", textAlign: "center" }}
-        >
-          {mode === "signup" ? "I already have an account" : "Create an account"}
-        </button>
+        {mode === "signin" && (
+          <>
+            <button
+              className="link"
+              type="button"
+              onClick={() => { setMode("resetRequest"); setError(""); setMessage(""); setPassword(""); setPasswordConfirm(""); }}
+              style={{ marginTop: 16, width: "100%", textAlign: "center" }}
+            >
+              Forgot your password?
+            </button>
+            <button
+              className="link"
+              type="button"
+              onClick={() => { setMode("signup"); setError(""); setMessage(""); setPassword(""); setPasswordConfirm(""); }}
+              style={{ marginTop: 10, width: "100%", textAlign: "center" }}
+            >
+              Create an account
+            </button>
+          </>
+        )}
+        {mode === "signup" && (
+          <button
+            className="link"
+            type="button"
+            onClick={() => { setMode("signin"); setError(""); setMessage(""); setPassword(""); setPasswordConfirm(""); }}
+            style={{ marginTop: 16, width: "100%", textAlign: "center" }}
+          >
+            I already have an account
+          </button>
+        )}
+        {mode === "resetRequest" && (
+          <button
+            className="link"
+            type="button"
+            onClick={() => { setMode("signin"); setError(""); setMessage(""); setPassword(""); setPasswordConfirm(""); }}
+            style={{ marginTop: 16, width: "100%", textAlign: "center" }}
+          >
+            Back to sign in
+          </button>
+        )}
       </form>
     </main>
   );
@@ -1508,7 +1607,7 @@ function App() {
     if (window.Store && window.Store.resetForAuth) window.Store.resetForAuth();
   };
 
-  if (auth.requiresLogin && !auth.authenticated) return <HostedAuthScreen auth={auth} />;
+  if (auth.requiresLogin && (!auth.authenticated || auth.recovery)) return <HostedAuthScreen auth={auth} />;
 
   return (
     <div className="app">

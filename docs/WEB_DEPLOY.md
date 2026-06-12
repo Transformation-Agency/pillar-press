@@ -51,6 +51,12 @@ the Supabase bearer token to same-origin `/api/*` calls, and auto-creates the
 first workspace plus a trial subscription row on the first authenticated
 session request.
 
+Password recovery is handled by the same static auth gate: users can request a
+Supabase recovery email, return to the hosted app with Supabase recovery tokens
+in the URL fragment, and set a new password before the workspace opens. In the
+Supabase dashboard, add the hosted app URL to the Auth redirect allowlist so
+recovery links can return to the app.
+
 ## Billing
 
 Hosted billing uses Stripe Checkout, Stripe Customer Portal, and signed Stripe

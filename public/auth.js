@@ -10,6 +10,7 @@
   let user = null;
   let ready = false;
   let lastError = null;
+  let recovery = readRecoveryFragment();
 
   function loadSession() {
     try {
@@ -35,6 +36,27 @@
     });
   }
 
+  function readRecoveryFragment() {
+    if (!window.location || !window.location.hash) return null;
+    const hash = window.location.hash.replace(/^#/, "");
+    if (!hash) return null;
+    const params = new URLSearchParams(hash);
+    if (params.get("type") !== "recovery") return null;
+    const accessToken = params.get("access_token");
+    const refreshToken = params.get("refresh_token");
+    if (!accessToken) return null;
+    try {
+      window.history.replaceState(null, document.title, window.location.pathname + window.location.search);
+    } catch { /* ignore */ }
+    return {
+      access_token: accessToken,
+      refresh_token: refreshToken || "",
+      token_type: params.get("token_type") || "bearer",
+      expires_in: Number(params.get("expires_in") || 3600),
+      type: "recovery",
+    };
+  }
+
   function snapshot() {
     const requiresLogin = Boolean(config && config.requiresLogin);
     return {
@@ -44,6 +66,7 @@
       authDisabled: Boolean(config && config.authDisabled),
       configured: Boolean(config && config.ready),
       authenticated: !requiresLogin || Boolean(session && session.access_token),
+      recovery: Boolean(recovery && recovery.access_token),
       user,
       error: lastError,
     };
@@ -70,6 +93,26 @@
         "Content-Type": "application/json",
         Accept: "application/json",
         apikey: anon,
+      },
+      body: JSON.stringify(body || {}),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error_description || data.msg || data.error || "Authentication failed.");
+    }
+    return data;
+  }
+
+  async function supabaseAuthorizedJson(path, token, method, body) {
+    const anon = config && config.supabaseAnonKey;
+    if (!anon) throw new Error("Supabase anon key is missing.");
+    const response = await nativeFetch(authEndpoint(path), {
+      method: method || "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        apikey: anon,
+        Authorization: "Bearer " + token,
       },
       body: JSON.stringify(body || {}),
     });
@@ -191,6 +234,7 @@
     try {
       const response = await nativeFetch("/api/auth/config", { headers: { Accept: "application/json" } });
       config = response.ok ? await response.json() : { requiresLogin: false, ready: true };
+      if (recovery && recovery.access_token && config.requiresLogin) saveSession(recovery);
       if (config.requiresLogin && session) await loadServerSession();
     } catch (err) {
       lastError = err && err.message ? err.message : "Could not load auth configuration.";
@@ -225,6 +269,25 @@
     });
   }
 
+  async function requestPasswordReset(email) {
+    if (!config || !config.requiresLogin) return snapshot();
+    lastError = null;
+    const redirectTo = window.location.origin + window.location.pathname;
+    await supabaseJson("/auth/v1/recover?redirect_to=" + encodeURIComponent(redirectTo), { email });
+    return snapshot();
+  }
+
+  async function updateRecoveredPassword(password) {
+    if (!config || !config.requiresLogin) return snapshot();
+    if (!recovery || !recovery.access_token) throw new Error("Password recovery link is missing or expired.");
+    lastError = null;
+    await supabaseAuthorizedJson("/auth/v1/user", recovery.access_token, "PUT", { password });
+    recovery = null;
+    saveSession(session);
+    await loadServerSession();
+    return Object.assign(snapshot(), { passwordUpdated: true });
+  }
+
   async function signOut() {
     saveSession(null);
     user = null;
@@ -242,6 +305,8 @@
     },
     signIn,
     signUp,
+    requestPasswordReset,
+    updateRecoveredPassword,
     signOut,
     getAccessToken: accessToken,
   };

@@ -427,6 +427,10 @@ Stage 1 is complete only when:
   has a hosted sign-in/sign-up gate, and `/api/auth/session` bootstraps a
   workspace plus the initial trial subscription row for authenticated Supabase
   users with no membership.
+- Users can recover account access. **Implemented:** the hosted auth gate can
+  request Supabase password recovery emails, detect recovery tokens in the
+  browser URL fragment, and submit a new password through the authenticated
+  Supabase Auth user update flow.
 - `requireUser()` resolves a Supabase user and workspace membership.
   **Implemented:** browser API calls attach the Supabase bearer token; the server
   auth layer validates it, resolves membership, and bootstraps a workspace before
