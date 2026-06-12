@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import {
   BillingError,
   getLatestSubscription,
@@ -10,7 +10,7 @@ import {
   entitlementAllowsByokProvider,
   entitlementAllowsManagedProvider,
 } from "@/lib/billing/usage";
-import { campaigns, db, entitlements, type Entitlement, type Subscription } from "@/lib/db";
+import { campaigns, db, entitlements, mediaJobs, type Entitlement, type Subscription } from "@/lib/db";
 
 async function entitlementForPlan(planId: string) {
   const [entitlement] = await db
@@ -26,6 +26,19 @@ async function campaignCount(workspaceId: string) {
     .select({ id: campaigns.id })
     .from(campaigns)
     .where(eq(campaigns.workspaceId, workspaceId));
+  return rows.length;
+}
+
+async function activeMediaJobCount(workspaceId: string) {
+  const rows = await db
+    .select({ id: mediaJobs.id })
+    .from(mediaJobs)
+    .where(
+      and(
+        eq(mediaJobs.workspaceId, workspaceId),
+        inArray(mediaJobs.status, ["queued", "processing"]),
+      ),
+    );
   return rows.length;
 }
 
@@ -98,6 +111,25 @@ export async function requireExportEnabled(user: BillingSessionUser) {
     );
   }
   return { subscription, entitlement };
+}
+
+export async function requireConcurrentJobCapacity(user: BillingSessionUser) {
+  const { subscription, entitlement } = await activeEntitlementForUser(user);
+  const current = await activeMediaJobCount(user.workspaceId);
+  if (current >= entitlement.maxConcurrentJobs) {
+    throw new BillingError(
+      402,
+      "concurrent_job_limit_exceeded",
+      `Concurrent job limit reached for your plan (${entitlement.maxConcurrentJobs}). Wait for a job to finish or upgrade to run more at once.`,
+    );
+  }
+
+  return {
+    subscription,
+    entitlement,
+    current,
+    limit: entitlement.maxConcurrentJobs,
+  };
 }
 
 export async function requireManagedProviderAccess(user: BillingSessionUser) {

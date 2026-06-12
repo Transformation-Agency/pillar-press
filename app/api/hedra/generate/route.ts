@@ -33,6 +33,7 @@ import { generateOpenAICompatibleImage } from "@/lib/mediaImage";
 import { generateOpenAICompatibleSpeech } from "@/lib/mediaAudio";
 import { campaignInWorkspace, tenantNotFound } from "@/lib/tenant";
 import { completeUsageReservation, failUsageReservation, reserveUsage, type UsageReservation } from "@/lib/billing/usage";
+import { requireConcurrentJobCapacity } from "@/lib/billing/entitlements";
 import type { SessionUser } from "@/lib/auth";
 import type { Piece } from "@/lib/db";
 
@@ -102,6 +103,9 @@ export async function POST(req: Request) {
     if (body.campaignId && !(await campaignInWorkspace(body.campaignId, user.workspaceId))) return tenantNotFound();
     const scopedPiece = body.pieceId ? await resolvePieceForTenant(body.pieceId, user) : null;
     if (body.pieceId && !scopedPiece) return tenantNotFound();
+    if (!isLocalFirstMode() && user.workspaceId) {
+      await requireConcurrentJobCapacity({ ...user, workspaceId: user.workspaceId });
+    }
 
     // ── Audio (ElevenLabs TTS) — no Hedra model involved ───────────────────
     if (body.type === "audio") {

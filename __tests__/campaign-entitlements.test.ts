@@ -148,6 +148,58 @@ describe("hosted campaign entitlement limits", () => {
     });
   });
 
+  it("blocks concurrent media jobs when the current plan active-job limit is reached", async () => {
+    class MockBillingError extends Error {
+      status: number;
+      code: string;
+      constructor(status: number, code: string, message: string) {
+        super(message);
+        this.status = status;
+        this.code = code;
+      }
+    }
+    const subscription = { workspaceId: "workspace_1", planId: "trial", status: "trialing", trialEnd: null };
+    const entitlement = { planId: "trial", maxConcurrentJobs: 1 };
+    const select = vi
+      .fn()
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            limit: vi.fn(async () => [entitlement]),
+          }),
+        }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({
+          where: vi.fn(async () => [{ id: "job_1" }]),
+        }),
+      });
+
+    vi.doMock("@/lib/billing/stripe", () => ({
+      BillingError: MockBillingError,
+      getLatestSubscription: vi.fn(async () => subscription),
+      getOrCreateTrialSubscription: vi.fn(),
+    }));
+    vi.doMock("@/lib/billing/usage", () => ({
+      billingAccessForSubscription: vi.fn(() => ({ allowed: true })),
+    }));
+    vi.doMock("@/lib/db", async () => {
+      const actual = await vi.importActual<any>("@/lib/db");
+      return { ...actual, db: { select } };
+    });
+
+    const { requireConcurrentJobCapacity } = await import("@/lib/billing/entitlements");
+
+    await expect(requireConcurrentJobCapacity({
+      id: "user_1",
+      workspaceId: "workspace_1",
+      role: "author",
+    })).rejects.toMatchObject({
+      status: 402,
+      code: "concurrent_job_limit_exceeded",
+    });
+  });
+
   it("checks hosted campaign capacity before inserting a new campaign", async () => {
     const { BillingError } = await import("@/lib/billing/stripe");
     const error = new BillingError(
@@ -315,5 +367,106 @@ describe("hosted campaign entitlement limits", () => {
       role: "author",
     });
     expect(select).not.toHaveBeenCalled();
+  });
+
+  it("checks hosted concurrent media job capacity before generating media", async () => {
+    const { BillingError } = await import("@/lib/billing/stripe");
+    const error = new BillingError(
+      402,
+      "concurrent_job_limit_exceeded",
+      "Concurrent job limit reached for your plan (1). Wait for a job to finish or upgrade to run more at once.",
+    );
+    const requireConcurrentJobCapacity = vi.fn(async () => {
+      throw error;
+    });
+    const reserveUsage = vi.fn();
+    const generateOpenAICompatibleImage = vi.fn();
+
+    vi.doMock("@/lib/auth", () => ({
+      requireUser: vi.fn(async () => ({ id: "user_1", workspaceId: "workspace_1", role: "author" })),
+    }));
+    vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => false }));
+    vi.doMock("@/lib/tenant", () => ({
+      campaignInWorkspace: vi.fn(async () => true),
+      tenantNotFound: vi.fn(() => new Response(JSON.stringify({ code: "not_found" }), { status: 404 })),
+    }));
+    vi.doMock("@/lib/billing/entitlements", () => ({ requireConcurrentJobCapacity }));
+    vi.doMock("@/lib/billing/usage", () => ({
+      reserveUsage,
+      completeUsageReservation: vi.fn(),
+      failUsageReservation: vi.fn(),
+    }));
+    vi.doMock("@/lib/mediaProviders", () => ({
+      getImageProviderForUser: vi.fn(async () => ({
+        provider: "openai",
+        apiKey: "sk-media-secret",
+        baseUrl: "https://api.openai.com/v1",
+        providerSource: "byok",
+        profileId: "openai-media",
+      })),
+      getAudioProviderForUser: vi.fn(async () => null),
+      getElevenLabsProviderForUser: vi.fn(async () => null),
+      getHedraProviderForUser: vi.fn(async () => null),
+    }));
+    vi.doMock("@/lib/mediaImage", () => ({ generateOpenAICompatibleImage }));
+    vi.doMock("@/lib/mediaAudio", () => ({ generateOpenAICompatibleSpeech: vi.fn() }));
+    vi.doMock("@/lib/hedra", () => ({
+      listModels: vi.fn(),
+      generateAsset: vi.fn(),
+      createAsset: vi.fn(),
+      uploadAsset: vi.fn(),
+    }));
+    vi.doMock("@/lib/elevenlabs", () => ({ textToSpeechLong: vi.fn() }));
+    vi.doMock("@/lib/storage", () => ({ uploadPublicAudio: vi.fn() }));
+    vi.doMock("@/lib/ai/imagePrompt", () => ({ craftImagePrompt: vi.fn() }));
+    vi.doMock("@/lib/llm", () => ({ getAIForTaskForUser: vi.fn() }));
+    vi.doMock("@/lib/refContext", () => ({ buildRefContext: vi.fn(() => "") }));
+    vi.doMock("@/lib/local/database", () => ({
+      createLocalMediaJob: vi.fn(),
+      getLocalMediaJob: vi.fn(),
+      getLocalPiece: vi.fn(),
+      getLocalReferences: vi.fn(),
+      getLocalStyleProfile: vi.fn(),
+    }));
+    vi.doMock("@/lib/db", async () => {
+      const actual = await vi.importActual<any>("@/lib/db");
+      return {
+        ...actual,
+        db: {
+          query: {
+            pieces: { findFirst: vi.fn() },
+            references: { findFirst: vi.fn() },
+            styleProfiles: { findFirst: vi.fn() },
+          },
+          insert: vi.fn(),
+        },
+      };
+    });
+    vi.doMock("@/db/style-schema", () => ({ styleProfiles: { campaignId: "style_profiles.campaign_id" } }));
+
+    const { POST } = await import("../app/api/hedra/generate/route");
+    const res = await POST(new Request("http://test.local/api/hedra/generate", {
+      method: "POST",
+      body: JSON.stringify({
+        type: "image",
+        provider: "openai",
+        modelId: "gpt-image-1",
+        prompt: "Create a cover image.",
+      }),
+    }));
+    const body = await res.json();
+
+    expect(res.status).toBe(402);
+    expect(body).toEqual({
+      error: "Concurrent job limit reached for your plan (1). Wait for a job to finish or upgrade to run more at once.",
+      code: "concurrent_job_limit_exceeded",
+    });
+    expect(requireConcurrentJobCapacity).toHaveBeenCalledWith({
+      id: "user_1",
+      workspaceId: "workspace_1",
+      role: "author",
+    });
+    expect(reserveUsage).not.toHaveBeenCalled();
+    expect(generateOpenAICompatibleImage).not.toHaveBeenCalled();
   });
 });

@@ -139,6 +139,7 @@
       "subscription_inactive",
       "trial_expired",
       "campaign_limit_exceeded",
+      "concurrent_job_limit_exceeded",
       "drive_not_enabled",
       "managed_provider_not_enabled",
       "byok_provider_not_enabled",

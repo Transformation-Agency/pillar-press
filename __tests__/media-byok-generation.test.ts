@@ -121,6 +121,9 @@ describe("POST /api/hedra/generate hosted media BYOK", () => {
       completeUsageReservation,
       failUsageReservation,
     }));
+    vi.doMock("@/lib/billing/entitlements", () => ({
+      requireConcurrentJobCapacity: vi.fn(async () => ({ current: 0, limit: 1 })),
+    }));
 
     const { POST } = await import("../app/api/hedra/generate/route");
     const res = await POST(new Request("http://test.local/api/hedra/generate", {

@@ -402,7 +402,9 @@ Stage 3 is complete only when:
 - Quotas block over-limit work before provider calls. **Started:** the shared
   reservation helper checks the current subscription period against plan
   entitlements before inserting the reservation; hosted campaign creation now
-  checks `max_campaigns` before inserting a campaign.
+  checks `max_campaigns` before inserting a campaign, and hosted media
+  generation checks `max_concurrent_jobs` against active queued/processing
+  media jobs before calling any media provider.
 - Feature gates block plan-restricted integrations. **Started:** hosted book
   export requires `export_enabled`, browser-only output downloads open the
   billing prompt when exports are disabled, and hosted Google Drive OAuth and
