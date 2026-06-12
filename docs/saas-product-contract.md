@@ -403,7 +403,9 @@ Rules:
   profiles to `provider_secrets` with encrypted API keys after verifying the
   workspace plan includes BYOK provider access, returns only secret-free
   metadata, and lets the model setup/test/list flow reuse a saved profile
-  without sending the stored key back to the browser. Desk chat,
+  without sending the stored key back to the browser. Hosted live provider tests
+  and model listing also require BYOK access before reading saved profiles or
+  touching user-supplied keys. Desk chat,
   `/api/llm/util`, onboarding setup extraction, review, revision, outputs,
   output condense, title generation, Weave, manual Gather summaries,
   references AI edit, style feedback, and Studio image/voice prompt helpers now

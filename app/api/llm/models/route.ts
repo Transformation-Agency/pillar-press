@@ -5,6 +5,7 @@ import { toErrorResponse } from "@/lib/errors";
 import { normalizeHostedProviderBaseUrl } from "@/lib/hostedProviderUrls";
 import { isLocalFirstMode } from "@/lib/local/mode";
 import { getHostedProviderProfile } from "@/lib/providerSettings";
+import { requireByokProviderAccess } from "@/lib/billing/entitlements";
 import {
   DEFAULT_GEMINI_BASE_URL,
   DEFAULT_OLLAMA_BASE_URL,
@@ -91,6 +92,12 @@ export async function POST(req: Request) {
   try {
     const user = await requireUser();
     const body = Body.parse(await req.json());
+    if (!isLocalFirstMode()) {
+      if (!user.workspaceId) {
+        return NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
+      }
+      await requireByokProviderAccess({ ...user, workspaceId: user.workspaceId });
+    }
     const saved = body.profileId ? await getHostedProviderProfile(user, body.profileId) : null;
     const request = saved
       ? {
