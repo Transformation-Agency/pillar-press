@@ -18,13 +18,16 @@ export async function POST(req: Request) {
     const form = await req.formData();
     const file = form.get("file");
     const kind = (form.get("kind") as string) === "audio" ? "audio" : "image";
+    const profileId = typeof form.get("mediaProfileId") === "string"
+      ? (form.get("mediaProfileId") as string).trim() || undefined
+      : undefined;
     if (!(file instanceof File)) return NextResponse.json({ error: "No file.", code: "bad_request" }, { status: 400 });
 
     const err = validateUpload({ type: file.type, size: file.size }, kind);
     if (err) return NextResponse.json({ error: err, code: "validation" }, { status: 422 });
 
     const name = sanitizeFilename(file.name);
-    const hedraProvider = await getHedraProviderForUser(user);
+    const hedraProvider = await getHedraProviderForUser(user, process.env, profileId);
     if (!isLocalFirstMode() && user.workspaceId) {
       const billingUser = { ...user, workspaceId: user.workspaceId };
       if (hedraProvider?.providerSource === "byok") await requireByokProviderAccess(billingUser);

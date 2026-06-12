@@ -32,11 +32,11 @@ describe("Hedra credits route in hosted mode", () => {
     }));
 
     const { GET } = await import("../app/api/hedra/credits/route");
-    const res = await GET();
+    const res = await GET(new Request("http://test.local/api/hedra/credits"));
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(body).toEqual({ ok: true, configured: true, managed: true, providerSource: "managed", credits: null });
+    expect(body).toEqual({ ok: true, configured: true, managed: true, providerSource: "managed", profileId: null, credits: null });
     expect(requireManagedProviderAccess).toHaveBeenCalledWith({ id: "user_1", workspaceId: "workspace_1", role: "author" });
     expect(getCredits).not.toHaveBeenCalled();
   });
@@ -68,7 +68,7 @@ describe("Hedra credits route in hosted mode", () => {
     }));
 
     const { GET } = await import("../app/api/hedra/credits/route");
-    const res = await GET();
+    const res = await GET(new Request("http://test.local/api/hedra/credits?mediaProfileId=hedra-main"));
     const body = await res.json();
 
     expect(res.status).toBe(200);
@@ -77,6 +77,7 @@ describe("Hedra credits route in hosted mode", () => {
       configured: true,
       managed: false,
       providerSource: "byok",
+      profileId: "hedra-main",
       credits: { remaining: 17 },
     });
     expect(requireByokProviderAccess).toHaveBeenCalledWith({ id: "user_1", workspaceId: "workspace_1", role: "author" });

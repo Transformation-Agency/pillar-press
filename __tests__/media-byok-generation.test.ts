@@ -302,6 +302,7 @@ describe("POST /api/hedra/generate hosted media BYOK", () => {
         type: "video",
         provider: "hedra",
         mediaProfileId: "hedra-main",
+        audioMediaProfileId: "openai-audio",
         modelId: "hedra-video-v1",
         prompt: "Make a short video.",
         script: "Read this as the synced narration.",
@@ -319,6 +320,8 @@ describe("POST /api/hedra/generate hosted media BYOK", () => {
     expect(getAudioProviderForUser).toHaveBeenCalledWith(
       "openai",
       { id: "user_1", workspaceId: "workspace_1", role: "author" },
+      process.env,
+      "openai-audio",
     );
     expect(getElevenLabsProviderForUser).not.toHaveBeenCalled();
     expect(requireByokProviderAccess).toHaveBeenCalledWith({ id: "user_1", workspaceId: "workspace_1", role: "author" });
@@ -644,5 +647,61 @@ describe("POST /api/hedra/generate hosted media BYOK", () => {
       actualCredits: 2,
       providerRequestId: "gen_1",
     });
+  });
+});
+
+describe("POST /api/hedra/assets hosted media BYOK", () => {
+  it("uploads Hedra assets through an explicit saved hosted media profile", async () => {
+    const reserveStorageBytes = vi.fn(async () => ({ id: "storage_1" }));
+    const releaseStorageReservation = vi.fn();
+    const requireByokProviderAccess = vi.fn(async () => ({}));
+    const createAsset = vi.fn(async () => ({ id: "asset_1" }));
+    const uploadAsset = vi.fn(async () => ({ id: "asset_1", name: "portrait.png" }));
+    const getHedraProviderForUser = vi.fn(async () => ({
+      provider: "hedra",
+      apiKey: "user-hedra-secret",
+      providerSource: "byok",
+      profileId: "hedra-main",
+    }));
+
+    vi.doMock("@/lib/auth", () => ({
+      requireUser: vi.fn(async () => ({ id: "user_1", workspaceId: "workspace_1", role: "author" })),
+    }));
+    vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => false }));
+    vi.doMock("@/lib/mediaProviders", () => ({ getHedraProviderForUser }));
+    vi.doMock("@/lib/hedra", () => ({ createAsset, uploadAsset }));
+    vi.doMock("@/lib/billing/usage", () => ({
+      reserveStorageBytes,
+      releaseStorageReservation,
+    }));
+    vi.doMock("@/lib/billing/entitlements", () => ({
+      requireByokProviderAccess,
+      requireManagedProviderAccess: vi.fn(),
+    }));
+
+    const form = new FormData();
+    form.append("file", new File([new Uint8Array([1, 2, 3])], "portrait.png", { type: "image/png" }));
+    form.append("kind", "image");
+    form.append("mediaProfileId", "hedra-main");
+
+    const { POST } = await import("../app/api/hedra/assets/route");
+    const res = await POST(new Request("http://test.local/api/hedra/assets", {
+      method: "POST",
+      body: form,
+    }));
+    const body = await res.json();
+
+    expect(res.status).toBe(201);
+    expect(body).toEqual({ asset: { id: "asset_1", name: "portrait.png" } });
+    expect(getHedraProviderForUser).toHaveBeenCalledWith(
+      { id: "user_1", workspaceId: "workspace_1", role: "author" },
+      process.env,
+      "hedra-main",
+    );
+    expect(requireByokProviderAccess).toHaveBeenCalledWith({ id: "user_1", workspaceId: "workspace_1", role: "author" });
+    expect(createAsset).toHaveBeenCalledWith({ name: "portrait.png", type: "image" }, { apiKey: "user-hedra-secret" });
+    expect(uploadAsset).toHaveBeenCalledWith("asset_1", expect.any(File), "portrait.png", { apiKey: "user-hedra-secret" });
+    expect(releaseStorageReservation).not.toHaveBeenCalled();
+    expect(JSON.stringify(body)).not.toContain("user-hedra-secret");
   });
 });

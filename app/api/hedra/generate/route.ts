@@ -285,8 +285,12 @@ export async function POST(req: Request) {
     const wanted: GenerationType = body.type === "avatar_video" ? "video" : (body.type as GenerationType);
     const hedraProvider = await getHedraProviderForUser(user, process.env, body.mediaProfileId);
     const needsVoiceover = !body.audioAssetId && Boolean(body.script) && (body.type === "avatar_video" || body.type === "video");
-    const voiceoverAudioProvider = needsVoiceover ? await getAudioProviderForUser("openai", user) : null;
-    const voiceoverProvider = needsVoiceover && !voiceoverAudioProvider ? await getElevenLabsProviderForUser(user) : null;
+    const voiceoverAudioProvider = needsVoiceover
+      ? await getAudioProviderForUser("openai", user, process.env, body.audioMediaProfileId)
+      : null;
+    const voiceoverProvider = needsVoiceover && !voiceoverAudioProvider
+      ? await getElevenLabsProviderForUser(user, process.env, body.audioMediaProfileId)
+      : null;
     const providerSource = combinedSource(hedraProvider, voiceoverAudioProvider ?? voiceoverProvider);
     await requireMediaProviderAccessForSource(user, providerSource);
     const models = await listModels([wanted], { apiKey: hedraProvider?.apiKey });

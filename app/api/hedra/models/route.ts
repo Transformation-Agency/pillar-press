@@ -20,8 +20,9 @@ export async function GET(req: Request) {
     const user = await requireUser();
     const url = new URL(req.url);
     const typeParam = url.searchParams.get("type");
+    const profileId = url.searchParams.get("mediaProfileId") || url.searchParams.get("profileId") || undefined;
     const types = typeParam ? (typeParam.split(",").filter(Boolean) as GenerationType[]) : undefined;
-    const hedraProvider = await getHedraProviderForUser(user);
+    const hedraProvider = await getHedraProviderForUser(user, process.env, profileId);
     if (!isLocalFirstMode()) {
       if (!user.workspaceId) return tenantNotFound();
       try {
@@ -42,6 +43,7 @@ export async function GET(req: Request) {
         models,
         source: "hedra",
         providerSource: hedraProvider?.providerSource ?? "managed",
+        profileId: hedraProvider?.profileId ?? null,
       });
     } catch (e) {
       // graceful fallback — log server-side, still serve the UI

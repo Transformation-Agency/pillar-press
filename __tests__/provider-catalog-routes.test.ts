@@ -29,7 +29,7 @@ describe("hosted provider catalog routes", () => {
     }));
 
     const { GET } = await import("../app/api/eleven/voices/route");
-    const res = await GET();
+    const res = await GET(new Request("http://test.local/api/eleven/voices"));
     const body = await res.json();
 
     expect(res.status).toBe(200);
@@ -37,6 +37,7 @@ describe("hosted provider catalog routes", () => {
     expect(listVoices).toHaveBeenCalledWith({ apiKey: undefined });
     expect(body).toEqual({
       providerSource: "managed",
+      profileId: null,
       source: "elevenlabs",
       voices: [{ id: "voice_1", name: "Narrator", category: "premade", previewUrl: "https://example.test/v.mp3" }],
     });
@@ -74,6 +75,54 @@ describe("hosted provider catalog routes", () => {
     expect(listVoices).toHaveBeenCalledWith({ apiKey: "user-eleven-key" });
     expect(body).toEqual({ source: "byok", voices: [] });
   });
+
+  it("lists ElevenLabs voices through an explicit saved hosted media profile", async () => {
+    const listVoices = vi.fn(async () => [
+      { voice_id: "voice_2", name: "Saved Voice", category: "professional", preview_url: null },
+    ]);
+    const requireByokProviderAccess = vi.fn(async () => ({}));
+    const getElevenLabsProviderForUser = vi.fn(async () => ({
+      provider: "elevenlabs",
+      apiKey: "saved-eleven-key",
+      providerSource: "byok",
+      profileId: "eleven-main",
+    }));
+
+    vi.doMock("@/lib/auth", () => ({
+      requireUser: vi.fn(async () => ({ id: "user_1", workspaceId: "workspace_1", role: "author" })),
+    }));
+    vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => false }));
+    vi.doMock("@/lib/elevenlabs", () => ({ listVoices }));
+    vi.doMock("@/lib/mediaProviders", () => ({ getElevenLabsProviderForUser }));
+    vi.doMock("@/lib/billing/entitlements", () => ({
+      requireManagedProviderAccess: vi.fn(),
+      requireByokProviderAccess,
+    }));
+    vi.doMock("@/lib/tenant", () => ({
+      tenantNotFound: () => Response.json({ error: "Not found.", code: "not_found" }, { status: 404 }),
+    }));
+
+    const { GET } = await import("../app/api/eleven/voices/route");
+    const res = await GET(new Request("http://test.local/api/eleven/voices?mediaProfileId=eleven-main"));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(getElevenLabsProviderForUser).toHaveBeenCalledWith(
+      { id: "user_1", workspaceId: "workspace_1", role: "author" },
+      process.env,
+      "eleven-main",
+    );
+    expect(requireByokProviderAccess).toHaveBeenCalledWith({ id: "user_1", workspaceId: "workspace_1", role: "author" });
+    expect(listVoices).toHaveBeenCalledWith({ apiKey: "saved-eleven-key" });
+    expect(body).toEqual({
+      providerSource: "byok",
+      profileId: "eleven-main",
+      source: "elevenlabs",
+      voices: [{ id: "voice_2", name: "Saved Voice", category: "professional", previewUrl: null }],
+    });
+    expect(JSON.stringify(body)).not.toContain("saved-eleven-key");
+  });
+
 
   it("serves fallback Hedra models without touching Hedra when managed access is unavailable", async () => {
     const listModels = vi.fn();
@@ -137,6 +186,7 @@ describe("hosted provider catalog routes", () => {
     expect(listModels).toHaveBeenCalledWith(["image"], { apiKey: undefined });
     expect(body).toEqual({
       providerSource: "managed",
+      profileId: null,
       source: "hedra",
       models: [{ id: "m1", name: "Image", type: "image" }],
     });
@@ -169,7 +219,7 @@ describe("hosted provider catalog routes", () => {
     }));
 
     const { GET } = await import("../app/api/hedra/models/route");
-    const res = await GET(new Request("http://test.local/api/hedra/models?type=image"));
+    const res = await GET(new Request("http://test.local/api/hedra/models?type=image&mediaProfileId=hedra-main"));
     const body = await res.json();
 
     expect(res.status).toBe(200);
@@ -178,6 +228,7 @@ describe("hosted provider catalog routes", () => {
     expect(listModels).toHaveBeenCalledWith(["image"], { apiKey: "user-hedra-key" });
     expect(body).toEqual({
       providerSource: "byok",
+      profileId: "hedra-main",
       source: "hedra",
       models: [{ id: "m1", name: "Image", type: "image" }],
     });

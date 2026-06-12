@@ -12,10 +12,12 @@ function publicVoices(voices: Awaited<ReturnType<typeof listVoices>>) {
 }
 
 // GET /api/eleven/voices  -> available ElevenLabs voices for the voice picker
-export async function GET() {
+export async function GET(req: Request) {
   try {
     const user = await requireUser();
-    const elevenProvider = await getElevenLabsProviderForUser(user);
+    const url = new URL(req.url);
+    const profileId = url.searchParams.get("mediaProfileId") || url.searchParams.get("profileId") || undefined;
+    const elevenProvider = await getElevenLabsProviderForUser(user, process.env, profileId);
     if (!isLocalFirstMode()) {
       if (!user.workspaceId) return tenantNotFound();
       if (elevenProvider?.providerSource === "byok") {
@@ -30,6 +32,7 @@ export async function GET() {
       voices: publicVoices(voices),
       source: "elevenlabs",
       providerSource: elevenProvider?.providerSource ?? "managed",
+      profileId: elevenProvider?.profileId ?? null,
     });
   } catch (err) {
     return toErrorResponse(err);

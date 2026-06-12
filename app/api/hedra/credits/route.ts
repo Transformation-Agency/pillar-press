@@ -8,10 +8,12 @@ import { tenantNotFound } from "@/lib/tenant";
 import { getHedraProviderForUser } from "@/lib/mediaProviders";
 
 // GET /api/hedra/credits
-export async function GET() {
+export async function GET(req: Request) {
   try {
     const user = await requireUser();
-    const hedraProvider = await getHedraProviderForUser(user);
+    const url = new URL(req.url);
+    const profileId = url.searchParams.get("mediaProfileId") || url.searchParams.get("profileId") || undefined;
+    const hedraProvider = await getHedraProviderForUser(user, process.env, profileId);
     if (!isLocalFirstMode()) {
       if (!user.workspaceId) return tenantNotFound();
       if (hedraProvider?.providerSource === "byok") {
@@ -22,6 +24,7 @@ export async function GET() {
           configured: true,
           managed: false,
           providerSource: "byok",
+          profileId: hedraProvider.profileId ?? null,
           credits,
         });
       }
@@ -31,6 +34,7 @@ export async function GET() {
         configured: Boolean(process.env.HEDRA_API_KEY),
         managed: true,
         providerSource: "managed",
+        profileId: null,
         credits: null,
       });
     }

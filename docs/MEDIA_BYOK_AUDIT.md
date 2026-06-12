@@ -188,6 +188,13 @@ experience still needs live-provider validation before broad self-serve launch.
   key.
 - Hedra avatar/video voiceover can combine hosted user-saved ElevenLabs and
   Hedra keys.
+- Follow-up audit update: profile ids now propagate to the non-generate media
+  edges too. Hedra model listing, Hedra credit checks, Hedra asset uploads, and
+  ElevenLabs voice listing all accept `mediaProfileId`/`profileId` so a hosted
+  BYOK user can target the selected encrypted profile instead of silently using
+  the workspace's first provider profile or managed env key. Video/avatar
+  generation also accepts `audioMediaProfileId` so Hedra rendering and
+  generated voiceover audio can use different explicit BYOK profiles.
 - Usage events distinguish managed media generation from BYOK media generation.
 - Plans can allow BYOK media while denying managed media.
 - Desktop/local-first media behavior remains unchanged.
