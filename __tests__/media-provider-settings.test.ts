@@ -96,11 +96,13 @@ describe("hosted media provider settings", () => {
     };
     const requireByokProviderAccess = vi.fn(async () => ({}));
     const saveHostedMediaProviderSettings = vi.fn(async () => savedSettings);
+    const safeRecordAuditEvent = vi.fn();
 
     vi.doMock("@/lib/auth", () => ({
       requireUser: vi.fn(async () => ({ id: "user_1", workspaceId: "workspace_1", role: "author" })),
     }));
     vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => false }));
+    vi.doMock("@/lib/audit", () => ({ safeRecordAuditEvent }));
     vi.doMock("@/lib/billing/entitlements", () => ({ requireByokProviderAccess }));
     vi.doMock("@/lib/mediaProviderSettings", () => ({
       getHostedMediaProviderSettings: vi.fn(async () => savedSettings),
@@ -135,5 +137,22 @@ describe("hosted media provider settings", () => {
     );
     expect(body).toEqual({ settings: savedSettings });
     expect(JSON.stringify(body)).not.toContain("eleven-secret");
+    expect(safeRecordAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      workspaceId: "workspace_1",
+      actorId: "user_1",
+      action: "provider_settings.updated",
+      targetType: "provider_secrets",
+      metadata: expect.objectContaining({
+        kind: "media",
+        profileCount: 1,
+        defaultProfileId: "eleven-main",
+        profiles: [expect.objectContaining({
+          id: "eleven-main",
+          provider: "elevenlabs",
+          hasApiKey: true,
+        })],
+      }),
+    }));
+    expect(JSON.stringify(safeRecordAuditEvent.mock.calls)).not.toContain("eleven-secret");
   });
 });

@@ -37,11 +37,13 @@ describe("hosted provider settings API", () => {
       taskDefaults: { draft: "openai-gpt-4o-mini" },
     };
     const saveHostedProviderSettings = vi.fn(async () => savedSettings);
+    const safeRecordAuditEvent = vi.fn();
 
     vi.doMock("@/lib/auth", () => ({
       requireUser: vi.fn(async () => ({ id: "user_1", workspaceId: "workspace_1", role: "author" })),
     }));
     vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => false }));
+    vi.doMock("@/lib/audit", () => ({ safeRecordAuditEvent }));
     vi.doMock("@/lib/providerSettings", async () => {
       const actual = await vi.importActual<any>("@/lib/providerSettings");
       return {
@@ -80,5 +82,22 @@ describe("hosted provider settings API", () => {
     );
     expect(body).toEqual({ settings: savedSettings });
     expect(JSON.stringify(body)).not.toContain("sk-should-not-return");
+    expect(safeRecordAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      workspaceId: "workspace_1",
+      actorId: "user_1",
+      action: "provider_settings.updated",
+      targetType: "provider_secrets",
+      metadata: expect.objectContaining({
+        kind: "llm",
+        profileCount: 1,
+        defaultProfileId: "openai-gpt-4o-mini",
+        profiles: [expect.objectContaining({
+          id: "openai-gpt-4o-mini",
+          provider: "openai",
+          hasApiKey: true,
+        })],
+      }),
+    }));
+    expect(JSON.stringify(safeRecordAuditEvent.mock.calls)).not.toContain("sk-should-not-return");
   });
 });

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireUser } from "@/lib/auth";
 import { toErrorResponse } from "@/lib/errors";
 import { isLocalFirstMode } from "@/lib/local/mode";
+import { safeRecordAuditEvent } from "@/lib/audit";
 import {
   getHostedProviderSettings,
   saveHostedProviderSettings,
@@ -56,6 +57,24 @@ export async function PUT(req: Request) {
     }
     const body = bodySchema.parse(await req.json());
     const settings = await saveHostedProviderSettings(user, body.settings);
+    await safeRecordAuditEvent({
+      workspaceId: user.workspaceId,
+      actorId: user.id,
+      action: "provider_settings.updated",
+      targetType: "provider_secrets",
+      metadata: {
+        kind: "llm",
+        profileCount: settings.profiles.length,
+        defaultProfileId: settings.defaultProfileId ?? null,
+        taskDefaultCount: Object.keys(settings.taskDefaults ?? {}).length,
+        profiles: settings.profiles.map((profile) => ({
+          id: profile.id,
+          provider: profile.provider,
+          model: profile.model,
+          hasApiKey: profile.hasApiKey,
+        })),
+      },
+    });
     return NextResponse.json({ settings });
   } catch (err) {
     return toErrorResponse(err);

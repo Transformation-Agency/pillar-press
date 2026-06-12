@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { toErrorResponse } from "@/lib/errors";
+import { safeRecordAuditEvent } from "@/lib/audit";
 import {
   BillingError,
   appBaseUrl,
@@ -33,6 +34,17 @@ export async function POST(req: Request) {
     const session = await stripe.billingPortal.sessions.create({
       customer: customer.stripeCustomerId,
       return_url: `${appBaseUrl(req)}/?billing=portal-return`,
+    });
+
+    await safeRecordAuditEvent({
+      workspaceId: user.workspaceId,
+      actorId: user.id,
+      action: "billing.portal_session.created",
+      targetType: "billing_portal.session",
+      targetId: session.id,
+      metadata: {
+        stripeCustomerId: customer.stripeCustomerId,
+      },
     });
 
     return NextResponse.json({ url: session.url });

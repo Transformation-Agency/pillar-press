@@ -215,3 +215,112 @@ describe("hosted billing status API", () => {
     });
   });
 });
+
+describe("hosted billing session audit events", () => {
+  it("records sanitized audit metadata when creating a Checkout session", async () => {
+    const createCheckout = vi.fn(async () => ({ id: "cs_123", url: "https://checkout.stripe.test/session" }));
+    const safeRecordAuditEvent = vi.fn();
+
+    vi.doMock("@/lib/audit", () => ({ safeRecordAuditEvent }));
+    vi.doMock("@/lib/billing/stripe", () => ({
+      requireBillingUser: vi.fn(async () => ({ id: "user_1", workspaceId: "workspace_1", role: "author" })),
+      requireCheckoutPlan: vi.fn(async () => ({
+        plan: { id: "pro" },
+        priceId: "price_pro",
+      })),
+      getOrCreateBillingCustomer: vi.fn(async () => ({
+        stripeCustomerId: "cus_123",
+      })),
+      appBaseUrl: vi.fn(() => "https://kingspress.test"),
+      getStripe: vi.fn(() => ({
+        checkout: {
+          sessions: {
+            create: createCheckout,
+          },
+        },
+      })),
+    }));
+
+    const { POST } = await import("../app/api/billing/checkout/route");
+    const res = await POST(new Request("https://kingspress.test/api/billing/checkout", {
+      method: "POST",
+      body: JSON.stringify({ planId: "pro", email: "private@example.com" }),
+    }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body).toEqual({ url: "https://checkout.stripe.test/session" });
+    expect(createCheckout).toHaveBeenCalledWith(expect.objectContaining({
+      mode: "subscription",
+      customer: "cus_123",
+      line_items: [{ price: "price_pro", quantity: 1 }],
+    }));
+    expect(safeRecordAuditEvent).toHaveBeenCalledWith({
+      workspaceId: "workspace_1",
+      actorId: "user_1",
+      action: "billing.checkout_session.created",
+      targetType: "checkout.session",
+      targetId: "cs_123",
+      metadata: {
+        planId: "pro",
+        stripeCustomerId: "cus_123",
+      },
+    });
+    expect(JSON.stringify(safeRecordAuditEvent.mock.calls)).not.toContain("private@example.com");
+  });
+
+  it("records sanitized audit metadata when creating a Customer Portal session", async () => {
+    const createPortal = vi.fn(async () => ({ id: "bps_123", url: "https://billing.stripe.test/session" }));
+    const safeRecordAuditEvent = vi.fn();
+
+    vi.doMock("@/lib/audit", () => ({ safeRecordAuditEvent }));
+    vi.doMock("@/lib/billing/stripe", () => ({
+      BillingError: class BillingError extends Error {
+        status: number;
+        code: string;
+        constructor(status: number, code: string, message: string) {
+          super(message);
+          this.status = status;
+          this.code = code;
+        }
+      },
+      requireBillingUser: vi.fn(async () => ({ id: "user_1", workspaceId: "workspace_1", role: "author" })),
+      getOrCreateBillingCustomer: vi.fn(async () => ({
+        stripeCustomerId: "cus_123",
+      })),
+      appBaseUrl: vi.fn(() => "https://kingspress.test"),
+      getStripe: vi.fn(() => ({
+        billingPortal: {
+          sessions: {
+            create: createPortal,
+          },
+        },
+      })),
+    }));
+
+    const { POST } = await import("../app/api/billing/portal/route");
+    const res = await POST(new Request("https://kingspress.test/api/billing/portal", {
+      method: "POST",
+      body: JSON.stringify({ email: "private@example.com" }),
+    }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body).toEqual({ url: "https://billing.stripe.test/session" });
+    expect(createPortal).toHaveBeenCalledWith({
+      customer: "cus_123",
+      return_url: "https://kingspress.test/?billing=portal-return",
+    });
+    expect(safeRecordAuditEvent).toHaveBeenCalledWith({
+      workspaceId: "workspace_1",
+      actorId: "user_1",
+      action: "billing.portal_session.created",
+      targetType: "billing_portal.session",
+      targetId: "bps_123",
+      metadata: {
+        stripeCustomerId: "cus_123",
+      },
+    });
+    expect(JSON.stringify(safeRecordAuditEvent.mock.calls)).not.toContain("private@example.com");
+  });
+});

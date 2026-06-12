@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { toErrorResponse } from "@/lib/errors";
+import { safeRecordAuditEvent } from "@/lib/audit";
 import {
   appBaseUrl,
   getOrCreateBillingCustomer,
@@ -50,6 +51,18 @@ export async function POST(req: Request) {
           planId: plan.id,
           product: "kings_press",
         },
+      },
+    });
+
+    await safeRecordAuditEvent({
+      workspaceId: user.workspaceId,
+      actorId: user.id,
+      action: "billing.checkout_session.created",
+      targetType: "checkout.session",
+      targetId: session.id,
+      metadata: {
+        planId: plan.id,
+        stripeCustomerId: customer.stripeCustomerId,
       },
     });
 

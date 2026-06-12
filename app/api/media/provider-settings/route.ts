@@ -4,6 +4,7 @@ import { requireUser } from "@/lib/auth";
 import { requireByokProviderAccess } from "@/lib/billing/entitlements";
 import { toErrorResponse } from "@/lib/errors";
 import { isLocalFirstMode } from "@/lib/local/mode";
+import { safeRecordAuditEvent } from "@/lib/audit";
 import {
   getHostedMediaProviderSettings,
   saveHostedMediaProviderSettings,
@@ -51,6 +52,23 @@ export async function PUT(req: Request) {
     await requireByokProviderAccess({ ...user, workspaceId: user.workspaceId });
     const body = bodySchema.parse(await req.json());
     const settings = await saveHostedMediaProviderSettings(user, body.settings);
+    await safeRecordAuditEvent({
+      workspaceId: user.workspaceId,
+      actorId: user.id,
+      action: "provider_settings.updated",
+      targetType: "provider_secrets",
+      metadata: {
+        kind: "media",
+        profileCount: settings.profiles.length,
+        defaultProfileId: settings.defaultProfileId ?? null,
+        profiles: settings.profiles.map((profile) => ({
+          id: profile.id,
+          provider: profile.provider,
+          model: profile.model ?? null,
+          hasApiKey: profile.hasApiKey,
+        })),
+      },
+    });
     return NextResponse.json({ settings });
   } catch (err) {
     return toErrorResponse(err);

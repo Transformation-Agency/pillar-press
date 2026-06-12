@@ -27,6 +27,9 @@ Do this as a staged migration, not a rewrite.
    `subscription_inactive`, or `trial_expired`.
 6. Stage 5: workers/jobs for long-running Gather, Weave, media, and batch work.
 7. Stage 6: production ops, admin, support, observability, and launch gates.
+   **Started:** sensitive hosted mutations now record sanitized audit events for
+   Stripe webhooks, billing Checkout/Portal sessions, and hosted LLM/media BYOK
+   provider setting updates.
 
 No stage should weaken the desktop path. Desktop/local-first stays SQLite and
 does not read or write the SaaS billing tables.
@@ -278,6 +281,11 @@ Initial actor types:
 - `system`
 - `stripe`
 - `admin`
+
+Initial audited actions:
+- Stripe webhook handling.
+- Billing Checkout and Customer Portal session creation.
+- Hosted LLM/media provider profile updates, with secret-free metadata only.
 
 ## Entitlement Enforcement Contract
 
