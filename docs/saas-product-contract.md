@@ -273,6 +273,9 @@ Important fields:
 Implemented events:
 - `started`: created when the hosted workspace first receives a trial
   subscription.
+- `extended`: created when an admin/support operator extends a trial through
+  the secret-protected support route. Metadata is limited to source, local
+  subscription id, day count, and a scrubbed support reason.
 - `ending_reminder`: created once when billing status first observes that a
   trial is inside the ending-soon upgrade window. Metadata is limited to the
   source, local subscription id, and days remaining.
@@ -581,4 +584,7 @@ Stage 3 is complete only when:
     **Started:** `GET /api/admin/support/workspaces` is available when
     `KINGS_PRESS_ADMIN_SECRET` or `KINGS_PRESS_SUPPORT_SECRET` is configured.
     It supports list and per-workspace diagnostics for support investigations
-    and records admin audit events for support reads.
+    and records admin audit events for support reads. `POST
+    /api/admin/support/trials/extend` lets support extend trial subscriptions
+    by 1-90 days, records `trial_events.extended`, refuses paid subscriptions,
+    and scrubs support reasons before persistence.

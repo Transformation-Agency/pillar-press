@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 beforeEach(() => {
+  vi.useRealTimers();
   vi.resetModules();
   vi.clearAllMocks();
   delete process.env.KINGS_PRESS_ADMIN_SECRET;
@@ -151,5 +152,164 @@ describe("GET /api/admin/support/workspaces", () => {
       targetType: "workspace",
       targetId: "workspace_1",
     }));
+  });
+});
+
+describe("POST /api/admin/support/trials/extend", () => {
+  it("requires the admin support secret", async () => {
+    const getLatestSubscription = vi.fn();
+    vi.doMock("@/lib/billing/stripe", async () => {
+      const actual = await vi.importActual<any>("@/lib/billing/stripe");
+      return { ...actual, getLatestSubscription };
+    });
+    vi.doMock("@/lib/db", async () => {
+      const actual = await vi.importActual<any>("@/lib/db");
+      return { ...actual, db: { update: vi.fn(), insert: vi.fn() } };
+    });
+    vi.doMock("@/lib/audit", () => ({ safeRecordAuditEvent: vi.fn() }));
+
+    const { POST } = await import("../app/api/admin/support/trials/extend/route");
+    const res = await POST(new Request("http://test.local/api/admin/support/trials/extend", {
+      method: "POST",
+      body: JSON.stringify({ workspaceId: "workspace_1", days: 7 }),
+    }));
+    const body = await res.json();
+
+    expect(res.status).toBe(503);
+    expect(body).toEqual({
+      error: "Admin support tools are not configured.",
+      code: "admin_not_configured",
+    });
+    expect(getLatestSubscription).not.toHaveBeenCalled();
+  });
+
+  it("extends a trial subscription and records trial/audit events without secrets", async () => {
+    process.env.KINGS_PRESS_ADMIN_SECRET = "admin-secret";
+    vi.setSystemTime(new Date("2026-06-12T12:00:00Z"));
+    const subscription = {
+      id: "sub_trial",
+      workspaceId: "workspace_1",
+      planId: "trial",
+      status: "trialing",
+      trialStart: new Date("2026-06-01T00:00:00Z"),
+      trialEnd: new Date("2026-06-15T00:00:00Z"),
+      currentPeriodEnd: new Date("2026-06-15T00:00:00Z"),
+      metadata: { source: "hosted_signup_trial" },
+    };
+    const getLatestSubscription = vi.fn(async () => subscription);
+    const returning = vi.fn(async () => [{
+      ...subscription,
+      trialEnd: new Date("2026-06-22T00:00:00Z"),
+      currentPeriodEnd: new Date("2026-06-22T00:00:00Z"),
+    }]);
+    const whereUpdate = vi.fn(() => ({ returning }));
+    const setUpdate = vi.fn(() => ({ where: whereUpdate }));
+    const update = vi.fn(() => ({ set: setUpdate }));
+    const valuesInsert = vi.fn(async () => undefined);
+    const insert = vi.fn(() => ({ values: valuesInsert }));
+    const safeRecordAuditEvent = vi.fn();
+
+    vi.doMock("@/lib/billing/stripe", async () => {
+      const actual = await vi.importActual<any>("@/lib/billing/stripe");
+      return { ...actual, getLatestSubscription };
+    });
+    vi.doMock("@/lib/db", async () => {
+      const actual = await vi.importActual<any>("@/lib/db");
+      return { ...actual, db: { update, insert } };
+    });
+    vi.doMock("@/lib/audit", () => ({ safeRecordAuditEvent }));
+
+    const { POST } = await import("../app/api/admin/support/trials/extend/route");
+    const res = await POST(new Request("http://test.local/api/admin/support/trials/extend", {
+      method: "POST",
+      headers: { Authorization: "Bearer admin-secret" },
+      body: JSON.stringify({
+        workspaceId: "workspace_1",
+        days: 7,
+        reason: "Customer asked from private@example.com with sk-secret in notes.",
+      }),
+    }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(getLatestSubscription).toHaveBeenCalledWith("workspace_1");
+    expect(setUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      status: "trialing",
+      trialEnd: new Date("2026-06-22T00:00:00Z"),
+      currentPeriodEnd: new Date("2026-06-22T00:00:00Z"),
+    }));
+    expect(valuesInsert).toHaveBeenCalledWith(expect.objectContaining({
+      workspaceId: "workspace_1",
+      event: "extended",
+      planId: "trial",
+      trialEnd: new Date("2026-06-22T00:00:00Z"),
+      metadata: expect.objectContaining({
+        source: "admin_support",
+        days: 7,
+        subscriptionId: "sub_trial",
+      }),
+    }));
+    expect(safeRecordAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      workspaceId: "workspace_1",
+      actorType: "admin",
+      action: "admin.trial.extended",
+      targetType: "subscription",
+      targetId: "sub_trial",
+      metadata: expect.objectContaining({
+        days: 7,
+        trialEnd: "2026-06-22T00:00:00.000Z",
+      }),
+    }));
+    expect(body.subscription).toMatchObject({
+      id: "sub_trial",
+      workspaceId: "workspace_1",
+      planId: "trial",
+      status: "trialing",
+      trialEnd: "2026-06-22T00:00:00.000Z",
+    });
+    expect(JSON.stringify(valuesInsert.mock.calls)).not.toContain("private@example.com");
+    expect(JSON.stringify(valuesInsert.mock.calls)).not.toContain("sk-secret");
+    expect(JSON.stringify(safeRecordAuditEvent.mock.calls)).not.toContain("private@example.com");
+    expect(JSON.stringify(safeRecordAuditEvent.mock.calls)).not.toContain("sk-secret");
+    expect(JSON.stringify(body)).not.toContain("private@example.com");
+    expect(JSON.stringify(body)).not.toContain("sk-secret");
+    vi.useRealTimers();
+  });
+
+  it("does not extend a paid subscription", async () => {
+    process.env.KINGS_PRESS_SUPPORT_SECRET = "support-secret";
+    const getLatestSubscription = vi.fn(async () => ({
+      id: "sub_paid",
+      workspaceId: "workspace_1",
+      planId: "pro",
+      status: "active",
+    }));
+    const update = vi.fn();
+    const insert = vi.fn();
+    vi.doMock("@/lib/billing/stripe", async () => {
+      const actual = await vi.importActual<any>("@/lib/billing/stripe");
+      return { ...actual, getLatestSubscription };
+    });
+    vi.doMock("@/lib/db", async () => {
+      const actual = await vi.importActual<any>("@/lib/db");
+      return { ...actual, db: { update, insert } };
+    });
+    vi.doMock("@/lib/audit", () => ({ safeRecordAuditEvent: vi.fn() }));
+
+    const { POST } = await import("../app/api/admin/support/trials/extend/route");
+    const res = await POST(new Request("http://test.local/api/admin/support/trials/extend", {
+      method: "POST",
+      headers: { "x-kings-press-admin-secret": "support-secret" },
+      body: JSON.stringify({ workspaceId: "workspace_1", days: 7 }),
+    }));
+    const body = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(body).toEqual({
+      error: "Only trial subscriptions can be extended from support tools.",
+      code: "not_trial_subscription",
+    });
+    expect(update).not.toHaveBeenCalled();
+    expect(insert).not.toHaveBeenCalled();
   });
 });

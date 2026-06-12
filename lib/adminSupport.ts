@@ -1,7 +1,7 @@
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { safeRecordAuditEvent } from "@/lib/audit";
-import { BillingError } from "@/lib/billing/stripe";
-import { db } from "@/lib/db";
+import { BillingError, getLatestSubscription } from "@/lib/billing/stripe";
+import { db, subscriptions, trialEvents } from "@/lib/db";
 
 type QueryResult = { rows?: unknown[] } | unknown[];
 
@@ -32,7 +32,7 @@ export function requireAdminSupportAccess(req: Request) {
 function redactString(value: string) {
   return value
     .replace(/Bearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer [redacted]")
-    .replace(/sk-[A-Za-z0-9._-]{8,}/gi, "sk-[redacted]")
+    .replace(/sk-[A-Za-z0-9._-]{4,}/gi, "sk-[redacted]")
     .replace(/api[_-]?key[=:]\s*[^&\s]+/gi, "api_key=[redacted]")
     .replace(/password[=:]\s*[^&\s]+/gi, "password=[redacted]")
     .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[redacted-email]")
@@ -41,6 +41,7 @@ function redactString(value: string) {
 
 function scrub(value: unknown): unknown {
   if (typeof value === "string") return redactString(value);
+  if (value instanceof Date) return value.toISOString();
   if (!value || typeof value !== "object") return value;
   if (Array.isArray(value)) return value.map(scrub);
   return Object.fromEntries(
@@ -57,6 +58,98 @@ function clampLimit(value: string | null, fallback = 20, max = 100) {
   const parsed = Number.parseInt(value ?? "", 10);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.min(Math.max(parsed, 1), max);
+}
+
+export function normalizeTrialExtensionDays(value: unknown) {
+  const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
+  if (!Number.isFinite(parsed)) {
+    throw new BillingError(400, "bad_request", "Trial extension days are required.");
+  }
+  const days = Math.trunc(parsed);
+  if (days < 1 || days > 90) {
+    throw new BillingError(400, "bad_request", "Trial extension must be between 1 and 90 days.");
+  }
+  return days;
+}
+
+export async function extendSupportTrial(input: {
+  req: Request;
+  workspaceId: string;
+  days: number;
+  reason?: string | null;
+}) {
+  requireAdminSupportAccess(input.req);
+  const days = normalizeTrialExtensionDays(input.days);
+  const subscription = await getLatestSubscription(input.workspaceId);
+  if (!subscription) {
+    throw new BillingError(404, "subscription_not_found", "Subscription not found.");
+  }
+  if (subscription.planId !== "trial") {
+    throw new BillingError(409, "not_trial_subscription", "Only trial subscriptions can be extended from support tools.");
+  }
+
+  const now = new Date();
+  const base = subscription.trialEnd && subscription.trialEnd.getTime() > now.getTime()
+    ? subscription.trialEnd
+    : now;
+  const trialEnd = new Date(base.getTime() + days * 24 * 60 * 60 * 1000);
+  const [updated] = await db
+    .update(subscriptions)
+    .set({
+      status: "trialing",
+      trialEnd,
+      currentPeriodEnd: trialEnd,
+      updatedAt: now,
+      metadata: {
+        ...(subscription.metadata && typeof subscription.metadata === "object" && !Array.isArray(subscription.metadata)
+          ? subscription.metadata as Record<string, unknown>
+          : {}),
+        supportExtendedAt: now.toISOString(),
+      },
+    })
+    .where(eq(subscriptions.id, subscription.id))
+    .returning();
+
+  await db.insert(trialEvents).values({
+    workspaceId: input.workspaceId,
+    userId: null,
+    event: "extended",
+    planId: "trial",
+    trialStart: updated?.trialStart ?? subscription.trialStart ?? null,
+    trialEnd,
+    metadata: {
+      source: "admin_support",
+      days,
+      reason: input.reason ? redactString(input.reason).slice(0, 500) : null,
+      subscriptionId: subscription.id,
+    },
+  });
+
+  await safeRecordAuditEvent({
+    workspaceId: input.workspaceId,
+    actorType: "admin",
+    action: "admin.trial.extended",
+    targetType: "subscription",
+    targetId: subscription.id,
+    metadata: {
+      planId: "trial",
+      days,
+      trialEnd: trialEnd.toISOString(),
+      reason: input.reason ? redactString(input.reason).slice(0, 500) : null,
+    },
+  });
+
+  return {
+    subscription: scrub({
+      id: updated?.id ?? subscription.id,
+      workspaceId: input.workspaceId,
+      planId: "trial",
+      status: "trialing",
+      trialStart: updated?.trialStart ?? subscription.trialStart ?? null,
+      trialEnd,
+      currentPeriodEnd: updated?.currentPeriodEnd ?? trialEnd,
+    }),
+  };
 }
 
 export async function listSupportWorkspaces(req: Request) {

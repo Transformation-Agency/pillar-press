@@ -120,6 +120,7 @@ Optional read-only support diagnostics are available at:
 ```text
 GET /api/admin/support/workspaces
 GET /api/admin/support/workspaces?workspaceId=<workspace-id>
+POST /api/admin/support/trials/extend
 ```
 
 These routes are disabled unless `KINGS_PRESS_ADMIN_SECRET` or
@@ -129,6 +130,15 @@ workspace subscription state, usage rollups, recent usage/audit/trial events,
 background job status, and provider profile counts. They do not return raw
 provider keys, billing emails, or Stripe customer email fields, and metadata is
 scrubbed again on read.
+
+Trial extension is intentionally narrow support tooling. It accepts:
+
+```json
+{ "workspaceId": "workspace-id", "days": 7, "reason": "support note" }
+```
+
+Only trial subscriptions can be extended. The route records both a
+`trial_events.extended` row and an admin audit event.
 
 For a temporary private preview without user accounts, set `AUTH_DISABLED=true`
 and add:
