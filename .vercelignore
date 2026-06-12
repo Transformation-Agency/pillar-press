@@ -1,0 +1,23 @@
+# Desktop/native release artifacts are not part of the hosted Next.js web app.
+src-tauri/
+
+# Local build output and dependency installs are rebuilt by Vercel.
+.next/
+node_modules/
+out/
+build/
+coverage/
+.drizzle/
+tsconfig.tsbuildinfo
+
+# Local-only project state and secrets.
+.git/
+.vercel/
+.env
+.env.local
+.env*.local
+.DS_Store
+*.log
+
+# Reference/prototype material is useful locally but not needed at runtime.
+prototype-reference/
