@@ -81,13 +81,7 @@ function exportAllowed() {
 }
 
 function notifyExportBlocked() {
-  window.dispatchEvent(new CustomEvent("kingspress:billing-action-required", {
-    detail: {
-      status: 402,
-      code: "export_not_enabled",
-      error: "Downloads and exports are not included in your current plan. Upgrade to export files.",
-    },
-  }));
+  if (window.KP_BILLING && window.KP_BILLING.notifyExportDisabled) window.KP_BILLING.notifyExportDisabled();
 }
 
 function outputFilename(o) { return window.EXPORT.safeName(o.platform) + ".md"; }
@@ -105,6 +99,11 @@ function downloadAllOutputs(piece) {
   window.EXPORT.downloadBlob(window.EXPORT.zipBlob(files), window.EXPORT.safeName(piece.title) + "-outputs.zip");
 }
 async function driveSave(files, setMsg) {
+  if (window.DRIVE && window.DRIVE.isDriveEnabled && !window.DRIVE.isDriveEnabled()) {
+    if (window.KP_BILLING && window.KP_BILLING.notifyDriveDisabled) window.KP_BILLING.notifyDriveDisabled();
+    setMsg({ t: "err", m: "Google Drive export requires an upgrade." });
+    return;
+  }
   if (!window.DRIVE.isConfigured()) { setMsg({ t: "link", m: "Link a Google Drive folder first." }); return; }
   try {
     setMsg({ t: "busy", m: files.length > 1 ? `Saving ${files.length} files to Drive…` : `Saving ${files[0].name} to Drive…` });
@@ -261,7 +260,14 @@ function OutputsTab({ piece, onUpdate, refCtx, onGoStudio }) {
   const [err, setErr] = React.useState(null);
   const [driveOpen, setDriveOpen] = React.useState(false);
   const [msg, setMsg] = React.useState(null);
-  const onDriveOne = (o) => { if (!window.DRIVE.isConfigured()) { setDriveOpen(true); return; } driveSave([{ name: outputFilename(o), content: window.EXPORT.outputMarkdown(o), mime: "text/markdown" }], setMsg); };
+  const onDriveOne = (o) => {
+    if (window.DRIVE && window.DRIVE.isDriveEnabled && !window.DRIVE.isDriveEnabled()) {
+      if (window.KP_BILLING && window.KP_BILLING.notifyDriveDisabled) window.KP_BILLING.notifyDriveDisabled();
+      return;
+    }
+    if (!window.DRIVE.isConfigured()) { setDriveOpen(true); return; }
+    driveSave([{ name: outputFilename(o), content: window.EXPORT.outputMarkdown(o), mime: "text/markdown" }], setMsg);
+  };
   const onVideo = (o) => { window.__studioPrefill = { type: "avatar", pieceId: piece.id, prompt: o.platform + " — " + (o.strategicPurpose || ""), script: o.draftPost || "" }; onGoStudio && onGoStudio(); };
   const onImage = (o) => { window.__studioPrefill = { type: "image", pieceId: piece.id, prompt: o.mediaRec || o.strategicPurpose || (o.platform + " post art") }; onGoStudio && onGoStudio(); };
   const onCondensed = (platform, draftPost) => {
@@ -347,7 +353,14 @@ function OutputsTab({ piece, onUpdate, refCtx, onGoStudio }) {
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
             <div className="eyebrow" style={{ marginRight: "auto" }}>{piece.outputOrder.length} output{piece.outputOrder.length !== 1 ? "s" : ""}</div>
             <button className="btn sm" onClick={() => downloadAllOutputs(piece)}><Icon name="doc" size={14} /> Download all (.zip)</button>
-            <button className="btn sm" onClick={() => { if (!window.DRIVE.isConfigured()) { setDriveOpen(true); return; } driveSave(outputFiles(piece), setMsg); }}><GoogleIcon size={13} /> Save all to Drive</button>
+            <button className="btn sm" onClick={() => {
+              if (window.DRIVE && window.DRIVE.isDriveEnabled && !window.DRIVE.isDriveEnabled()) {
+                if (window.KP_BILLING && window.KP_BILLING.notifyDriveDisabled) window.KP_BILLING.notifyDriveDisabled();
+                return;
+              }
+              if (!window.DRIVE.isConfigured()) { setDriveOpen(true); return; }
+              driveSave(outputFiles(piece), setMsg);
+            }}><GoogleIcon size={13} /> Save all to Drive</button>
             <button className="btn ghost sm" onClick={() => setDriveOpen(true)} title="Link / change Google Drive folder"><Icon name="gear" size={14} /> {window.DRIVE.isConfigured() ? "Drive linked" : "Link Drive"}</button>
           </div>
         )}

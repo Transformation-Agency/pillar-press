@@ -47,6 +47,29 @@ function bookUnwrap(res, key) {
   return null;
 }
 
+function bookHostedBilling() {
+  const auth = window.KP_AUTH && window.KP_AUTH.snapshot ? window.KP_AUTH.snapshot() : null;
+  if (!auth || !auth.hosted) return null;
+  return window.Store && window.Store.billingStatus ? window.Store.billingStatus() : null;
+}
+
+function bookExportAllowed() {
+  const billing = bookHostedBilling();
+  return !billing || !billing.entitlement || billing.entitlement.exportEnabled !== false;
+}
+
+function notifyBookExportBlocked() {
+  if (window.KP_BILLING && window.KP_BILLING.notifyExportDisabled) window.KP_BILLING.notifyExportDisabled();
+}
+
+function bookDriveDisabledByPlan() {
+  return !!(window.DRIVE && window.DRIVE.isDriveEnabled && !window.DRIVE.isDriveEnabled());
+}
+
+function notifyBookDriveBlocked() {
+  if (window.KP_BILLING && window.KP_BILLING.notifyDriveDisabled) window.KP_BILLING.notifyDriveDisabled();
+}
+
 /* ---- chapter ordering: leading number, else "Chapter N", else created ---- */
 function chapterNum(title) {
   const t = String(title || "");
@@ -589,6 +612,7 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
   // Download / Drive use the AI-free server assembler as the single source of
   // the manuscript markdown (GET /api/campaigns/:id/book/export).
   const downloadBook = async () => {
+    if (!bookExportAllowed()) { notifyBookExportBlocked(); return; }
     setBusy("export"); setErr(null);
     try {
       await persistChapter();
@@ -599,6 +623,7 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
     setBusy(null);
   };
   const uploadBook = async () => {
+    if (bookDriveDisabledByPlan()) { notifyBookDriveBlocked(); return; }
     setBusy("export"); setErr(null);
     try {
       await persistChapter();
@@ -622,6 +647,7 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
   const showChapters = !isMobile || (noBook ? true : mobilePane === "chapters");
   const showEditor = !isMobile || (noBook ? false : mobilePane === "editor");
   const showWorkflow = !isMobile || (noBook ? false : mobilePane === "workflow");
+  const driveActionVisible = !!(window.DRIVE && (window.DRIVE.isConfigured() || bookDriveDisabledByPlan()));
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: isMobile ? "column" : "row", minHeight: 0 }}>
@@ -695,7 +721,7 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
                 <button className="btn sm" onClick={runOutputs} disabled={!!busy}>{busy === "outputs" ? <Spinner size={13} /> : <Icon name="arrowR" size={13} />} {isMobile ? "Outputs" : "Generate outputs"}</button>
                 <div style={{ flex: 1 }} />
                 <button className="btn ghost sm" onClick={downloadBook} disabled={busy === "export"} title="Assemble all chapters into one Markdown file">{busy === "export" ? <Spinner size={13} /> : <Icon name="doc" size={13} />} {isMobile ? "Download" : "Download book"}</button>
-                {window.DRIVE && window.DRIVE.isConfigured() && <button className="btn ghost sm" onClick={uploadBook} disabled={busy === "export"}>{busy === "export" ? <Spinner size={13} /> : <Icon name="book" size={13} />} To Drive</button>}
+                {driveActionVisible && <button className="btn ghost sm" onClick={uploadBook} disabled={busy === "export"}>{busy === "export" ? <Spinner size={13} /> : <Icon name="book" size={13} />} To Drive</button>}
               </div>
               {(err || note || (busy && prog)) && (
                 <div style={{ marginTop: 10, fontSize: 13, display: "flex", alignItems: "center", gap: 7,

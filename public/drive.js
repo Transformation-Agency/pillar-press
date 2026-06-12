@@ -44,8 +44,22 @@
     return !!((status.linked && status.driveEnabled !== false) || status.localExportAvailable);
   }
 
+  function isDriveEnabled() {
+    if (!refreshing) { refreshing = refresh().finally(() => { refreshing = null; }); }
+    return status.driveEnabled !== false;
+  }
+
+  function driveDisabledError() {
+    if (window.KP_BILLING && window.KP_BILLING.notifyDriveDisabled) window.KP_BILLING.notifyDriveDisabled();
+    const err = new Error("Google Drive export is not included in your current plan. Upgrade to save files to Drive.");
+    err.status = 402;
+    err.code = "drive_not_enabled";
+    return err;
+  }
+
   async function uploadMany(files, onProgress) {
     if (!files || !files.length) return [];
+    if (!isDriveEnabled()) throw driveDisabledError();
     // Report progress as we hand each file to the server. The server uploads
     // the whole batch in one request, so emit progress before the call.
     for (let i = 0; i < files.length; i++) {
@@ -80,6 +94,7 @@
   // Save a generated media item (image/video/audio) to the linked Drive folder.
   // The server fetches the media bytes and uploads them (binary).
   async function uploadMediaFile(mediaId) {
+    if (!isDriveEnabled()) throw driveDisabledError();
     const res = await fetch("/api/drive/upload-media", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ mediaId }),
@@ -93,5 +108,5 @@
     return (data && data.file) || {};
   }
 
-  window.DRIVE = { isConfigured, config, uploadFile, uploadMany, uploadMediaFile, refresh };
+  window.DRIVE = { isConfigured, isDriveEnabled, config, uploadFile, uploadMany, uploadMediaFile, refresh };
 })();

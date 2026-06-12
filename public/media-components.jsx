@@ -216,7 +216,12 @@ function MediaCard({ media, pieces, audios, onAttach, onCombine, onRegen, onDupl
   const [combineOpen, setCombineOpen] = React.useState(false);
   const [driveState, setDriveState] = React.useState(null); // null | "saving" | "saved" | <error string>
   const driveOn = !!(window.DRIVE && window.DRIVE.isConfigured());
+  const driveDisabledByPlan = !!(window.DRIVE && window.DRIVE.isDriveEnabled && !window.DRIVE.isDriveEnabled());
   const saveToDrive = async () => {
+    if (driveDisabledByPlan) {
+      if (window.KP_BILLING && window.KP_BILLING.notifyDriveDisabled) window.KP_BILLING.notifyDriveDisabled();
+      return;
+    }
     setDriveState("saving");
     try { await window.DRIVE.uploadMediaFile(media.id); setDriveState("saved"); setTimeout(() => setDriveState(null), 2500); }
     catch (e) { setDriveState((e && e.message) || "Drive save failed."); setTimeout(() => setDriveState(null), 4500); }
@@ -263,7 +268,7 @@ function MediaCard({ media, pieces, audios, onAttach, onCombine, onRegen, onDupl
             {onRegen && <button className="btn ghost sm" onClick={() => onRegen(media)} title="Regenerate"><Icon name="play" size={13} /></button>}
             {onDuplicate && <button className="btn ghost sm" onClick={() => onDuplicate(media)} title="Duplicate prompt"><Icon name="copy" size={13} /></button>}
             {(media.downloadUrl || media.outputUrl || media.posterUrl) && <button className="btn ghost sm" onClick={download} title="Download"><Icon name="doc" size={13} /></button>}
-            {driveOn && (media.downloadUrl || media.outputUrl) && (
+            {(driveOn || driveDisabledByPlan) && (media.downloadUrl || media.outputUrl) && (
               <button className="btn ghost sm" onClick={saveToDrive} disabled={driveState === "saving"} title="Save to Google Drive">
                 {driveState === "saving" ? <Spinner size={13} /> : <Icon name={driveState === "saved" ? "check" : "upload"} size={13} />} {driveState === "saved" ? "Saved" : "Drive"}
               </button>
