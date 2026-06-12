@@ -110,6 +110,18 @@ export async function getHostedMediaProviderProfileForProvider(
   return row ? rowToSecret(row) : null;
 }
 
+export async function deleteHostedMediaProviderProfile(
+  user: Pick<SessionUser, "id" | "workspaceId">,
+  profileId: string,
+): Promise<HostedMediaProviderSettingsView> {
+  const id = trim(profileId);
+  if (!id) return getHostedMediaProviderSettings(user);
+  await db
+    .delete(providerSecrets)
+    .where(and(scope(user), eq(providerSecrets.profileId, id)));
+  return getHostedMediaProviderSettings(user);
+}
+
 export async function saveHostedMediaProviderSettings(
   user: Pick<SessionUser, "id" | "workspaceId">,
   settings: HostedMediaProviderSettingsInput,

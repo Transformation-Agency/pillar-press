@@ -71,8 +71,9 @@ flowchart TD
 - First-run setup and the full-screen model setup save an OpenAI key as both a
   hosted LLM profile and hosted media/voice profile, so users do not have to
   paste the same OpenAI key twice.
-- Studio's provider dialog can add or replace hosted media keys through
-  `/api/media/provider-settings`.
+- Studio's provider dialog can add, replace, or remove hosted media keys through
+  `/api/media/provider-settings`, with delete operations entitlement-gated and
+  audited without secrets.
 
 ## Gaps
 
@@ -86,14 +87,15 @@ Impact: before launch, run a hosted staging smoke with real BYOK keys for each
 supported provider and confirm generated assets persist beyond signed provider
 URL expiry.
 
-### 2. Hosted media provider management is functional, not polished
+### 2. Hosted media provider management still needs richer defaults
 
 First-run setup and Studio now write hosted media keys through the encrypted
-settings route, but a production SaaS should still add profile editing,
-deletion, provider-specific help, and clearer model/capability defaults.
+settings route, and Studio can remove saved profiles. A production SaaS should
+still add richer provider-specific help, profile test buttons for saved keys,
+and clearer model/capability defaults per media task.
 
 Impact: hosted BYOK media can be configured without env vars, but the management
-experience is still an MVP surface.
+experience still needs polish before broad self-serve launch.
 
 ## Required Implementation Order
 
@@ -105,9 +107,10 @@ experience is still an MVP surface.
      API key.
 
 2. Add server routes for hosted media settings. **Implemented.**
-   - Recommended route: `GET/PUT /api/media/provider-settings`.
+   - Recommended route: `GET/PUT/DELETE /api/media/provider-settings`.
    - Browser must receive only secret-free metadata.
-   - PUT must require authenticated hosted user and BYOK-provider entitlement.
+   - PUT and DELETE must require authenticated hosted user and BYOK-provider
+     entitlement.
 
 3. Add a user-scoped media resolver. **Implemented.**
    - Recommended API:
@@ -131,11 +134,13 @@ experience is still an MVP surface.
    - All usage reservations include `providerSource`, `provider`, `model`, and
      `profileId`.
 
-6. Update provider status and setup UI. **Implemented as MVP.**
+6. Update provider status and setup UI. **Started.**
    - `GET /api/media/providers` should merge managed availability with
      user-saved hosted media BYOK status.
    - Onboarding/setup should save media keys through the hosted media settings
      route when not running in desktop local-first mode.
+   - Studio should list and remove saved hosted media profiles without exposing
+     keys. **Implemented.**
 
 7. Add tests. **Started.**
    - Media settings encryption tests for `kind = "media"`.
@@ -154,6 +159,8 @@ experience is still an MVP surface.
 - A hosted user can add and save a Hedra key, ElevenLabs key, OpenAI media key,
   xAI media key, or custom image provider key without exposing it to the
   browser after save.
+- A hosted user can remove a saved media provider profile without exposing the
+  key and without touching other users or workspaces.
 - Studio status reflects those saved providers.
 - Image generation can run from a hosted user-saved OpenAI/xAI/custom key.
 - Audio generation can run from a hosted user-saved OpenAI or ElevenLabs key.

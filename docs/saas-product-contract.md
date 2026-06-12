@@ -455,9 +455,10 @@ Stage 3 is complete only when:
 - Hosted media BYOK generation works end to end. **Not complete:** see
   `docs/MEDIA_BYOK_AUDIT.md` for the current credential-flow audit and required
   implementation order. Server-side generation/status consumption is
-  implemented; hosted setup/UI media profile management is available as an MVP;
-  the remaining work is live provider smoke coverage and production-grade profile
-  editing/rotation UX.
+  implemented; hosted setup/UI media profile management can add, replace, and
+  remove encrypted media profiles; the remaining work is live provider smoke
+  coverage and production-grade provider-specific help, saved-profile test
+  buttons, and capability defaults.
 - Usage rollups reflect the ledger. **Started:** `GET /api/billing/status`
   rebuilds the current billing period's `usage_rollups` row from
   `usage_events` for LLM, media, Gather, provider cost, and existing storage

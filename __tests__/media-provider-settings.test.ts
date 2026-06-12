@@ -155,4 +155,106 @@ describe("hosted media provider settings", () => {
     }));
     expect(JSON.stringify(safeRecordAuditEvent.mock.calls)).not.toContain("eleven-secret");
   });
+
+  it("deletes only the requested hosted media profile and returns remaining sanitized settings", async () => {
+    vi.doUnmock("@/lib/mediaProviderSettings");
+    const whereDelete = vi.fn(async () => undefined);
+    const deleteMock = vi.fn(() => ({ where: whereDelete }));
+    const select = vi.fn(() => ({
+      from: () => ({
+        where: vi.fn(async () => [{
+          profileId: "openai-media",
+          label: "OpenAI media",
+          provider: "openai",
+          model: "gpt-4o-mini-tts",
+          baseUrl: "https://api.openai.com/v1",
+          encryptedApiKey: "kphost:v1:hidden",
+          hasApiKey: true,
+          isDefault: true,
+        }]),
+      }),
+    }));
+
+    vi.doMock("@/lib/db", async () => {
+      const actual = await vi.importActual<any>("@/lib/db");
+      return { ...actual, db: { delete: deleteMock, select } };
+    });
+
+    const { deleteHostedMediaProviderProfile } = await import("@/lib/mediaProviderSettings");
+    const settings = await deleteHostedMediaProviderProfile(
+      { id: "user_1", workspaceId: "workspace_1" },
+      "hedra-main",
+    );
+
+    expect(deleteMock).toHaveBeenCalledTimes(1);
+    expect(whereDelete).toHaveBeenCalledTimes(1);
+    expect(settings).toEqual({
+      profiles: [{
+        id: "openai-media",
+        label: "OpenAI media",
+        provider: "openai",
+        model: "gpt-4o-mini-tts",
+        baseUrl: "https://api.openai.com/v1",
+        hasApiKey: true,
+      }],
+      defaultProfileId: "openai-media",
+    });
+    expect(JSON.stringify(settings)).not.toContain("hidden");
+  });
+
+  it("DELETE requires BYOK access, deletes a media profile, and audits without secrets", async () => {
+    const savedSettings = {
+      profiles: [{
+        id: "openai-media",
+        label: "OpenAI media",
+        provider: "openai",
+        model: "gpt-4o-mini-tts",
+        hasApiKey: true,
+      }],
+      defaultProfileId: "openai-media",
+    };
+    const requireByokProviderAccess = vi.fn(async () => ({}));
+    const deleteHostedMediaProviderProfile = vi.fn(async () => savedSettings);
+    const safeRecordAuditEvent = vi.fn();
+
+    vi.doMock("@/lib/auth", () => ({
+      requireUser: vi.fn(async () => ({ id: "user_1", workspaceId: "workspace_1", role: "author" })),
+    }));
+    vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => false }));
+    vi.doMock("@/lib/audit", () => ({ safeRecordAuditEvent }));
+    vi.doMock("@/lib/billing/entitlements", () => ({ requireByokProviderAccess }));
+    vi.doMock("@/lib/mediaProviderSettings", () => ({
+      getHostedMediaProviderSettings: vi.fn(async () => savedSettings),
+      saveHostedMediaProviderSettings: vi.fn(),
+      deleteHostedMediaProviderProfile,
+    }));
+
+    const { DELETE } = await import("../app/api/media/provider-settings/route");
+    const res = await DELETE(new Request("http://test.local/api/media/provider-settings?profileId=hedra-main", {
+      method: "DELETE",
+    }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(requireByokProviderAccess).toHaveBeenCalledWith({ id: "user_1", workspaceId: "workspace_1", role: "author" });
+    expect(deleteHostedMediaProviderProfile).toHaveBeenCalledWith(
+      { id: "user_1", workspaceId: "workspace_1", role: "author" },
+      "hedra-main",
+    );
+    expect(body).toEqual({ settings: savedSettings });
+    expect(safeRecordAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      workspaceId: "workspace_1",
+      actorId: "user_1",
+      action: "provider_settings.deleted",
+      targetType: "provider_secrets",
+      targetId: "hedra-main",
+      metadata: expect.objectContaining({
+        kind: "media",
+        profileId: "hedra-main",
+        remainingProfileCount: 1,
+        defaultProfileId: "openai-media",
+      }),
+    }));
+    expect(JSON.stringify(safeRecordAuditEvent.mock.calls)).not.toContain("sk-");
+  });
 });

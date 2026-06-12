@@ -6,14 +6,16 @@ import { toErrorResponse } from "@/lib/errors";
 import { isLocalFirstMode } from "@/lib/local/mode";
 import { safeRecordAuditEvent } from "@/lib/audit";
 import {
+  deleteHostedMediaProviderProfile,
   getHostedMediaProviderSettings,
   saveHostedMediaProviderSettings,
 } from "@/lib/mediaProviderSettings";
 
 const mediaProviderSchema = z.enum(["hedra", "elevenlabs", "openai", "xai", "custom-image"]);
+const profileIdSchema = z.string().trim().min(1).max(120);
 
 const profileSchema = z.object({
-  id: z.string().trim().min(1).max(120),
+  id: profileIdSchema,
   label: z.string().trim().max(160).optional(),
   provider: mediaProviderSchema,
   model: z.string().trim().max(200).optional(),
@@ -67,6 +69,42 @@ export async function PUT(req: Request) {
           model: profile.model ?? null,
           hasApiKey: profile.hasApiKey,
         })),
+      },
+    });
+    return NextResponse.json({ settings });
+  } catch (err) {
+    return toErrorResponse(err);
+  }
+}
+
+export async function DELETE(req: Request) {
+  try {
+    const user = await requireUser();
+    if (isLocalFirstMode()) {
+      return NextResponse.json({ error: "Desktop media provider settings are stored by the desktop app.", code: "local_first" }, { status: 409 });
+    }
+    if (!user.workspaceId) {
+      return NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
+    }
+    await requireByokProviderAccess({ ...user, workspaceId: user.workspaceId });
+    const url = new URL(req.url);
+    const parsedProfileId = profileIdSchema.safeParse(url.searchParams.get("profileId"));
+    if (!parsedProfileId.success) {
+      return NextResponse.json({ error: "Missing profileId.", code: "bad_request" }, { status: 400 });
+    }
+    const profileId = parsedProfileId.data;
+    const settings = await deleteHostedMediaProviderProfile(user, profileId);
+    await safeRecordAuditEvent({
+      workspaceId: user.workspaceId,
+      actorId: user.id,
+      action: "provider_settings.deleted",
+      targetType: "provider_secrets",
+      targetId: profileId,
+      metadata: {
+        kind: "media",
+        profileId,
+        remainingProfileCount: settings.profiles.length,
+        defaultProfileId: settings.defaultProfileId ?? null,
       },
     });
     return NextResponse.json({ settings });

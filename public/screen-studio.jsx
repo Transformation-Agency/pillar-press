@@ -96,6 +96,26 @@ function MediaProvidersDialog({ status, onClose }) {
     }
   }
 
+  async function deleteProvider(profile) {
+    if (!profile || !profile.id) return;
+    setBusy("delete-" + profile.id);
+    setMessage("Removing " + (profile.label || providerLabels[profile.provider] || "media profile") + ".");
+    try {
+      const response = await fetch("/api/media/provider-settings?profileId=" + encodeURIComponent(profile.id), {
+        method: "DELETE",
+        headers: { Accept: "application/json" },
+      });
+      const body = await response.json().catch(() => null);
+      if (!response.ok) throw new Error((body && body.error) || "Could not remove media provider.");
+      setSettings(body.settings || { profiles: [], defaultProfileId: null });
+      setMessage("Provider removed.");
+    } catch (error) {
+      setMessage((error && error.message) || "Could not remove media provider.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "oklch(0 0 0 / 0.4)", display: "grid", placeItems: "center", zIndex: 80 }}>
       <div className="card" onClick={(e) => e.stopPropagation()} style={{ width: 720, maxWidth: "92vw", padding: "26px 28px", maxHeight: "86vh", overflowY: "auto" }}>
@@ -158,6 +178,41 @@ function MediaProvidersDialog({ status, onClose }) {
           </div>
           {message && <p className="muted" role="status" style={{ fontSize: 12.5, margin: "10px 0 0" }}>{message}</p>}
         </div>
+        {Array.isArray(settings.profiles) && settings.profiles.length > 0 && (
+          <div className="card" style={{ padding: 14, marginBottom: 16 }}>
+            <div className="eyebrow" style={{ marginBottom: 8 }}>Saved hosted media profiles</div>
+            <div style={{ display: "grid", gap: 8 }}>
+              {settings.profiles.map((profile) => (
+                <div key={profile.id} style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  alignItems: "center",
+                  border: "1px solid var(--hair)",
+                  borderRadius: 10,
+                  padding: "9px 10px",
+                  background: "var(--paper)",
+                }}>
+                  <div>
+                    <div style={{ fontSize: 14.5 }}>{profile.label || providerLabels[profile.provider] || profile.provider}</div>
+                    <div className="muted" style={{ fontSize: 12.5 }}>
+                      {(providerLabels[profile.provider] || profile.provider) + (profile.model ? " · " + profile.model : "")}
+                      {profile.id === settings.defaultProfileId ? " · default" : ""}
+                    </div>
+                  </div>
+                  <button
+                    className="btn ghost"
+                    onClick={() => deleteProvider(profile)}
+                    disabled={!!busy}
+                    title="Remove this hosted media profile"
+                  >
+                    {busy === "delete-" + profile.id ? <Spinner size={14} /> : "Remove"}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         <p className="muted" style={{ fontSize: 12.5, lineHeight: 1.5, marginBottom: 18 }}>
           Desktop/local-first can still use native encrypted settings or server env vars. Hosted web users should use this encrypted profile path.
         </p>
