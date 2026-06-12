@@ -12,7 +12,8 @@ Tauri builds, with local-first persistence when SQLite is active.
 | `POST /api/gather/sources` | Create a Gather source. |
 | `PATCH /api/gather/sources/:id` | Update a Gather source. |
 | `DELETE /api/gather/sources/:id` | Remove a Gather source. |
-| `POST /api/gather/run` | Run Gather immediately for a campaign. |
+| `POST /api/gather/run` | Run Gather immediately in local-first mode; enqueue a hosted background job in web mode. |
+| `GET /api/gather/run/:jobId` | Poll a hosted Gather background job. |
 | `GET /api/gather/items` | List gathered items. |
 | `GET /api/gather/schedules` | List saved schedules. |
 | `POST /api/gather/schedules` | Create a once/daily/weekly schedule. |

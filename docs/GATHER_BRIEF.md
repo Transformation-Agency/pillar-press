@@ -58,7 +58,10 @@ Run sources concurrently with a small pool; partial failure must not fail the wh
 
 ## Endpoints (`app/api/gather/`)
 - `GET/POST /api/gather/sources`, `PATCH/DELETE /api/gather/sources/:id` — CRUD, user+campaign scoped.
-- `POST /api/gather/run` — `{ campaignId }`: run that campaign's enabled sources, persist items, return them. Long runs → background job + `GET /api/gather/run/:jobId`.
+- `POST /api/gather/run` — `{ campaignId }`: local-first runs immediately;
+  hosted web enqueues a background job and returns `202 { queued, job }`.
+- `GET /api/gather/run/:jobId` — hosted-only scoped polling for queued Gather
+  jobs; refresh items and source summaries after `status: "succeeded"`.
 - `GET /api/gather/items?campaignId=` / `DELETE /api/gather/items?id=` — list/remove.
 - Send-to-Weave is a front-end action that calls the existing weave/pieces endpoints; no new route needed.
 

@@ -41,6 +41,38 @@
     return ct.indexOf("application/json") >= 0 ? r.json() : null;
   }
 
+  function delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  async function waitForGatherJob(jobId, onProgress) {
+    if (!jobId) throw new Error("Gather job did not return an id.");
+    for (let attempt = 0; attempt < 60; attempt++) {
+      const res = await apiGet("/gather/run/" + encodeURIComponent(jobId));
+      const job = (res && res.job) || {};
+      if (onProgress) onProgress({ label: "background gather", i: Math.min(attempt + 1, 60), total: 60 });
+      if (job.status === "succeeded") return job;
+      if (job.status === "failed" || job.status === "canceled") {
+        throw new Error(job.errorMessage || "Gather job failed.");
+      }
+      await delay(2000);
+    }
+    throw new Error("Gather is still running. Check again in a moment.");
+  }
+
+  function sourceSummaries(sources) {
+    return (sources || [])
+      .filter((s) => s && s.summary)
+      .map((s) => ({
+        sourceId: s.id,
+        kind: s.kind,
+        label: s.label || null,
+        query: s.config || "",
+        itemCount: s.summaryItemCount || s.lastCount || 0,
+        text: s.summary,
+      }));
+  }
+
   const SCHEDULE_KEY = "kingspress.gatherSchedules.v1";
   let schedulerStarted = false;
 
@@ -210,7 +242,12 @@
     if (onProgress) onProgress({ label: "all sources", i: 0, total: 1 });
 
     // Server runs the campaign's enabled sources and persists items.
-    const runRes = await apiPost("/gather/run", { campaignId });
+    let runRes = await apiPost("/gather/run", { campaignId });
+    if (runRes && runRes.queued) {
+      if (onProgress) onProgress({ label: "queued", i: 0, total: 1 });
+      const job = await waitForGatherJob(runRes.job && runRes.job.id, onProgress);
+      runRes = Object.assign({}, runRes, { job });
+    }
     const perSource = (runRes && runRes.perSource) || null;
 
     // Refresh from server truth (the FULL list — fetched results, prior items,
@@ -234,7 +271,15 @@
     refreshGatherItems(campaignId, items);
 
     // Per-source research briefs (one independent LLM call each, server-side).
-    const summaries = (runRes && runRes.summaries) || [];
+    let summaries = (runRes && runRes.summaries) || [];
+    if (!summaries.length && runRes && runRes.queued) {
+      try {
+        const sourceRes = await apiGet("/gather/sources?campaignId=" + encodeURIComponent(campaignId));
+        summaries = sourceSummaries((sourceRes && sourceRes.sources) || []);
+      } catch (e) {
+        summaries = [];
+      }
+    }
     window.Store.setGatherSummaries(campaignId, summaries);
 
     if (onProgress) onProgress({ done: true });

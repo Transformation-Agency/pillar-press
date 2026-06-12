@@ -6,6 +6,8 @@ import { toErrorResponse } from "@/lib/errors";
 import { campaignInWorkspace, tenantNotFound } from "@/lib/tenant";
 import { completeUsageReservation, failUsageReservation, reserveUsage, type UsageReservation } from "@/lib/billing/usage";
 import { getAIForTaskForUser } from "@/lib/llm";
+import { isLocalFirstMode } from "@/lib/local/mode";
+import { enqueueBackgroundJob } from "@/lib/jobs/background";
 
 // Per-source LLM summaries can take a few seconds each (run concurrently).
 export const maxDuration = 60;
@@ -22,6 +24,30 @@ export async function POST(req: Request) {
     const { campaignId } = runSchema.parse(await req.json());
 
     if (!(await campaignInWorkspace(campaignId, user.workspaceId))) return tenantNotFound();
+    if (!isLocalFirstMode()) {
+      if (!user.workspaceId) return tenantNotFound();
+      const job = await enqueueBackgroundJob({
+        workspaceId: user.workspaceId,
+        userId: user.id,
+        campaignId,
+        kind: "gather_run",
+        priority: 0,
+        maxAttempts: 3,
+        idempotencyKey: `gather:manual:${campaignId}:${user.id}:${Math.floor(Date.now() / 30_000)}`,
+        payload: { campaignId, requestedBy: "manual" },
+      });
+      return NextResponse.json({
+        queued: true,
+        job: job ? {
+          id: job.id,
+          kind: job.kind,
+          status: job.status,
+          campaignId: job.campaignId,
+          runAfter: job.runAfter,
+        } : null,
+      }, { status: 202 });
+    }
+
     const taskAI = await getAIForTaskForUser("gather", user);
     reservation = await reserveUsage({
       user,

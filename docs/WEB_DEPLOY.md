@@ -138,8 +138,11 @@ psql "$DATABASE_URL" -f db/migrations/0009_background_jobs.sql
 
 ## Background Jobs
 
-Hosted long-running work uses the `background_jobs` table. The first worker
-entry point can claim and run queued Gather jobs.
+Hosted long-running work uses the `background_jobs` table. Manual
+`POST /api/gather/run` requests enqueue a scoped Gather job and return `202`
+with the job id; the browser polls `GET /api/gather/run/:jobId` and refreshes
+items/summaries after completion. The first worker entry point can claim and run
+queued Gather jobs.
 
 Set a server-only worker secret:
 

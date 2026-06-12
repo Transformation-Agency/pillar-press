@@ -529,7 +529,8 @@ Stage 3 is complete only when:
 9. Stage 5: introduce a worker/job runner for long operations. **Started:**
    `db/migrations/0009_background_jobs.sql`, `db/schema.ts`,
    `lib/jobs/background.ts`, `lib/jobs/runner.ts`, and `POST /api/jobs/run`
-   define the hosted queue and a secret-protected worker entry point. The next
-   step is wiring selected long-running routes to enqueue jobs instead of
-   executing synchronously.
+   define the hosted queue and a secret-protected worker entry point. Hosted
+   `POST /api/gather/run` now enqueues manual Gather jobs, returns `202`, and
+   exposes scoped polling through `GET /api/gather/run/:jobId`; local-first
+   Gather remains synchronous.
 10. Stage 6: add admin/support tooling and production observability.
