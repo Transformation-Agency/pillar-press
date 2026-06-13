@@ -84,6 +84,10 @@
     return config.supabaseUrl.replace(/\/+$/, "") + path;
   }
 
+  function currentAuthRedirect() {
+    return window.location.origin + window.location.pathname;
+  }
+
   async function supabaseJson(path, body) {
     const anon = config && config.supabaseAnonKey;
     if (!anon) throw new Error("Supabase anon key is missing.");
@@ -258,7 +262,8 @@
   async function signUp(email, password) {
     if (!config || !config.requiresLogin) return snapshot();
     lastError = null;
-    const data = await supabaseJson("/auth/v1/signup", { email, password });
+    const redirectTo = currentAuthRedirect();
+    const data = await supabaseJson("/auth/v1/signup?redirect_to=" + encodeURIComponent(redirectTo), { email, password });
     const nextSession = data.session || data;
     if (nextSession && nextSession.access_token) {
       saveSession(nextSession);
@@ -272,7 +277,7 @@
   async function requestPasswordReset(email) {
     if (!config || !config.requiresLogin) return snapshot();
     lastError = null;
-    const redirectTo = window.location.origin + window.location.pathname;
+    const redirectTo = currentAuthRedirect();
     await supabaseJson("/auth/v1/recover?redirect_to=" + encodeURIComponent(redirectTo), { email });
     return snapshot();
   }

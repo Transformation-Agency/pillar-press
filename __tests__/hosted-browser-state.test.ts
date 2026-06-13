@@ -40,4 +40,13 @@ describe("hosted browser account state isolation", () => {
     expect(app).toContain("choose “I already have an account.”");
     expect(app).toContain("That email already has an account.");
   });
+
+  it("sends explicit hosted auth redirects for signup and password reset links", () => {
+    const auth = readPublic("auth.js");
+
+    expect(auth).toContain("function currentAuthRedirect()");
+    expect(auth).toContain("/auth/v1/signup?redirect_to=");
+    expect(auth).toContain("/auth/v1/recover?redirect_to=");
+    expect(auth).toContain("encodeURIComponent(redirectTo)");
+  });
 });
