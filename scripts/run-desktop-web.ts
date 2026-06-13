@@ -2,9 +2,11 @@ import { spawn } from "node:child_process";
 
 const command = process.argv[2] === "build" ? "build" : "dev";
 const npmBin = process.platform === "win32" ? "npm.cmd" : "npm";
+const useShell = process.platform === "win32";
 
 const child = spawn(npmBin, ["run", command], {
   stdio: "inherit",
+  shell: useShell,
   env: {
     ...process.env,
     PILLAR_PRESS_LOCAL_FIRST: "true",
@@ -24,6 +26,7 @@ child.on("exit", (code, signal) => {
 
   const prepare = spawn(npmBin, ["run", "desktop:prepare-sidecar"], {
     stdio: "inherit",
+    shell: useShell,
     env: process.env,
   });
   prepare.on("exit", (prepareCode, prepareSignal) => {
