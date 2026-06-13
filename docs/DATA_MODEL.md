@@ -74,7 +74,7 @@ Hedra/Eleven generation jobs. Fields: ownership (`user_id`, `workspace_id`, `cam
 | prefs | json/jsonb | non-secret UI prefs (theme, active campaign, tweaks) |
 
 Desktop LLM setup is stored outside this table in the native app-data
-`desktop-settings.json`, pointed to the server by `KINGS_PRESS_LLM_SETTINGS_PATH`.
+`desktop-settings.json`, pointed to the server by `PILLAR_PRESS_LLM_SETTINGS_PATH`.
 That file can contain an optional provider API key for cloud models. Local backup
 creation must null secret-like fields before copying settings into a backup.
 Hosted/server deployments can still use provider keys from environment variables.

@@ -7,16 +7,16 @@ import type { BookChapter } from "@/lib/exporters";
 let dir: string;
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), "kings-press-local-"));
-  process.env.KINGS_PRESS_DATA_DIR = dir;
-  process.env.KINGS_PRESS_STORAGE = "local";
+  dir = mkdtempSync(join(tmpdir(), "pillar-press-local-"));
+  process.env.PILLAR_PRESS_DATA_DIR = dir;
+  process.env.PILLAR_PRESS_STORAGE = "local";
 });
 
 afterEach(async () => {
   const { resetLocalDbForTests } = await import("@/lib/local/database");
   resetLocalDbForTests();
-  delete process.env.KINGS_PRESS_DATA_DIR;
-  delete process.env.KINGS_PRESS_STORAGE;
+  delete process.env.PILLAR_PRESS_DATA_DIR;
+  delete process.env.PILLAR_PRESS_STORAGE;
   rmSync(dir, { recursive: true, force: true });
 });
 

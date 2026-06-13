@@ -4,7 +4,7 @@ import { join } from "node:path";
 const APP_DIR_NAME = "Pillar Press";
 
 export function localDataDir(): string {
-  const explicit = process.env.KINGS_PRESS_DATA_DIR || process.env.LOCAL_DATA_DIR;
+  const explicit = process.env.PILLAR_PRESS_DATA_DIR || process.env.LOCAL_DATA_DIR;
   if (explicit) return explicit;
 
   if (process.platform === "darwin") {
@@ -17,9 +17,9 @@ export function localDataDir(): string {
 }
 
 export function localDatabasePath(): string {
-  return process.env.KINGS_PRESS_DB_PATH || process.env.LOCAL_DATABASE_PATH || join(localDataDir(), "pillar-press.sqlite3");
+  return process.env.PILLAR_PRESS_DB_PATH || process.env.LOCAL_DATABASE_PATH || join(localDataDir(), "pillar-press.sqlite3");
 }
 
 export function localStorageDir(): string {
-  return process.env.KINGS_PRESS_STORAGE_DIR || join(localDataDir(), "storage");
+  return process.env.PILLAR_PRESS_STORAGE_DIR || join(localDataDir(), "storage");
 }

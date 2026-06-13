@@ -5,7 +5,6 @@
 
   const PRESS_BRAND_LABEL = {
     pillar_press: "Pillar Press",
-    kings_press: "Pillar Press",
   };
 
   function getAudioReadyPrompt() {

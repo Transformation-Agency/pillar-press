@@ -12,7 +12,7 @@ Editorial Desk**.
   - `npm run desktop:prepare-sidecar`
 - `npm run desktop:dev` starts the local web runtime through `npm run desktop:web`,
   which sets:
-  - `KINGS_PRESS_LOCAL_FIRST=true`
+  - `PILLAR_PRESS_LOCAL_FIRST=true`
   - `STORAGE_PROVIDER=local`
 - `npm run desktop:build` runs a Next standalone build and copies the packaged
   server runtime into `src-tauri/resources/desktop-server`. The production Tauri
@@ -23,7 +23,7 @@ Editorial Desk**.
   behind a hidden restore prompt after a forced quit or crash.
 - `npm run desktop:prepare-sidecar` also copies the Node runtime used for the
   build into `src-tauri/resources/node`. The production Tauri launcher prefers
-  this bundled runtime, with `KINGS_PRESS_NODE_BIN` retained as a developer
+  this bundled runtime, with `PILLAR_PRESS_NODE_BIN` retained as a developer
   override. This removes the normal-user requirement to install Node separately.
 - The sidecar preparation step prunes hosted-only Google Drive SDK packages from
   the desktop resource bundle. Local exports remain available; hosted/web builds
@@ -52,7 +52,7 @@ Editorial Desk**.
   settings. The launcher resolves Ollama through `OLLAMA_BIN`, common Homebrew
   install paths, and then `PATH`.
 - The saved model choice is passed to the Next runtime through
-  `KINGS_PRESS_LLM_SETTINGS_PATH`; local-first mode defaults to
+  `PILLAR_PRESS_LLM_SETTINGS_PATH`; local-first mode defaults to
   `LLM_PROVIDER=ollama` when no explicit cloud provider is configured.
 - The native settings file can store multiple LLM provider profiles plus
   per-task defaults. Normal users configure this from first-run setup / **Set Up
@@ -110,8 +110,8 @@ Editorial Desk**.
   campaigns they need, and each new campaign receives a small blank references
   skeleton.
 - Override paths for development or backup testing:
-  - `KINGS_PRESS_DATA_DIR=/path/to/app-data`
-  - `KINGS_PRESS_DB_PATH=/path/to/pillar-press.sqlite3`
+  - `PILLAR_PRESS_DATA_DIR=/path/to/app-data`
+  - `PILLAR_PRESS_DB_PATH=/path/to/pillar-press.sqlite3`
 - Backups are local folders named `pillar-press-backup-<unix-ms>`. The SQLite
   copy is created with SQLite `VACUUM INTO` so the backup is consistent while
   the app is running. Desktop settings are included with API keys, tokens,
@@ -122,7 +122,7 @@ Editorial Desk**.
 ## Supabase replacement
 Supabase is replaced in local-first desktop mode by embedded local services:
 - Auth: no cloud auth by default; one local desktop owner profile. When
-  `KINGS_PRESS_LOCAL_FIRST=true`, `DATA_BACKEND=sqlite`, or `KINGS_PRESS_DB_PATH`
+  `PILLAR_PRESS_LOCAL_FIRST=true`, `DATA_BACKEND=sqlite`, or `PILLAR_PRESS_DB_PATH`
   is set, `lib/auth.ts` resolves requests from the embedded local profile without
   touching Supabase or Postgres.
 - Database: SQLite instead of Supabase Postgres.
@@ -195,13 +195,13 @@ npm run desktop:verify-signed-release
 ```
 
 `desktop:build:signed` refuses to run unless it can use either
-`KINGS_PRESS_SIGNING_IDENTITY`, `APPLE_SIGNING_IDENTITY`, or
+`PILLAR_PRESS_SIGNING_IDENTITY`, `APPLE_SIGNING_IDENTITY`, or
 `MACOS_SIGNING_IDENTITY`, or an importable `APPLE_CERTIFICATE` plus
 `APPLE_CERTIFICATE_PASSWORD`. It also requires notarization credentials through
 either `APPLE_API_KEY` / `APPLE_API_ISSUER` / `APPLE_API_KEY_PATH` or
 `APPLE_ID` / `APPLE_PASSWORD` / `APPLE_TEAM_ID`. Local release work can instead
 use a saved `notarytool` keychain profile via
-`APPLE_NOTARY_KEYCHAIN_PROFILE` or `KINGS_PRESS_NOTARY_KEYCHAIN_PROFILE`. Before
+`APPLE_NOTARY_KEYCHAIN_PROFILE` or `PILLAR_PRESS_NOTARY_KEYCHAIN_PROFILE`. Before
 Tauri notarizes the app, the signed build signs packaged native Node resources
 such as `.node` addons, `.dylib` libraries, and the bundled Node runtime; Node is
 signed with the V8/JIT entitlements in

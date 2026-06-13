@@ -206,7 +206,7 @@
       if (!options || typeof options.onOpenProviderSetup !== "function") {
         throw new Error("Model setup is available in the desktop app.");
       }
-      const desktop = window.KINGS_DESKTOP;
+      const desktop = window.PILLAR_DESKTOP;
       if (!desktop || !desktop.isDesktop || !desktop.isDesktop()) {
         throw new Error("Model setup is available in the desktop app.");
       }
@@ -221,7 +221,7 @@
   async function requestVoice() {
     const intent = INTENTS.REQUEST_VOICE || "request_voice";
     try {
-      const desktop = window.KINGS_DESKTOP;
+      const desktop = window.PILLAR_DESKTOP;
       if (desktop && desktop.isDesktop && desktop.isDesktop() && desktop.startVoiceSession) {
         return succeeded(intent, { voiceConnected: true, transcription: "local-whisper" });
       }
@@ -487,7 +487,7 @@
   }
 
   function onSttFinal(handler) {
-    const desktop = window.KINGS_DESKTOP;
+    const desktop = window.PILLAR_DESKTOP;
     if (!desktop || !desktop.isDesktop || !desktop.isDesktop() || !desktop.onSttFinal) {
       return Promise.resolve(function () {});
     }
@@ -501,7 +501,7 @@
   }
 
   function onVoiceStatus(handler) {
-    const desktop = window.KINGS_DESKTOP;
+    const desktop = window.PILLAR_DESKTOP;
     if (!desktop || !desktop.isDesktop || !desktop.isDesktop() || !desktop.onVoiceStatus) {
       return Promise.resolve(function () {});
     }

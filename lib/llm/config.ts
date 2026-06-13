@@ -125,20 +125,20 @@ function readMacKeychainDesktopSettingsKey(): string | undefined {
 
 function desktopSettingsKey(env: Env, settingsPath: string | undefined): string | undefined {
   return (
-    validDesktopKey(env.KINGS_PRESS_DESKTOP_SETTINGS_KEY) ||
+    validDesktopKey(env.PILLAR_PRESS_DESKTOP_SETTINGS_KEY) ||
     readLocalDesktopSettingsKey(settingsPath) ||
     readMacKeychainDesktopSettingsKey()
   );
 }
 
 function desktopSettingsPath(env: Env): string | undefined {
-  const explicit = trim(env.KINGS_PRESS_LLM_SETTINGS_PATH);
+  const explicit = trim(env.PILLAR_PRESS_LLM_SETTINGS_PATH);
   if (explicit) return explicit;
   if (
     env.NODE_ENV === "test" ||
     process.env.NODE_ENV === "test" ||
     process.env.VITEST === "true" ||
-    env.KINGS_PRESS_DISABLE_DESKTOP_SETTINGS_DISCOVERY === "true"
+    env.PILLAR_PRESS_DISABLE_DESKTOP_SETTINGS_DISCOVERY === "true"
   ) {
     return undefined;
   }
@@ -179,9 +179,9 @@ function taskEnvKey(task: LLMTask): string {
 
 function isLocalFirstEnv(env: Env): boolean {
   return (
-    env.KINGS_PRESS_LOCAL_FIRST === "true" ||
+    env.PILLAR_PRESS_LOCAL_FIRST === "true" ||
     env.DATA_BACKEND === "sqlite" ||
-    Boolean(trim(env.KINGS_PRESS_DB_PATH))
+    Boolean(trim(env.PILLAR_PRESS_DB_PATH))
   );
 }
 

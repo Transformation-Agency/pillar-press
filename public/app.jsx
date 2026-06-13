@@ -359,7 +359,7 @@ function DesktopOnboarding() {
   const [taskDefaults, setTaskDefaults] = React.useState({});
   const [modelSetupContext, setModelSetupContext] = React.useState(null);
 
-  const desktop = window.KINGS_DESKTOP;
+  const desktop = window.PILLAR_DESKTOP;
   const desktopSecretPrefix = "kpenc:v1:";
   const setupCompleteKey = (window.KP_CONVERSATIONAL_ONBOARDING &&
     window.KP_CONVERSATIONAL_ONBOARDING.flags &&
@@ -1223,7 +1223,7 @@ function App() {
 
   const active = state.pieces.find((p) => p.id === state.activePieceId);
   const inWorkspace = view === "workspace" && active;
-  const hasDesktopBridge = !!(window.KINGS_DESKTOP && window.KINGS_DESKTOP.isDesktop && window.KINGS_DESKTOP.isDesktop());
+  const hasDesktopBridge = !!(window.PILLAR_DESKTOP && window.PILLAR_DESKTOP.isDesktop && window.PILLAR_DESKTOP.isDesktop());
   const setupCompletePref = (window.KP_CONVERSATIONAL_ONBOARDING &&
     window.KP_CONVERSATIONAL_ONBOARDING.flags &&
     window.KP_CONVERSATIONAL_ONBOARDING.flags.onboardingCompletePref) || "setupHelperCompleteV1";
@@ -1317,7 +1317,7 @@ function App() {
     setBackupBusy(true);
     setDesktopNotice(null);
     try {
-      const result = await window.KINGS_DESKTOP.createLocalBackup();
+      const result = await window.PILLAR_DESKTOP.createLocalBackup();
       setDesktopNotice({ type: "ok", text: "Backup created" + (result && result.path ? ": " + result.path : ".") });
     } catch (e) {
       setDesktopNotice({ type: "err", text: (e && e.message) || "Could not create backup." });

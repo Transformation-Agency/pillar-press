@@ -55,7 +55,7 @@ function cleanLaunchEnv(homeDir: string, tmpDir: string, appDataDir: string): No
     SHELL: process.env.SHELL,
     LANG: process.env.LANG,
     NODE_ENV: process.env.NODE_ENV,
-    KINGS_PRESS_DESKTOP_DATA_DIR: appDataDir,
+    PILLAR_PRESS_DESKTOP_DATA_DIR: appDataDir,
   };
 }
 

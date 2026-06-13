@@ -229,7 +229,7 @@ impl Drop for DesktopServer {
 }
 
 fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    if let Some(dir) = std::env::var_os("KINGS_PRESS_DESKTOP_DATA_DIR").map(PathBuf::from) {
+    if let Some(dir) = std::env::var_os("PILLAR_PRESS_DESKTOP_DATA_DIR").map(PathBuf::from) {
         fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         return Ok(dir);
     }
@@ -273,8 +273,8 @@ fn random_secret_key() -> String {
 }
 
 fn should_use_keychain_secret() -> bool {
-    std::env::var_os("KINGS_PRESS_DESKTOP_DATA_DIR").is_none()
-        && std::env::var_os("KINGS_PRESS_DISABLE_KEYCHAIN").is_none()
+    std::env::var_os("PILLAR_PRESS_DESKTOP_DATA_DIR").is_none()
+        && std::env::var_os("PILLAR_PRESS_DISABLE_KEYCHAIN").is_none()
 }
 
 #[cfg(target_os = "macos")]
@@ -1009,7 +1009,7 @@ fn start_packaged_server(app: &AppHandle) -> Result<Option<String>, String> {
             ));
         }
 
-        let node_bin = std::env::var_os("KINGS_PRESS_NODE_BIN")
+        let node_bin = std::env::var_os("PILLAR_PRESS_NODE_BIN")
             .filter(|value| !value.is_empty())
             .map(PathBuf::from)
             .or_else(|| bundled_node_path(app))
@@ -1025,15 +1025,15 @@ fn start_packaged_server(app: &AppHandle) -> Result<Option<String>, String> {
             .env("NODE_ENV", "production")
             .env("HOSTNAME", "127.0.0.1")
             .env("PORT", port.to_string())
-            .env("KINGS_PRESS_LOCAL_FIRST", "true")
+            .env("PILLAR_PRESS_LOCAL_FIRST", "true")
             .env("DATA_BACKEND", "sqlite")
             .env("STORAGE_PROVIDER", "local")
-            .env("KINGS_PRESS_STORAGE", "local")
-            .env("KINGS_PRESS_DATA_DIR", &data_dir)
-            .env("KINGS_PRESS_DB_PATH", &db_path)
-            .env("KINGS_PRESS_STORAGE_DIR", &storage_path)
-            .env("KINGS_PRESS_LLM_SETTINGS_PATH", &settings)
-            .env("KINGS_PRESS_DESKTOP_SETTINGS_KEY", desktop_settings_key)
+            .env("PILLAR_PRESS_STORAGE", "local")
+            .env("PILLAR_PRESS_DATA_DIR", &data_dir)
+            .env("PILLAR_PRESS_DB_PATH", &db_path)
+            .env("PILLAR_PRESS_STORAGE_DIR", &storage_path)
+            .env("PILLAR_PRESS_LLM_SETTINGS_PATH", &settings)
+            .env("PILLAR_PRESS_DESKTOP_SETTINGS_KEY", desktop_settings_key)
             // The basic-auth gate is for public hosted URLs. The desktop server
             // binds to localhost only, and the background scheduler's raw POST
             // sends no credentials — an inherited SITE_PASSWORD would silently

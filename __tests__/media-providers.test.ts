@@ -43,7 +43,7 @@ describe("media provider status", () => {
   });
 
   it("recognizes encrypted desktop media provider keys without returning them", () => {
-    const dir = mkdtempSync(join(tmpdir(), "kings-press-media-"));
+    const dir = mkdtempSync(join(tmpdir(), "pillar-press-media-"));
     const settingsPath = join(dir, "desktop-settings.json");
     const secret = encryptDesktopSecret("media-secret");
     writeFileSync(settingsPath, JSON.stringify({
@@ -56,8 +56,8 @@ describe("media provider status", () => {
     try {
       const status = getMediaProviderStatus({
         NODE_ENV: "test",
-        KINGS_PRESS_LLM_SETTINGS_PATH: settingsPath,
-        KINGS_PRESS_DESKTOP_SETTINGS_KEY: secret.keyText,
+        PILLAR_PRESS_LLM_SETTINGS_PATH: settingsPath,
+        PILLAR_PRESS_DESKTOP_SETTINGS_KEY: secret.keyText,
       });
       expect(status.openai.configured).toBe(true);
       expect(status.elevenlabs.configured).toBe(true);

@@ -75,8 +75,8 @@
   }
 
   async function downloadBlob(blob, filename) {
-    if (window.KINGS_DESKTOP && window.KINGS_DESKTOP.isDesktop && window.KINGS_DESKTOP.isDesktop() && window.KINGS_DESKTOP.saveExportFile) {
-      return window.KINGS_DESKTOP.saveExportFile(filename, await blobBase64(blob));
+    if (window.PILLAR_DESKTOP && window.PILLAR_DESKTOP.isDesktop && window.PILLAR_DESKTOP.isDesktop() && window.PILLAR_DESKTOP.saveExportFile) {
+      return window.PILLAR_DESKTOP.saveExportFile(filename, await blobBase64(blob));
     }
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");

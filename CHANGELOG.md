@@ -27,9 +27,8 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Media config errors point users to **Settings → Studio integrations** instead
   of naming server environment variables.
 - The Utility model task is labeled to note it also powers Desk chat.
-- Branding: remaining "King's Press" display-name references in docs, the auth
-  realm, and code comments renamed to "Pillar Press" (internal `KINGS_PRESS_`
-  environment names and the `window.KINGS_DESKTOP` bridge are unchanged).
+- Public repo cleanup: legacy predecessor branding removed from docs, examples,
+  runtime environment names, and the desktop bridge.
 
 ### Fixed
 - **Library piece deletion** worked again on desktop — it used a native

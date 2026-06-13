@@ -29,7 +29,7 @@ function AudioActions({ text, label = "text", filename = "audio.mp3", pieceId = 
   };
 
   const saveOutputUrl = async (outputUrl) => {
-    const desktop = window.KINGS_DESKTOP;
+    const desktop = window.PILLAR_DESKTOP;
     const tauriInvoke = window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke;
     const isDesktop = !!((desktop && desktop.isDesktop && desktop.isDesktop()) || tauriInvoke);
     if (isDesktop) {

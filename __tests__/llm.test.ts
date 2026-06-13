@@ -91,13 +91,13 @@ describe("LLM config", () => {
   });
 
   it("uses the saved desktop model choice for local-first Ollama", () => {
-    const dir = mkdtempSync(join(tmpdir(), "kings-press-llm-"));
+    const dir = mkdtempSync(join(tmpdir(), "pillar-press-llm-"));
     const settingsPath = join(dir, "desktop-settings.json");
     writeFileSync(settingsPath, JSON.stringify({ model: "mistral-small:latest" }));
     try {
       const cfg = resolveMainLLMConfig({
-        KINGS_PRESS_LOCAL_FIRST: "true",
-        KINGS_PRESS_LLM_SETTINGS_PATH: settingsPath,
+        PILLAR_PRESS_LOCAL_FIRST: "true",
+        PILLAR_PRESS_LLM_SETTINGS_PATH: settingsPath,
       });
       expect(cfg).toMatchObject({
         provider: "ollama",
@@ -110,7 +110,7 @@ describe("LLM config", () => {
   });
 
   it("uses saved desktop provider settings for local-first OpenAI-compatible endpoints", () => {
-    const dir = mkdtempSync(join(tmpdir(), "kings-press-llm-"));
+    const dir = mkdtempSync(join(tmpdir(), "pillar-press-llm-"));
     const settingsPath = join(dir, "desktop-settings.json");
     writeFileSync(settingsPath, JSON.stringify({
       provider: "openai-compatible",
@@ -120,8 +120,8 @@ describe("LLM config", () => {
     }));
     try {
       const cfg = resolveMainLLMConfig({
-        KINGS_PRESS_LOCAL_FIRST: "true",
-        KINGS_PRESS_LLM_SETTINGS_PATH: settingsPath,
+        PILLAR_PRESS_LOCAL_FIRST: "true",
+        PILLAR_PRESS_LLM_SETTINGS_PATH: settingsPath,
       });
       expect(cfg).toMatchObject({
         provider: "openai-compatible",
@@ -135,7 +135,7 @@ describe("LLM config", () => {
   });
 
   it("resolves per-task desktop profile defaults", () => {
-    const dir = mkdtempSync(join(tmpdir(), "kings-press-llm-"));
+    const dir = mkdtempSync(join(tmpdir(), "pillar-press-llm-"));
     const settingsPath = join(dir, "desktop-settings.json");
     writeFileSync(settingsPath, JSON.stringify({
       profiles: [
@@ -171,15 +171,15 @@ describe("LLM config", () => {
     }));
     try {
       expect(resolveTaskLLMConfig("gather", {
-        KINGS_PRESS_LOCAL_FIRST: "true",
-        KINGS_PRESS_LLM_SETTINGS_PATH: settingsPath,
+        PILLAR_PRESS_LOCAL_FIRST: "true",
+        PILLAR_PRESS_LLM_SETTINGS_PATH: settingsPath,
       })).toMatchObject({
         provider: "ollama",
         model: "llama3.2",
       });
       expect(resolveTaskLLMConfig("draft", {
-        KINGS_PRESS_LOCAL_FIRST: "true",
-        KINGS_PRESS_LLM_SETTINGS_PATH: settingsPath,
+        PILLAR_PRESS_LOCAL_FIRST: "true",
+        PILLAR_PRESS_LLM_SETTINGS_PATH: settingsPath,
       })).toMatchObject({
         provider: "openai",
         model: "gpt-4o-mini",
@@ -187,8 +187,8 @@ describe("LLM config", () => {
         baseUrl: "https://api.openai.com/v1",
       });
       expect(resolveTaskLLMConfig("review", {
-        KINGS_PRESS_LOCAL_FIRST: "true",
-        KINGS_PRESS_LLM_SETTINGS_PATH: settingsPath,
+        PILLAR_PRESS_LOCAL_FIRST: "true",
+        PILLAR_PRESS_LLM_SETTINGS_PATH: settingsPath,
       })).toMatchObject({
         provider: "xai",
         model: "grok-4.3",
@@ -201,7 +201,7 @@ describe("LLM config", () => {
   });
 
   it("decrypts encrypted desktop provider keys with the runtime desktop key", () => {
-    const dir = mkdtempSync(join(tmpdir(), "kings-press-llm-"));
+    const dir = mkdtempSync(join(tmpdir(), "pillar-press-llm-"));
     const settingsPath = join(dir, "desktop-settings.json");
     const secret = encryptDesktopSecret("sk-encrypted-openai");
     writeFileSync(settingsPath, JSON.stringify({
@@ -216,9 +216,9 @@ describe("LLM config", () => {
     }));
     try {
       const cfg = resolveMainLLMConfig({
-        KINGS_PRESS_LOCAL_FIRST: "true",
-        KINGS_PRESS_LLM_SETTINGS_PATH: settingsPath,
-        KINGS_PRESS_DESKTOP_SETTINGS_KEY: secret.keyText,
+        PILLAR_PRESS_LOCAL_FIRST: "true",
+        PILLAR_PRESS_LLM_SETTINGS_PATH: settingsPath,
+        PILLAR_PRESS_DESKTOP_SETTINGS_KEY: secret.keyText,
       });
       expect(cfg).toMatchObject({
         provider: "openai",
@@ -226,9 +226,9 @@ describe("LLM config", () => {
         apiKey: "sk-encrypted-openai",
       });
       const status = publicLLMStatus({
-        KINGS_PRESS_LOCAL_FIRST: "true",
-        KINGS_PRESS_LLM_SETTINGS_PATH: settingsPath,
-        KINGS_PRESS_DESKTOP_SETTINGS_KEY: secret.keyText,
+        PILLAR_PRESS_LOCAL_FIRST: "true",
+        PILLAR_PRESS_LLM_SETTINGS_PATH: settingsPath,
+        PILLAR_PRESS_DESKTOP_SETTINGS_KEY: secret.keyText,
       });
       expect(JSON.stringify(status)).not.toContain("sk-encrypted-openai");
       expect(JSON.stringify(status)).not.toContain(secret.encrypted);
@@ -238,7 +238,7 @@ describe("LLM config", () => {
   });
 
   it("lets task env overrides win over desktop defaults", () => {
-    const dir = mkdtempSync(join(tmpdir(), "kings-press-llm-"));
+    const dir = mkdtempSync(join(tmpdir(), "pillar-press-llm-"));
     const settingsPath = join(dir, "desktop-settings.json");
     writeFileSync(settingsPath, JSON.stringify({
       profiles: [{ id: "local", provider: "ollama", model: "llama3.2" }],
@@ -247,8 +247,8 @@ describe("LLM config", () => {
     }));
     try {
       expect(resolveTaskLLMConfig("review", {
-        KINGS_PRESS_LOCAL_FIRST: "true",
-        KINGS_PRESS_LLM_SETTINGS_PATH: settingsPath,
+        PILLAR_PRESS_LOCAL_FIRST: "true",
+        PILLAR_PRESS_LLM_SETTINGS_PATH: settingsPath,
         LLM_TASK_REVIEW_PROVIDER: "anthropic",
         LLM_TASK_REVIEW_MODEL: "claude-haiku-4-5",
         LLM_TASK_REVIEW_API_KEY: "sk-ant",
@@ -280,7 +280,7 @@ describe("LLM config", () => {
   });
 
   it("reports task profile status without leaking desktop profile keys", () => {
-    const dir = mkdtempSync(join(tmpdir(), "kings-press-llm-"));
+    const dir = mkdtempSync(join(tmpdir(), "pillar-press-llm-"));
     const settingsPath = join(dir, "desktop-settings.json");
     writeFileSync(settingsPath, JSON.stringify({
       profiles: [
@@ -292,8 +292,8 @@ describe("LLM config", () => {
     }));
     try {
       const status = publicLLMStatus({
-        KINGS_PRESS_LOCAL_FIRST: "true",
-        KINGS_PRESS_LLM_SETTINGS_PATH: settingsPath,
+        PILLAR_PRESS_LOCAL_FIRST: "true",
+        PILLAR_PRESS_LLM_SETTINGS_PATH: settingsPath,
       });
       expect(status).toMatchObject({
         provider: "ollama",
@@ -316,7 +316,7 @@ describe("LLM config", () => {
 
   it("reports local-first status before an Ollama model is selected", () => {
     const status = publicLLMStatus({
-      KINGS_PRESS_LOCAL_FIRST: "true",
+      PILLAR_PRESS_LOCAL_FIRST: "true",
       LLM_PROVIDER: "ollama",
       LLM_BASE_URL: "http://127.0.0.1:11434",
     });

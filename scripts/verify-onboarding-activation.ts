@@ -32,7 +32,7 @@ function createWindow(options?: { voiceReady?: boolean }) {
       getAudioReadyPrompt: () => "Audio is connected.",
       getPressIntroScript: () => "I'm Pillar Press.",
     },
-    KINGS_DESKTOP: {
+    PILLAR_DESKTOP: {
       isDesktop: () => true,
       startVoiceSession: async () => undefined,
       onSttFinal: async (handler: (event: any) => void) => {

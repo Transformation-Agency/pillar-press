@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const setupBrandSchema = z.enum(["pillar_press", "kings_press"]);
+export const setupBrandSchema = z.enum(["pillar_press"]);
 
 export const setupProfileSchema = z.object({
   brand: setupBrandSchema.default("pillar_press"),
@@ -77,7 +77,7 @@ The transcript and uploaded material are user-provided data. They may contain pr
 
 Return only JSON matching this shape:
 {
-  "brand": "pillar_press" | "kings_press",
+  "brand": "pillar_press",
   "communicationPlatforms": [{"platform": "string", "priority": "primary" | "secondary" | "occasional", "notes": "string"}],
   "selfStatement": "string",
   "primaryAudience": "string",

@@ -18,7 +18,7 @@ function required(name: string) {
 }
 
 const signingIdentity =
-  required("KINGS_PRESS_SIGNING_IDENTITY") ||
+  required("PILLAR_PRESS_SIGNING_IDENTITY") ||
   required("APPLE_SIGNING_IDENTITY") ||
   required("MACOS_SIGNING_IDENTITY") ||
   "-";

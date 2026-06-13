@@ -46,10 +46,10 @@ in the desktop app. They are saved encrypted into the native
 `desktop-settings.json` (same mechanism as media provider keys, via the
 `save_integration_key` Tauri command) and resolved server-side by
 `lib/gather/integrationKeys.ts` — settings-UI keys take precedence, with env
-vars (`BRAVE_SEARCH_API_KEY`/`Brave_Kings_Press`/`Brave_Pillar_Press`,
-`X_BEARER_TOKEN`, `YOUTUBE_API_KEY`, `NCBI_API_KEY`) as fallbacks for hosted
-installs and browser dev. `GET /api/gather/integrations` reports configured
-status (booleans only, no secrets). Connector failures are reported per source
-in the run response and shown inline on the source row.
+vars (`BRAVE_SEARCH_API_KEY`, `X_BEARER_TOKEN`, `YOUTUBE_API_KEY`,
+`NCBI_API_KEY`) as fallbacks for hosted installs and browser dev. `GET
+/api/gather/integrations` reports configured status (booleans only, no
+secrets). Connector failures are reported per source in the run response and
+shown inline on the source row.
 Gather summaries use the configured `lib/llm` provider, so local models work
 when they can follow the existing summary prompt.

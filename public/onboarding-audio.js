@@ -36,7 +36,7 @@
   function speakText(text, options) {
     const body = String(text || "").trim();
     if (!body) return Promise.resolve();
-    const desktop = window.KINGS_DESKTOP;
+    const desktop = window.PILLAR_DESKTOP;
     if (desktop && desktop.isDesktop && desktop.isDesktop() && desktop.speakText) {
       return desktop.speakText(body, options || {}).catch(() => browserSpeakText(body, options));
     }
@@ -44,7 +44,7 @@
   }
 
   function stopSpeaking() {
-    const desktop = window.KINGS_DESKTOP;
+    const desktop = window.PILLAR_DESKTOP;
     if (desktop && desktop.isDesktop && desktop.isDesktop() && desktop.stopSpeaking) {
       desktop.stopSpeaking().catch(() => {});
     }

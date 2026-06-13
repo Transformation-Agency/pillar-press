@@ -30,7 +30,7 @@
     return event.listen(name, handler);
   }
 
-  window.KINGS_DESKTOP = {
+  window.PILLAR_DESKTOP = {
     isDesktop,
     ollamaStatus: () => invoke("ollama_status"),
     startOllama: () => invoke("start_ollama_service"),

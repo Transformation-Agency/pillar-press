@@ -55,7 +55,7 @@ function MediaIntegrationCard({ provider, name, logoSrc, blurb, helper, verifyUr
   }, [statusKey]);
   React.useEffect(() => { refresh(); }, [refresh]);
 
-  const hasDesktop = !!(window.KINGS_DESKTOP && window.KINGS_DESKTOP.isDesktop && window.KINGS_DESKTOP.isDesktop());
+  const hasDesktop = !!(window.PILLAR_DESKTOP && window.PILLAR_DESKTOP.isDesktop && window.PILLAR_DESKTOP.isDesktop());
 
   const testAndSave = async () => {
     const key = apiKey.trim();
@@ -75,8 +75,8 @@ function MediaIntegrationCard({ provider, name, logoSrc, blurb, helper, verifyUr
         if (!res.ok) throw new Error((data && data.error) || (name + " rejected the key."));
         if (parseStatus) setDetail(parseStatus(data));
       }
-      if (hasDesktop && window.KINGS_DESKTOP.saveMediaProviderKey) {
-        await window.KINGS_DESKTOP.saveMediaProviderKey(provider, key, url ? { baseUrl: url } : undefined);
+      if (hasDesktop && window.PILLAR_DESKTOP.saveMediaProviderKey) {
+        await window.PILLAR_DESKTOP.saveMediaProviderKey(provider, key, url ? { baseUrl: url } : undefined);
         setApiKey(""); setOpen(false);
         setMessage(verifyUrl ? name + " key works and was saved encrypted for Studio." : name + " key was saved encrypted for Studio.");
         await refresh();

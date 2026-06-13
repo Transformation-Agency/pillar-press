@@ -46,7 +46,7 @@ function createTestWindow() {
       getAudioReadyPrompt: () => "Audio is connected.",
       getPressIntroScript: () => "I'm Pillar Press.",
     },
-    KINGS_DESKTOP: {
+    PILLAR_DESKTOP: {
       isDesktop: () => true,
     },
     addEventListener: (name: string, handler: (event: any) => void) => {
@@ -781,7 +781,7 @@ describe("browser onboarding action registry", () => {
     });
 
     const webWindow = loadBrowserActions();
-    webWindow.KINGS_DESKTOP.isDesktop = () => false;
+    webWindow.PILLAR_DESKTOP.isDesktop = () => false;
     const webResult = await webWindow.KP_ONBOARDING_ACTIONS.openProviderSetup({
       onOpenProviderSetup: () => {
         throw new Error("should not open");
@@ -801,7 +801,7 @@ describe("browser onboarding action registry", () => {
     let cleaned = false;
     const received: any[] = [];
 
-    window.KINGS_DESKTOP.onSttFinal = (handler: (event: any) => void) => {
+    window.PILLAR_DESKTOP.onSttFinal = (handler: (event: any) => void) => {
       desktopHandler = handler;
       return Promise.resolve(() => {
         cleaned = true;

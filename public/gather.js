@@ -97,7 +97,7 @@
   }
 
   function isDesktop() {
-    return !!(window.KINGS_DESKTOP && window.KINGS_DESKTOP.isDesktop && window.KINGS_DESKTOP.isDesktop());
+    return !!(window.PILLAR_DESKTOP && window.PILLAR_DESKTOP.isDesktop && window.PILLAR_DESKTOP.isDesktop());
   }
 
   function cacheSchedule(saved) {
@@ -203,7 +203,7 @@
   }
 
   function startScheduler() {
-    if (window.KINGS_DESKTOP && window.KINGS_DESKTOP.isDesktop && window.KINGS_DESKTOP.isDesktop()) return;
+    if (window.PILLAR_DESKTOP && window.PILLAR_DESKTOP.isDesktop && window.PILLAR_DESKTOP.isDesktop()) return;
     if (schedulerStarted) return;
     schedulerStarted = true;
     const tick = () => readSchedules().map(normalizeSchedule).filter((s) => isDue(s)).forEach((s) => runScheduledGather(s));

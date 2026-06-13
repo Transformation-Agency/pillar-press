@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { localStorageDir } from "@/lib/local/paths";
 
 export function localStorageConfigured(): boolean {
-  return process.env.STORAGE_PROVIDER === "local" || process.env.KINGS_PRESS_STORAGE === "local" || !process.env.SUPABASE_URL;
+  return process.env.STORAGE_PROVIDER === "local" || process.env.PILLAR_PRESS_STORAGE === "local" || !process.env.SUPABASE_URL;
 }
 
 export function isLocalStoredUrl(url: string | null | undefined): boolean {

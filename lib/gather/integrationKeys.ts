@@ -8,9 +8,7 @@ type Env = Record<string, string | undefined>;
 export function braveSearchKey(env: Env = process.env): string | undefined {
   return (
     desktopIntegrationKey("brave", env) ||
-    env.BRAVE_SEARCH_API_KEY ||
-    env.Brave_Kings_Press ||
-    env.Brave_Pillar_Press // legacy hosted fallback
+    env.BRAVE_SEARCH_API_KEY
   );
 }
 

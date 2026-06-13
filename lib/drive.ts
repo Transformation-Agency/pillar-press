@@ -3,8 +3,8 @@
  *
  * The prototype (`prototype-reference/drive.js`) ran the whole OAuth dance in
  * the browser with Google Identity Services and a user-entered Client ID, then
- * uploaded via a multipart `fetch` to the Drive REST API. Per BUILD_BRIEF §8 we
- * move ALL of that server-side:
+ * uploaded via a multipart `fetch` to the Drive REST API. The production path
+ * keeps all of that server-side:
  *
  *   - OAuth uses `googleapis` with GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET and a
  *     fixed redirect URI (GOOGLE_REDIRECT_URI). We request `access_type:offline`

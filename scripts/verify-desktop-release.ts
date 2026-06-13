@@ -8,9 +8,9 @@ const appPath = join(root, "src-tauri", "target", "release", "bundle", "macos", 
 const dmgPath = join(root, "src-tauri", "target", "release", "bundle", "dmg", "Pillar Press_0.1.0_aarch64.dmg");
 const appResources = join(appPath, "Contents", "Resources");
 const requireDeveloperId =
-  process.argv.includes("--require-developer-id") || process.env.KINGS_PRESS_REQUIRE_DEVELOPER_ID === "true";
+  process.argv.includes("--require-developer-id") || process.env.PILLAR_PRESS_REQUIRE_DEVELOPER_ID === "true";
 const requireNotarized =
-  process.argv.includes("--require-notarized") || process.env.KINGS_PRESS_REQUIRE_NOTARIZED === "true";
+  process.argv.includes("--require-notarized") || process.env.PILLAR_PRESS_REQUIRE_NOTARIZED === "true";
 
 async function exists(path: string) {
   try {
@@ -102,6 +102,7 @@ async function verifyAppBundleMetadata(bundlePath: string) {
     assertPlistValue(plist, "CFBundleName", "Pillar Press"),
     assertPlistValue(plist, "CFBundleIdentifier", "com.pillar.press"),
     assertPlistValue(plist, "CFBundleShortVersionString", "0.1.0"),
+    assertPlistValue(plist, "LSMinimumSystemVersion", "12.0"),
     assertPlistValue(plist, "CFBundleIconFile", "icon.icns"),
     assertPlistBool(plist, "NSQuitAlwaysKeepsWindows", false),
   ]);
@@ -193,12 +194,12 @@ async function smokePackagedServer(bundledNode: string, bundledServer: string, b
       HOME: dataDir,
       PATH: process.env.PATH ?? "",
       TMPDIR: process.env.TMPDIR ?? tmpdir(),
-      KINGS_PRESS_LOCAL_FIRST: "true",
+      PILLAR_PRESS_LOCAL_FIRST: "true",
       DATA_BACKEND: "sqlite",
       STORAGE_PROVIDER: "local",
-      KINGS_PRESS_STORAGE: "local",
-      KINGS_PRESS_DATA_DIR: dataDir,
-      KINGS_PRESS_LLM_SETTINGS_PATH: join(dataDir, "desktop-settings.json"),
+      PILLAR_PRESS_STORAGE: "local",
+      PILLAR_PRESS_DATA_DIR: dataDir,
+      PILLAR_PRESS_LLM_SETTINGS_PATH: join(dataDir, "desktop-settings.json"),
       PORT: String(port),
       HOSTNAME: "127.0.0.1",
       NODE_ENV: "production",

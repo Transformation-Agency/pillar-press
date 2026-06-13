@@ -1,0 +1,78 @@
+name: Windows build
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      AZURE_ENDPOINT: ${{ secrets.AZURE_ENDPOINT }}
+      AZURE_CODE_SIGNING_NAME: ${{ secrets.AZURE_CODE_SIGNING_NAME }}
+      AZURE_CERT_PROFILE_NAME: ${{ secrets.AZURE_CERT_PROFILE_NAME }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Configure Azure Trusted Signing
+        shell: pwsh
+        run: |
+          cargo install trusted-signing-cli --locked
+          $signCommand = "trusted-signing-cli -e $env:AZURE_ENDPOINT -a $env:AZURE_CODE_SIGNING_NAME -c $env:AZURE_CERT_PROFILE_NAME %1"
+          $config = @{ bundle = @{ windows = @{ signCommand = $signCommand } } } | ConvertTo-Json -Depth 5
+          Set-Content -Path src-tauri/tauri.sign.conf.json -Value $config
+
+      - name: Test signing
+        shell: pwsh
+        run: |
+          Copy-Item "$env:ProgramFiles\nodejs\node.exe" test-sign.exe
+          trusted-signing-cli -e $env:AZURE_ENDPOINT -a $env:AZURE_CODE_SIGNING_NAME -c $env:AZURE_CERT_PROFILE_NAME test-sign.exe
+          Remove-Item test-sign.exe
+
+      - name: Build desktop app (signed)
+        run: npm run desktop:build -- --config src-tauri/tauri.sign.conf.json
+
+      - name: Prepare release assets
+        shell: pwsh
+        run: |
+          $version = node -p 'require("./package.json").version'
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          $exe = Get-ChildItem "src-tauri/target/release/bundle/nsis/*.exe" | Select-Object -First 1
+          if (-not $exe) { throw "No NSIS installer found" }
+          Copy-Item $exe.FullName "release/Pillar.Press_${version}_x64-setup.exe"
+          Get-FileHash "release/Pillar.Press_${version}_x64-setup.exe" -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash.ToLower())  Pillar.Press_${version}_x64-setup.exe" } |
+            Set-Content "release/Pillar.Press_${version}_x64-setup.exe.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pillar-press-windows
+          path: release/*
+          if-no-files-found: error
+
+      - name: Upload assets to GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          fail_on_unmatched_files: true

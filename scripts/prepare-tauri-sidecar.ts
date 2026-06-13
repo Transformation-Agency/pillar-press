@@ -93,7 +93,8 @@ function resolveBundledDylib(linkedPath: string, fromFile: string) {
 }
 
 async function copyNodeRuntime() {
-  const nodePath = await realpath(process.execPath);
+  const configuredNodePath = process.env.PILLAR_PRESS_NODE_SIDECAR_PATH?.trim();
+  const nodePath = await realpath(configuredNodePath || process.execPath);
   if (!(await exists(nodePath))) {
     throw new Error(`Could not find the build Node runtime at ${nodePath}.`);
   }

@@ -356,7 +356,7 @@ function SetupStatusChip({ label }) {
 }
 
 function InlineModelSetup({ status, onSaved }) {
-  const desktop = window.KINGS_DESKTOP;
+  const desktop = window.PILLAR_DESKTOP;
   const hasDesktop = !!(desktop && desktop.isDesktop && desktop.isDesktop());
   const [mode, setMode] = React.useState("cloud");
   const [provider, setProvider] = React.useState((status && status.provider && status.provider !== "ollama") ? status.provider : "openai");
@@ -806,7 +806,7 @@ function IntroConsentSetup({ answered, onAccept, onSkip, value, onChange, onSubm
 }
 
 function InlineVoiceSetup({ status, audioState, onConnect, onLLMSaved, onVoiceConfigured }) {
-  const desktop = window.KINGS_DESKTOP;
+  const desktop = window.PILLAR_DESKTOP;
   const hasDesktop = !!(desktop && desktop.isDesktop && desktop.isDesktop());
   const [provider, setProvider] = React.useState("openai");
   const [apiKey, setApiKey] = React.useState("");
@@ -995,7 +995,7 @@ function InlineVoiceSetup({ status, audioState, onConnect, onLLMSaved, onVoiceCo
   async function openProviderUrl(url) {
     const cleanUrl = String(url || "").trim();
     if (!cleanUrl) return;
-    const desktopBridge = window.KINGS_DESKTOP;
+    const desktopBridge = window.PILLAR_DESKTOP;
     if (desktopBridge && desktopBridge.isDesktop && desktopBridge.isDesktop() && desktopBridge.openExternalUrl) {
       try {
         await desktopBridge.openExternalUrl(cleanUrl);
@@ -1201,7 +1201,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
   const state = window.Store.getState();
   const campaigns = state.campaigns || [];
   const activeCampaign = window.Store.activeCampaign && window.Store.activeCampaign();
-  const hasDesktopBridge = !!(window.KINGS_DESKTOP && window.KINGS_DESKTOP.isDesktop && window.KINGS_DESKTOP.isDesktop());
+  const hasDesktopBridge = !!(window.PILLAR_DESKTOP && window.PILLAR_DESKTOP.isDesktop && window.PILLAR_DESKTOP.isDesktop());
   const introScript = ONBOARDING_COPY.getPressIntroScript("pillar_press");
   const focusSuggestions = "Try something concrete like Launch plan, Book draft, Newsletter, Research brief, or Client proposal.";
 
@@ -1818,19 +1818,19 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     setSetupError("");
     stopListeningSession();
     listenTargetRef.current = targetStep || step;
-    if (hasDesktopBridge && window.KINGS_DESKTOP.startVoiceSession) {
+    if (hasDesktopBridge && window.PILLAR_DESKTOP.startVoiceSession) {
       setListening(true);
       setAudioState("listening");
       setAudioError("");
       listenSessionRef.current = {
         supported: true,
         stop: function () {
-          if (window.KINGS_DESKTOP && window.KINGS_DESKTOP.stopVoiceSession) {
-            window.KINGS_DESKTOP.stopVoiceSession().catch(() => {});
+          if (window.PILLAR_DESKTOP && window.PILLAR_DESKTOP.stopVoiceSession) {
+            window.PILLAR_DESKTOP.stopVoiceSession().catch(() => {});
           }
         },
       };
-      window.KINGS_DESKTOP.startVoiceSession().catch((error) => {
+      window.PILLAR_DESKTOP.startVoiceSession().catch((error) => {
         const message = (error && error.message) || "Local voice transcription is not available. You can type instead.";
         setSetupError(message);
         setAudioError(message);
@@ -1914,8 +1914,8 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
         }
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         stream.getTracks().forEach((track) => track.stop());
-        if (hasDesktopBridge && window.KINGS_DESKTOP.startVoiceSession) {
-          await window.KINGS_DESKTOP.startVoiceSession();
+        if (hasDesktopBridge && window.PILLAR_DESKTOP.startVoiceSession) {
+          await window.PILLAR_DESKTOP.startVoiceSession();
         }
       }
       setAudioState("audio_ready");

@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 152" role="img" aria-label="Pillar Press logo banner">
+  <defs>
+    <radialGradient id="pp-burgundy" cx="42%" cy="26%" r="72%">
+      <stop offset="0" stop-color="#9a2f2e"/>
+      <stop offset=".58" stop-color="#7d2020"/>
+      <stop offset="1" stop-color="#4d1215"/>
+    </radialGradient>
+    <linearGradient id="pp-gold" x1="38" y1="18" x2="72" y2="102" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fff0b4"/>
+      <stop offset=".24" stop-color="#e2bd62"/>
+      <stop offset=".55" stop-color="#b8842d"/>
+      <stop offset=".78" stop-color="#f3d98d"/>
+      <stop offset="1" stop-color="#8f6724"/>
+    </linearGradient>
+    <linearGradient id="pp-gold-stroke" x1="14" y1="14" x2="102" y2="106" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f8e5a5"/>
+      <stop offset=".55" stop-color="#b9852d"/>
+      <stop offset="1" stop-color="#f3d98d"/>
+    </linearGradient>
+  </defs>
+  <rect width="720" height="152" fill="#faf9f7"/>
+  <g transform="translate(18 25)">
+    <circle cx="51" cy="51" r="48" fill="url(#pp-burgundy)" stroke="url(#pp-gold-stroke)" stroke-width="4"/>
+    <circle cx="51" cy="51" r="41" fill="none" stroke="#e5bf63" stroke-width="2" opacity=".75"/>
+    <path d="M36 18h30l-3.5 8H39.5L36 18Zm5 12h20v6H41v-6Zm4 10h5v31h-5V40Zm11 0h5v31h-5V40ZM41 75h20v7H41v-7Zm-5 11h30l5 9H31l5-9Z" fill="url(#pp-gold)"/>
+    <path d="M39 22h24M42 34h17M42 79h19M37 90h29" fill="none" stroke="#fff1bc" stroke-width="1.4" stroke-linecap="round" opacity=".76"/>
+    <path d="M15 46h14M15 57h14M15 68h14M73 46h14M73 57h14M73 68h14" stroke="#e5bf63" stroke-width="3.5" stroke-linecap="round"/>
+  </g>
+  <g transform="translate(140 41)">
+    <g fill="#11100e" font-family="Cormorant Garamond, Georgia, serif" font-size="68" font-weight="600">
+      <text x="0" y="66" letter-spacing="9">P</text>
+      <text x="108" y="66" letter-spacing="9">LLAR</text>
+    </g>
+    <g transform="translate(59 1) scale(.84)">
+      <path d="M8 8h28l-3 8H11L8 8Zm4 11h20v6H12v-6Zm3 9h5v35h-5V28Zm9 0h5v35h-5V28Zm-12 38h20v6H12v-6Zm-4 9h28l4 9H4l4-9Z" fill="url(#pp-gold)"/>
+      <path d="M11 12h22M12 23h20M13 69h18M8 80h28" fill="none" stroke="#fff2bd" stroke-width="1.4" stroke-linecap="round" opacity=".72"/>
+    </g>
+    <text x="388" y="66" fill="#7d2020" font-family="Cormorant Garamond, Georgia, serif" font-size="66" font-weight="650">Press</text>
+  </g>
+</svg>

@@ -171,7 +171,7 @@ function IntegrationRow({ def, configured, onSaved }) {
   const [apiKey, setApiKey] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState(null);
-  const desktop = window.KINGS_DESKTOP;
+  const desktop = window.PILLAR_DESKTOP;
   const canSave = !!(desktop && desktop.isDesktop && desktop.isDesktop() && desktop.saveIntegrationKey);
 
   const save = async (value) => {

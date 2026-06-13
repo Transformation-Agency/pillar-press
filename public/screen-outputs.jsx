@@ -83,7 +83,7 @@ async function downloadAllOutputs(piece, setMsg) {
   const files = outputFiles(piece); if (!files.length) return;
   try {
     const result = await window.EXPORT.downloadBlob(window.EXPORT.zipBlob(files), window.EXPORT.safeName(piece.title) + "-outputs.zip");
-    if (setMsg && result && result.path && window.KINGS_DESKTOP && window.KINGS_DESKTOP.isDesktop && window.KINGS_DESKTOP.isDesktop()) {
+    if (setMsg && result && result.path && window.PILLAR_DESKTOP && window.PILLAR_DESKTOP.isDesktop && window.PILLAR_DESKTOP.isDesktop()) {
       setMsg({ t: "ok", m: "Downloaded outputs.", link: "file://" + result.path });
     }
   } catch (e) {
@@ -116,7 +116,7 @@ function GoogleDriveIntegrationCard() {
   const [linking, setLinking] = React.useState(false);
   const [msg, setMsg] = React.useState("");
   const pollRef = React.useRef(null);
-  const isDesktop = !!(window.KINGS_DESKTOP && window.KINGS_DESKTOP.isDesktop && window.KINGS_DESKTOP.isDesktop());
+  const isDesktop = !!(window.PILLAR_DESKTOP && window.PILLAR_DESKTOP.isDesktop && window.PILLAR_DESKTOP.isDesktop());
 
   const refresh = React.useCallback(async () => {
     try {
@@ -130,11 +130,11 @@ function GoogleDriveIntegrationCard() {
   React.useEffect(() => { refresh(); return () => clearInterval(pollRef.current); }, [refresh]);
 
   const saveCreds = async () => {
-    if (!isDesktop || !window.KINGS_DESKTOP.saveIntegrationKey) { setMsg("On a hosted install, set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in the server environment."); return; }
+    if (!isDesktop || !window.PILLAR_DESKTOP.saveIntegrationKey) { setMsg("On a hosted install, set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in the server environment."); return; }
     if (!clientId.trim() || !clientSecret.trim()) { setMsg("Paste both the Client ID and the Client Secret."); return; }
     setBusy(true); setMsg("");
     try {
-      await window.KINGS_DESKTOP.saveIntegrationKey("google", clientSecret.trim(), { baseUrl: clientId.trim() });
+      await window.PILLAR_DESKTOP.saveIntegrationKey("google", clientSecret.trim(), { baseUrl: clientId.trim() });
       setClientSecret("");
       setMsg("Credentials saved encrypted. Now connect your account.");
       await refresh();
@@ -144,9 +144,9 @@ function GoogleDriveIntegrationCard() {
 
   const startLink = () => {
     const path = "/api/drive/auth" + (folderId.trim() ? "?folderId=" + encodeURIComponent(folderId.trim()) : "");
-    if (isDesktop && window.KINGS_DESKTOP.openExternalUrl) {
+    if (isDesktop && window.PILLAR_DESKTOP.openExternalUrl) {
       // Google rejects OAuth in embedded webviews — use the system browser.
-      window.KINGS_DESKTOP.openExternalUrl(window.location.origin + path);
+      window.PILLAR_DESKTOP.openExternalUrl(window.location.origin + path);
     } else {
       window.open(path, "_blank", "width=520,height=680,noopener");
     }

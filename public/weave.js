@@ -10,7 +10,7 @@
 (function () {
 
   function isDesktop() {
-    return !!(window.KINGS_DESKTOP && window.KINGS_DESKTOP.isDesktop && window.KINGS_DESKTOP.isDesktop());
+    return !!(window.PILLAR_DESKTOP && window.PILLAR_DESKTOP.isDesktop && window.PILLAR_DESKTOP.isDesktop());
   }
 
   async function postWeave(usable, asyncMode) {

@@ -21,7 +21,7 @@ function hasAppleIdNotaryCredentials() {
 }
 
 function notaryKeychainProfile() {
-  return required("KINGS_PRESS_NOTARY_KEYCHAIN_PROFILE") || required("APPLE_NOTARY_KEYCHAIN_PROFILE");
+  return required("PILLAR_PRESS_NOTARY_KEYCHAIN_PROFILE") || required("APPLE_NOTARY_KEYCHAIN_PROFILE");
 }
 
 function hasKeychainProfileCredentials() {
@@ -97,7 +97,7 @@ if (process.platform !== "darwin") {
 }
 
 const signingIdentity =
-  required("KINGS_PRESS_SIGNING_IDENTITY") ||
+  required("PILLAR_PRESS_SIGNING_IDENTITY") ||
   required("APPLE_SIGNING_IDENTITY") ||
   required("MACOS_SIGNING_IDENTITY");
 const hasImportableCertificate = Boolean(required("APPLE_CERTIFICATE") && required("APPLE_CERTIFICATE_PASSWORD"));
@@ -106,7 +106,7 @@ if (!signingIdentity && !hasImportableCertificate) {
   throw new Error(
     [
       "Missing Developer ID signing credentials.",
-      "Set KINGS_PRESS_SIGNING_IDENTITY, APPLE_SIGNING_IDENTITY, or MACOS_SIGNING_IDENTITY",
+      "Set PILLAR_PRESS_SIGNING_IDENTITY, APPLE_SIGNING_IDENTITY, or MACOS_SIGNING_IDENTITY",
       "to a Developer ID Application certificate in the login keychain, or provide",
       "APPLE_CERTIFICATE plus APPLE_CERTIFICATE_PASSWORD for CI certificate import.",
     ].join(" ")
@@ -125,7 +125,7 @@ if (!hasApiKeyNotaryCredentials() && !hasAppleIdNotaryCredentials() && !hasKeych
 }
 
 const providerShortName =
-  required("KINGS_PRESS_PROVIDER_SHORT_NAME") ||
+  required("PILLAR_PRESS_PROVIDER_SHORT_NAME") ||
   required("APPLE_PROVIDER_SHORT_NAME") ||
   required("APPLE_TEAM_ID");
 const tempDir = join(tmpdir(), `pillar-press-signed-${Date.now()}`);
@@ -136,6 +136,7 @@ try {
   const macOS: Record<string, unknown> = {
     signingIdentity: signingIdentity ?? null,
     hardenedRuntime: true,
+    minimumSystemVersion: "12.0",
   };
   if (providerShortName) macOS.providerShortName = providerShortName;
 

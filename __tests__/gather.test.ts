@@ -40,8 +40,6 @@ describe("runGather", () => {
   it("reports a failed source's error message in `errors`", async () => {
     const { runGather } = await import("../lib/gather");
     delete process.env.BRAVE_SEARCH_API_KEY;
-    delete process.env.Brave_Kings_Press;
-    delete process.env.Brave_Pillar_Press;
     const { items, perSource, errors } = await runGather([
       { id: "bad", kind: "web" as const, config: "anything", enabled: true }, // fails: no key
     ]);
@@ -60,7 +58,7 @@ describe("integration keys", () => {
     writeFileSync(path, JSON.stringify({ integrations: { brave: { apiKey: "from-settings" } } }));
     try {
       const { braveSearchKey } = await import("../lib/gather/integrationKeys");
-      expect(braveSearchKey({ KINGS_PRESS_LLM_SETTINGS_PATH: path, BRAVE_SEARCH_API_KEY: "from-env" })).toBe("from-settings");
+      expect(braveSearchKey({ PILLAR_PRESS_LLM_SETTINGS_PATH: path, BRAVE_SEARCH_API_KEY: "from-env" })).toBe("from-settings");
       expect(braveSearchKey({ BRAVE_SEARCH_API_KEY: "from-env" })).toBe("from-env");
       expect(braveSearchKey({})).toBeUndefined();
     } finally {
@@ -72,8 +70,6 @@ describe("integration keys", () => {
 describe("websearch connector", () => {
   it("throws a config error (not a leak) when the provider key is missing", async () => {
     delete process.env.BRAVE_SEARCH_API_KEY;
-    delete process.env.Brave_Kings_Press;
-    delete process.env.Brave_Pillar_Press;
     const { runWebSearch } = await import("../lib/gather/websearch");
     await expect(runWebSearch("test")).rejects.toMatchObject({ code: "config" });
   });

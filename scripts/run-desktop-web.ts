@@ -7,7 +7,7 @@ const child = spawn(npmBin, ["run", command], {
   stdio: "inherit",
   env: {
     ...process.env,
-    KINGS_PRESS_LOCAL_FIRST: "true",
+    PILLAR_PRESS_LOCAL_FIRST: "true",
     STORAGE_PROVIDER: "local",
   },
 });

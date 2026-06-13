@@ -24,7 +24,7 @@ export function decryptDesktopSecret(value: string | undefined, env: Env = proce
   const raw = trim(value);
   if (!raw) return undefined;
   if (!raw.startsWith(DESKTOP_SECRET_PREFIX)) return raw;
-  const keyText = trim(env.KINGS_PRESS_DESKTOP_SETTINGS_KEY);
+  const keyText = trim(env.PILLAR_PRESS_DESKTOP_SETTINGS_KEY);
   if (!keyText) return undefined;
   try {
     const payload = raw.slice(DESKTOP_SECRET_PREFIX.length);
@@ -45,7 +45,7 @@ export function decryptDesktopSecret(value: string | undefined, env: Env = proce
 }
 
 export function readDesktopSettings(env: Env = process.env): DesktopSettingsFile | null {
-  const path = trim(env.KINGS_PRESS_LLM_SETTINGS_PATH);
+  const path = trim(env.PILLAR_PRESS_LLM_SETTINGS_PATH);
   if (!path) return null;
   try {
     const parsed = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
