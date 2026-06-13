@@ -1,5 +1,5 @@
-import { chmod, cp, mkdir, readdir, stat, writeFile } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
+import { chmod, cp, mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { basename, join } from "node:path";
 
 const root = process.cwd();
 const resourceDir = join(root, "src-tauri", "resources", "whisper");
@@ -31,21 +31,22 @@ async function maybeCopy(from: string | null, to: string, label: string): Promis
   return true;
 }
 
-await mkdir(binDir, { recursive: true });
-await mkdir(libDir, { recursive: true });
-await mkdir(libexecDir, { recursive: true });
-await mkdir(modelDir, { recursive: true });
-
 const sourceBin = envPath("PILLAR_PRESS_WHISPER_BIN") || envPath("WHISPER_CPP_BIN");
 const sourceModel = envPath("PILLAR_PRESS_WHISPER_MODEL") || envPath("WHISPER_CPP_MODEL");
 const sourceLibDir =
   envPath("PILLAR_PRESS_WHISPER_LIB_DIR") ||
-  envPath("WHISPER_CPP_LIB_DIR") ||
-  (sourceBin ? resolve(dirname(sourceBin), "..", "lib") : null);
+  envPath("WHISPER_CPP_LIB_DIR");
 const sourceLibexecDir =
   envPath("PILLAR_PRESS_WHISPER_LIBEXEC_DIR") ||
-  envPath("WHISPER_CPP_LIBEXEC_DIR") ||
-  (sourceBin ? resolve(dirname(sourceBin), "..", "libexec") : null);
+  envPath("WHISPER_CPP_LIBEXEC_DIR");
+
+await rm(binDir, { recursive: true, force: true });
+await rm(libDir, { recursive: true, force: true });
+await rm(libexecDir, { recursive: true, force: true });
+await mkdir(binDir, { recursive: true });
+await mkdir(libDir, { recursive: true });
+await mkdir(libexecDir, { recursive: true });
+await mkdir(modelDir, { recursive: true });
 
 const copiedBin = await maybeCopy(
   sourceBin,
