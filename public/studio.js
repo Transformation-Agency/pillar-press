@@ -29,7 +29,7 @@
       description: "Talking-head video: a portrait image lip-synced to an audio track.",
       aspectRatios: ["9:16", "1:1", "16:9"], resolutions: ["540p", "720p"], durations: [], maxDuration: 120,
       requires: { startFrame: true, audio: true } },
-    { id: "eleven-tts-multilingual-v2", name: "ElevenLabs · Multilingual v2", type: "audio", credits: 1,
+    { id: "eleven-tts-multilingual-v2", name: "ElevenLabs · Multilingual v2", type: "audio",
       provider: "elevenlabs",
       description: "Natural voiceover from a script. The audio you can sync video to.",
       aspectRatios: [], resolutions: [], durations: [],
@@ -255,14 +255,16 @@
     return Math.max(2, Math.round((words / 2.6) * 10) / 10); // ~156 wpm
   }
 
+  // Credits are a Hedra balance. Other providers (OpenAI, xAI, ElevenLabs) bill
+  // their own accounts directly, so estimating "credits" for them is fiction —
+  // return 0 and let the UI hide the figure.
   function creditsCost(model, params) {
-    if (!model) return 0;
+    if (!model || model.provider !== "hedra") return 0;
     let c = model.credits || 0;
     const resMult = { "540p": 1, "720p": 1.4, "1080p": 2 }[params.resolution] || 1;
     if (model.type === "video") c = Math.round(c * resMult * ((params.duration || 5) / 5));
     else if (model.type === "avatar") c = Math.round(c * resMult * Math.max(1, (params.estDuration || 8) / 8));
     else if (model.type === "image") c = Math.round(c * resMult * (params.batch || 1));
-    else if (model.type === "audio") c = Math.max(1, Math.round((params.estDuration || estimateAudioDuration(params.prompt)) / 5));
     return c;
   }
 

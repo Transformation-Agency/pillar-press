@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { requireUser } from "@/lib/auth";
 import { db, settings } from "@/lib/db";
-import { folderName } from "@/lib/drive";
+import { driveOauthConfigured, folderName } from "@/lib/drive";
 import { toErrorResponse } from "@/lib/errors";
 import { getOrCreateLocalSettings } from "@/lib/local/database";
 import { isLocalFirstMode } from "@/lib/local/mode";
@@ -30,11 +30,17 @@ export async function GET() {
 
     if (isLocalFirstMode()) {
       const row = getOrCreateLocalSettings(user.id, user.workspaceId ?? "local-workspace");
+      const linked = Boolean(row.driveRefreshToken);
+      let name: string | null = null;
+      if (linked && row.driveFolderId) {
+        name = await folderName(row.driveRefreshToken!, row.driveFolderId).catch(() => null);
+      }
       return NextResponse.json({
-        linked: false,
+        linked,
         folderId: row.driveFolderId,
-        folderName: row.driveFolderId ? "Local exports" : null,
+        folderName: name ?? (row.driveFolderId && !linked ? "Local exports" : name),
         localExportAvailable: true,
+        oauthConfigured: driveOauthConfigured(),
       });
     }
 
@@ -48,7 +54,7 @@ export async function GET() {
       name = await folderName(row!.driveRefreshToken!, folderId);
     }
 
-    return NextResponse.json({ linked, folderId, folderName: name });
+    return NextResponse.json({ linked, folderId, folderName: name, oauthConfigured: driveOauthConfigured() });
   } catch (err) {
     return toErrorResponse(err);
   }

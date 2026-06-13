@@ -2,6 +2,7 @@
  *  title/channel via YouTube Data API. SERVER ONLY. */
 import { YoutubeTranscript } from "youtube-transcript";
 import { fetchJSON, GatherError, type GatherItem } from "./index";
+import { youtubeApiKey } from "./integrationKeys";
 
 export async function runYouTube(input: string): Promise<GatherItem[]> {
   const id = parseId(input);
@@ -13,7 +14,7 @@ export async function runYouTube(input: string): Promise<GatherItem[]> {
   const transcript = segments.map((s) => s.text).join(" ").replace(/\s+/g, " ").trim();
 
   let title = `YouTube video ${id}`, channel = "YouTube", date = "";
-  const key = process.env.YOUTUBE_API_KEY;
+  const key = youtubeApiKey();
   if (key) {
     try {
       const meta = await fetchJSON<any>(`https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${id}&key=${key}`);

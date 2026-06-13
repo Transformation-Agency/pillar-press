@@ -4,6 +4,7 @@ import { requireUser } from "@/lib/auth";
 import { db, settings, type Setting } from "@/lib/db";
 import { exchangeCode, DriveError } from "@/lib/drive";
 import { toErrorResponse } from "@/lib/errors";
+import { updateLocalSettings } from "@/lib/local/database";
 import { isLocalFirstMode } from "@/lib/local/mode";
 
 /**
@@ -30,13 +31,6 @@ export async function GET(req: Request) {
   try {
     const user = await requireUser();
 
-    if (isLocalFirstMode()) {
-      return NextResponse.json(
-        { error: "Google Drive linking is disabled in local-first desktop mode. Use local exports instead.", code: "local_first" },
-        { status: 400 },
-      );
-    }
-
     const url = new URL(req.url);
     const error = url.searchParams.get("error");
     if (error) {
@@ -60,7 +54,12 @@ export async function GET(req: Request) {
       }
     }
 
-    const { refreshToken } = await exchangeCode(code);
+    // Must match the redirect_uri used in the consent request (see auth route).
+    const redirectOverride = isLocalFirstMode()
+      ? new URL("/api/drive/auth/callback", url).toString()
+      : undefined;
+
+    const { refreshToken } = await exchangeCode(code, redirectOverride);
     if (!refreshToken) {
       // Google omits the refresh token if the user previously consented and we
       // didn't force prompt:consent. consentUrl() forces it, so this is rare.
@@ -69,6 +68,14 @@ export async function GET(req: Request) {
         502,
         "drive_no_refresh_token",
       );
+    }
+
+    if (isLocalFirstMode()) {
+      updateLocalSettings(user.id, user.workspaceId ?? "local-workspace", {
+        driveRefreshToken: refreshToken,
+        ...(folderId ? { driveFolderId: folderId } : {}),
+      });
+      return NextResponse.redirect(`${url.origin}/?drive=linked`);
     }
 
     const patch: Partial<Setting> = {

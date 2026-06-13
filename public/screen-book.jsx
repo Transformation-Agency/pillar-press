@@ -65,6 +65,12 @@ function sortChapters(pieces) {
     return (a.createdAt || 0) - (b.createdAt || 0);
   });
 }
+function chapterBaseTitle(title) {
+  return String(title || "Untitled")
+    .replace(/^\s*0*\d{1,3}\s*[-.:)]\s*/, "")
+    .replace(/^\s*(?:chapter|ch\.?|part)\s+0*\d{1,3}\s*[-.:)]?\s*/i, "")
+    .trim() || "Untitled";
+}
 function chapterText(p) {
   return (p && p.original && p.original.trim()) ? p.original : ((p && p.revision && p.revision.text) || "");
 }
@@ -141,9 +147,10 @@ function BookPicker({ campaigns, bookId, onPick, onNew, role }) {
 }
 
 /* ---------- left: chapter list ---------- */
-function ChapterList({ chapters, selectedId, onSelect, onAdd, role, campaigns, bookId, onPickBook, onNewBook, isMobile, hidden }) {
+function ChapterList({ chapters, selectedId, onSelect, onAdd, onReorder, role, campaigns, bookId, onPickBook, onNewBook, isMobile, hidden }) {
   const [adding, setAdding] = React.useState(false);
   const [title, setTitle] = React.useState("");
+  const [dragId, setDragId] = React.useState(null);
   const commit = () => {
     const n = chapters.length + 1;
     onAdd(title.trim() || ("Chapter " + n));
@@ -162,12 +169,18 @@ function ChapterList({ chapters, selectedId, onSelect, onAdd, role, campaigns, b
           const on = c.id === selectedId;
           return (
             <button key={c.id} onClick={() => onSelect(c.id)}
+              draggable={!!onReorder && role !== "assistant"}
+              onDragStart={(e) => { setDragId(c.id); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", c.id); }}
+              onDragOver={(e) => { if (dragId && dragId !== c.id) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; } }}
+              onDrop={(e) => { e.preventDefault(); const from = e.dataTransfer.getData("text/plain") || dragId; setDragId(null); if (from && from !== c.id && onReorder) onReorder(from, c.id); }}
+              onDragEnd={() => setDragId(null)}
               style={{ display: "block", width: "100%", textAlign: "left", border: "none", cursor: "pointer",
                 background: on ? "var(--accent-soft)" : "transparent", borderRadius: "var(--radius)",
-                padding: "11px 12px", marginBottom: 2, transition: "background 0.12s" }}>
+                padding: "11px 12px", marginBottom: 2, transition: "background 0.12s", opacity: dragId === c.id ? 0.55 : 1 }}>
               <div style={{ display: "flex", gap: 9, alignItems: "baseline" }}>
                 <span className="mono" style={{ fontSize: 11, color: on ? "var(--accent-ink)" : "var(--ink-3)", flexShrink: 0, width: 18 }}>{String(i + 1).padStart(2, "0")}</span>
                 <span style={{ fontFamily: "var(--font-display)", fontSize: 16, lineHeight: 1.25, color: on ? "var(--ink)" : "var(--ink-2)", flex: 1 }}>{c.title || "Untitled"}</span>
+                {role !== "assistant" && <Icon name="grip" size={14} style={{ color: "var(--ink-3)", flexShrink: 0 }} />}
               </div>
               <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6, paddingLeft: 27 }}>
                 <span style={{ width: 6, height: 6, borderRadius: 99, background: `var(${window.STATUS_VAR[c.status] || "--st-draft"})` }} />
@@ -425,7 +438,7 @@ function Collapsible({ label, children }) {
 }
 
 /* ---------- main ---------- */
-function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaign }) {
+function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaign, onShowLibrary }) {
   // A book IS a campaign, chosen here independently of the globally-active
   // campaign so a book has its own library separate from "Me". Remembered in prefs.
   const isMobile = window.useIsMobile();
@@ -444,15 +457,20 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
   const draftFileRef = React.useRef(null);
   const [naming, setNaming] = React.useState(false);
   const [bookName, setBookName] = React.useState("");
+  const [confirmDeleteChapter, setConfirmDeleteChapter] = React.useState(null);
+  const bookCampaigns = React.useMemo(
+    () => (campaigns || []).filter((campaign) => campaign && campaign.meta && campaign.meta.kind === "book"),
+    [(campaigns || []).map((c) => c.id + ":" + ((c.meta && c.meta.kind) || "")).join(",")],
+  );
 
   // Drop a stale book selection if the campaign no longer exists; load the
   // book's pieces/references on demand (without making it the active campaign).
   React.useEffect(() => {
-    if (bookId && !(campaigns || []).find((c) => c.id === bookId)) { setBookId(null); return; }
+    if (bookId && !bookCampaigns.find((c) => c.id === bookId)) { setBookId(null); return; }
     if (bookId) window.Store.loadCampaign(bookId);
-  }, [bookId, (campaigns || []).map((c) => c.id).join(",")]);
+  }, [bookId, bookCampaigns.map((c) => c.id).join(",")]);
 
-  const bookCampaign = (campaigns || []).find((c) => c.id === bookId) || null;
+  const bookCampaign = bookCampaigns.find((c) => c.id === bookId) || null;
   const refs = (bookCampaign && bookCampaign.references) || {};
   const refCtx = window.AI.refContext(refs);
   const pieces = bookId ? (allPieces || []).filter((p) => p.campaignId === bookId) : [];
@@ -468,9 +486,23 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
     const n = bookName.trim();
     if (!n) return;
     setNaming(false);
-    const id = window.Store.addCampaign(n, { activate: false }); // don't hijack the active campaign
+    const id = window.Store.addCampaign(n, { activate: false, meta: { kind: "book" } }); // don't hijack the active campaign
     window.Store.loadCampaign(id);
     pickBook(id);
+  };
+
+  const reorderChapters = (fromId, toId) => {
+    if (!fromId || !toId || fromId === toId) return;
+    const fromIndex = chapters.findIndex((chapter) => chapter.id === fromId);
+    const toIndex = chapters.findIndex((chapter) => chapter.id === toId);
+    if (fromIndex < 0 || toIndex < 0) return;
+    const next = chapters.slice();
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, moved);
+    next.forEach((chapter, index) => {
+      const numbered = String(index + 1).padStart(2, "0") + " " + chapterBaseTitle(chapter.title);
+      if (chapter.title !== numbered) window.Store.updatePiece(chapter.id, { title: numbered });
+    });
   };
 
   // keep a valid selection as chapters change
@@ -503,6 +535,19 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
 
   const selectChapter = (id) => { saveNow(); setSelectedId(id); setMobilePane("editor"); };
   const addChapter = (t) => { if (!bookId) return; const p = window.Store.createPiece(t, bookId); setSelectedId(p.id); setPanel("sources"); setMobilePane("editor"); };
+  const requestDeleteChapter = () => {
+    const p = window.Store.getPiece(selectedId);
+    if (p) setConfirmDeleteChapter(p);
+  };
+  const deleteChapter = (chapter) => {
+    if (!chapter) return;
+    const index = chapters.findIndex((c) => c.id === chapter.id);
+    const next = chapters[index + 1] || chapters[index - 1] || null;
+    window.Store.deletePiece(chapter.id);
+    setConfirmDeleteChapter(null);
+    setSelectedId(next ? next.id : null);
+    flash("Chapter deleted");
+  };
 
   // Load a chapter draft from an uploaded file (PDF, image, .docx, or text).
   const uploadDraft = async (e) => {
@@ -599,8 +644,8 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
     try {
       await persistChapter();
       const res = await bookApi("GET", "/api/campaigns/" + bookCampaign.id + "/book/export");
-      window.EXPORT.downloadText(res.markdown || "", window.EXPORT.safeName(res.title || bookCampaign.name) + "-book.md");
-      flash("Book Markdown downloaded");
+      await window.EXPORT.downloadText(res.markdown || "", window.EXPORT.safeName(res.title || bookCampaign.name) + "-book.md");
+      flash("Book saved");
     } catch (e) { setErr(e.message || "Export failed."); }
     setBusy(null);
   };
@@ -647,8 +692,8 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
         </div>
       )}
 
-      <ChapterList chapters={chapters} selectedId={selectedId} onSelect={selectChapter} onAdd={addChapter} role={role}
-        campaigns={campaigns} bookId={bookId} onPickBook={pickBook} onNewBook={newBook}
+      <ChapterList chapters={chapters} selectedId={selectedId} onSelect={selectChapter} onAdd={addChapter} onReorder={reorderChapters} role={role}
+        campaigns={bookCampaigns} bookId={bookId} onPickBook={pickBook} onNewBook={newBook}
         isMobile={isMobile} hidden={isMobile && !showChapters} />
 
       {/* editor region (also hosts the no-book / no-chapter states) */}
@@ -685,7 +730,7 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
                   <select className="field" value={piece.status} onChange={(e) => setStatus(e.target.value)} style={{ width: "auto", fontSize: 12, padding: "5px 8px" }}>
                     {window.Store.STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>
-                  {!isMobile && <button className="btn ghost sm" onClick={() => { saveNow(); if (onActivateCampaign) onActivateCampaign(bookId); onOpenPiece(piece.id); }} title="Open in the full editorial desk">Desk ↗</button>}
+                  {!isMobile && <button className="btn ghost sm" onClick={() => { saveNow(); if (onActivateCampaign) onActivateCampaign(bookId); if (onShowLibrary) onShowLibrary(piece.id); else onOpenPiece(piece.id); }} title="Show this book campaign in Library">Show in Library</button>}
                 </div>
               </div>
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -699,6 +744,9 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
                   <input type="checkbox" checked={fullRevise} onChange={(e) => setFullRevise(e.target.checked)} disabled={!!busy} /> Full
                 </label>
                 <button className="btn sm" onClick={runOutputs} disabled={!!busy}>{busy === "outputs" ? <Spinner size={13} /> : <Icon name="arrowR" size={13} />} {isMobile ? "Outputs" : "Generate outputs"}</button>
+                <button className="btn ghost sm" onClick={requestDeleteChapter} disabled={!!busy} title="Delete this chapter">
+                  <Icon name="trash" size={13} /> Delete chapter
+                </button>
                 <div style={{ flex: 1 }} />
                 <button className="btn ghost sm" onClick={downloadBook} disabled={busy === "export"} title="Assemble all chapters into one Markdown file">{busy === "export" ? <Spinner size={13} /> : <Icon name="doc" size={13} />} {isMobile ? "Download" : "Download book"}</button>
                 {window.DRIVE && window.DRIVE.isConfigured() && <button className="btn ghost sm" onClick={uploadBook} disabled={busy === "export"}>{busy === "export" ? <Spinner size={13} /> : <Icon name="book" size={13} />} To Drive</button>}
@@ -759,6 +807,23 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
               <button className="btn" onClick={() => setNaming(false)}>Cancel</button>
               <button className="btn primary" disabled={!bookName.trim()} onClick={createBook}><Icon name="plus" size={13} /> Create book</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {confirmDeleteChapter && (
+        <div onClick={() => setConfirmDeleteChapter(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 200, display: "grid", placeItems: "center", padding: 16 }}>
+          <div onClick={(e) => e.stopPropagation()} className="card" style={{ width: "min(420px, 96vw)", padding: "22px 24px" }}>
+            <div className="eyebrow" style={{ marginBottom: 8 }}>Delete chapter</div>
+            <p style={{ margin: "0 0 16px", color: "var(--ink-2)", fontSize: 15 }}>
+              Delete &ldquo;{confirmDeleteChapter.title || "this chapter"}&rdquo;? This can&rsquo;t be undone.
+            </p>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button className="btn" onClick={() => setConfirmDeleteChapter(null)}>Cancel</button>
+              <button className="btn primary" onClick={() => deleteChapter(confirmDeleteChapter)}
+                style={{ background: "var(--sev-must)", borderColor: "var(--sev-must)" }}>
+                <Icon name="trash" size={13} /> Delete
+              </button>
             </div>
           </div>
         </div>

@@ -70,10 +70,12 @@ export function runConnector(kind: SourceKind, config: string): Promise<GatherIt
 
 export interface SourceLike { id: string; kind: SourceKind; config: string; enabled: boolean; label?: string }
 
-/** Run all enabled sources concurrently; partial failure skips that source. */
-export async function runGather(sources: SourceLike[]): Promise<{ items: GatherItem[]; perSource: Record<string, number> }> {
+/** Run all enabled sources concurrently; partial failure skips that source.
+ *  Failures are reported per source in `errors` so callers can surface them. */
+export async function runGather(sources: SourceLike[]): Promise<{ items: GatherItem[]; perSource: Record<string, number>; errors: Record<string, string> }> {
   const enabled = sources.filter((s) => s.enabled && s.config?.trim());
   const perSource: Record<string, number> = {};
+  const errors: Record<string, string> = {};
   const settled = await Promise.allSettled(
     enabled.map(async (s) => {
       const items = await runConnector(s.kind, s.config);
@@ -83,7 +85,12 @@ export async function runGather(sources: SourceLike[]): Promise<{ items: GatherI
   const items: GatherItem[] = [];
   settled.forEach((r, i) => {
     if (r.status === "fulfilled") { perSource[enabled[i].id] = r.value.length; items.push(...r.value); }
-    else { perSource[enabled[i].id] = 0; console.warn(JSON.stringify({ level: "warn", msg: "gather source failed", sourceId: enabled[i].id, reason: (r.reason instanceof Error ? r.reason.message : String(r.reason)) })); }
+    else {
+      const reason = r.reason instanceof Error ? r.reason.message : String(r.reason);
+      perSource[enabled[i].id] = 0;
+      errors[enabled[i].id] = reason;
+      console.warn(JSON.stringify({ level: "warn", msg: "gather source failed", sourceId: enabled[i].id, reason }));
+    }
   });
-  return { items, perSource };
+  return { items, perSource, errors };
 }

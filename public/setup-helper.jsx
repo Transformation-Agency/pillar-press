@@ -3233,6 +3233,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
                 <div style={{ display: "grid", gap: 12 }}>
                   <HedraIntegrationCard />
                   {window.ElevenLabsIntegrationCard && <ElevenLabsIntegrationCard />}
+                  {window.GoogleDriveIntegrationCard && <GoogleDriveIntegrationCard />}
                 </div>
               </section>
             )}

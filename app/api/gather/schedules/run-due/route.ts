@@ -10,7 +10,9 @@ import { isGatherScheduleDue } from "@/lib/gather/scheduleDue";
 import { toErrorResponse } from "@/lib/errors";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+// A due run covers a whole campaign (every enabled source + its LLM brief),
+// which can be slow on local models — match the run route's headroom.
+export const maxDuration = 300;
 
 let running = false;
 

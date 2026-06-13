@@ -37,17 +37,34 @@ const pct = (p: number | undefined) => (p == null ? 0 : Math.round(p <= 1 ? p * 
 
 /**
  * A start image can arrive as a raw Hedra asset id, an http(s) URL (a library
- * image), or a data: URL (an uploaded file). Hedra's start_keyframe_id needs an
- * asset id, so anything URL-shaped is fetched and uploaded first.
+ * image), a local-first relative URL (/api/local-files/…), or a data: URL (an
+ * uploaded file). Hedra's start_keyframe_id needs an asset id, so anything
+ * URL-shaped is fetched and uploaded first.
  */
 async function resolveStartAsset(ref: string | undefined): Promise<string | undefined> {
   if (!ref) return undefined;
-  const isUrl = ref.startsWith("http://") || ref.startsWith("https://") || ref.startsWith("data:");
-  if (!isUrl) return ref; // already an asset id
-  const resp = await fetch(ref);
-  if (!resp.ok) throw new Error("Could not load the start image.");
-  const blob = await resp.blob();
-  const ext = (blob.type && blob.type.split("/")[1]) || "png";
+  let blob: Blob;
+  if (ref.startsWith("/api/local-files/")) {
+    // Local-first storage URL: relative, so read it straight off disk instead
+    // of fetching (the server doesn't know its own public origin).
+    const { readFile } = await import("node:fs/promises");
+    const { join, relative, resolve } = await import("node:path");
+    const { localStorageDir } = await import("@/lib/local/paths");
+    const url = new URL(ref, "http://localhost");
+    const segments = url.pathname.split("/").slice(3).map(decodeURIComponent); // drop "", "api", "local-files"
+    const root = resolve(localStorageDir());
+    const filePath = resolve(join(root, ...segments));
+    if (relative(root, filePath).startsWith("..")) throw new Error("Could not load the start image.");
+    const bytes = await readFile(filePath);
+    blob = new Blob([new Uint8Array(bytes)], { type: url.searchParams.get("contentType") || "image/png" });
+  } else if (ref.startsWith("http://") || ref.startsWith("https://") || ref.startsWith("data:")) {
+    const resp = await fetch(ref);
+    if (!resp.ok) throw new Error("Could not load the start image.");
+    blob = await resp.blob();
+  } else {
+    return ref; // already an asset id
+  }
+  const ext = (blob.type && blob.type.split("/")[1]?.split("+")[0]) || "png";
   const name = `start-frame-${Date.now()}.${ext}`;
   const asset = await createAsset({ name, type: "image" });
   await uploadAsset(asset.id, blob, name);
@@ -55,8 +72,7 @@ async function resolveStartAsset(ref: string | undefined): Promise<string | unde
 }
 
 // POST /api/hedra/generate
-// - audio: ElevenLabs TTS rendered to an inline data URL (no Hedra), persisted
-//   as a completed job.
+// - audio: configured TTS provider output, persisted as a completed job.
 // - image: flat Hedra text-to-image (poll status; the asset carries the URL).
 // - video / avatar_video: Hedra video; avatar/video with a script first renders
 //   TTS on ElevenLabs and uploads it to Hedra as the audio track.
@@ -65,7 +81,7 @@ export async function POST(req: Request) {
     const user = await requireUser();
     const body = generateBodySchema.parse(await req.json());
 
-    // ── Audio (ElevenLabs TTS) — no Hedra model involved ───────────────────
+    // ── Audio (configured TTS) — no Hedra model involved ───────────────────
     if (body.type === "audio") {
       const script = sanitizeText(body.script || body.prompt, 100000);
       if (!script) return NextResponse.json({ error: "Provide a script to voice.", code: "validation" }, { status: 422 });

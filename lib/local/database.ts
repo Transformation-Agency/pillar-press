@@ -51,6 +51,7 @@ function migrateLooseColumns(db: Database.Database): void {
   addColumn(db, "media_jobs", "thumbnail_url", "TEXT");
   addColumn(db, "media_jobs", "credits_estimate", "REAL");
   addColumn(db, "media_jobs", "credits_actual", "REAL");
+  addColumn(db, "campaigns", "meta_json", "TEXT");
   addColumn(db, "settings", "user_id", "TEXT");
   addColumn(db, "settings", "workspace_id", "TEXT");
   addColumn(db, "settings", "drive_folder_id", "TEXT");
@@ -81,6 +82,7 @@ export interface LocalCampaign {
   workspaceId: string;
   slug: string;
   name: string;
+  meta: Record<string, unknown> | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -240,6 +242,7 @@ function rowCampaign(row: any): LocalCampaign {
     workspaceId: row.workspace_id,
     slug: row.slug,
     name: row.name,
+    meta: parseJson<Record<string, unknown> | null>(row.meta_json, null),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -453,7 +456,7 @@ export function getLocalCampaign(id: string, workspaceId = LOCAL_WORKSPACE_ID): 
   return row ? rowCampaign(row) : null;
 }
 
-export function createLocalCampaign(input: { id?: string; name: string; workspaceId?: string }): LocalCampaign {
+export function createLocalCampaign(input: { id?: string; name: string; workspaceId?: string; meta?: Record<string, unknown> | null }): LocalCampaign {
   const workspaceId = input.workspaceId || LOCAL_WORKSPACE_ID;
   ensureLocalWorkspace();
   const db = localDb();
@@ -466,8 +469,8 @@ export function createLocalCampaign(input: { id?: string; name: string; workspac
   const campaignId = input.id || randomUUID();
   const tx = db.transaction(() => {
     db.prepare(
-      "INSERT INTO campaigns (id, workspace_id, slug, name, updated_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)",
-    ).run(campaignId, workspaceId, candidate, input.name);
+      "INSERT INTO campaigns (id, workspace_id, slug, name, meta_json, updated_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
+    ).run(campaignId, workspaceId, candidate, input.name, input.meta ? JSON.stringify(input.meta) : null);
     db.prepare(
       "INSERT INTO references_doc (id, campaign_id, doc_json, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
     ).run(randomUUID(), campaignId, JSON.stringify(EMPTY_REFERENCES));
@@ -932,17 +935,18 @@ export function getOrCreateLocalSettings(
 export function updateLocalSettings(
   userId: string,
   workspaceId: string,
-  patch: { driveFolderId?: string | null; prefs?: Record<string, unknown> },
+  patch: { driveFolderId?: string | null; driveRefreshToken?: string | null; prefs?: Record<string, unknown> },
 ): LocalSetting {
   const existing = getOrCreateLocalSettings(userId, workspaceId);
   localDb()
     .prepare(
       `UPDATE settings
-       SET drive_folder_id = ?, prefs_json = ?, updated_at = CURRENT_TIMESTAMP
+       SET drive_folder_id = ?, drive_refresh_token = ?, prefs_json = ?, updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
     )
     .run(
       patch.driveFolderId !== undefined ? patch.driveFolderId : existing.driveFolderId,
+      patch.driveRefreshToken !== undefined ? patch.driveRefreshToken : existing.driveRefreshToken,
       JSON.stringify(patch.prefs !== undefined ? patch.prefs : existing.prefs),
       existing.id,
     );

@@ -57,6 +57,9 @@ function splitModels(value: string | undefined, fallback: string[]) {
   return models.length ? models : fallback;
 }
 
+// Note: no `credits` on non-Hedra models. Credits are a Hedra-specific balance;
+// OpenAI/xAI/ElevenLabs bill their own accounts directly, so a credit number
+// here would be fiction the UI then displays.
 function imageModels(provider: string, models: string[]): MediaModelInfo[] {
   return models.map((id) => ({
     id,
@@ -66,7 +69,6 @@ function imageModels(provider: string, models: string[]): MediaModelInfo[] {
     aspectRatios: ["1:1", "4:5", "16:9", "9:16"],
     resolutions: ["1024x1024", "1024x1536", "1536x1024", "auto"],
     durations: [],
-    credits: 1,
     requires: { prompt: true },
   }));
 }
@@ -80,7 +82,6 @@ function audioModels(provider: string, models: string[]): MediaModelInfo[] {
     aspectRatios: [],
     resolutions: [],
     durations: [],
-    credits: 1,
     requires: { prompt: true, voice: true },
   }));
 }
@@ -119,7 +120,6 @@ export function getMediaProviderStatus(env: NodeJS.ProcessEnv = process.env): Me
       aspectRatios: [],
       resolutions: [],
       durations: [],
-      credits: 1,
       requires: { prompt: true, voice: true },
     }],
   };
@@ -158,24 +158,27 @@ export function getMediaProviderStatus(env: NodeJS.ProcessEnv = process.env): Me
   };
 }
 
+// Key precedence everywhere: settings-UI keys first (desktop media key, then
+// the LLM profile key where applicable), env vars last as hosted/dev fallbacks.
+// Env must never shadow a key the user saved through the UI.
 export function getImageProviderConfig(provider: string | undefined, env: NodeJS.ProcessEnv = process.env): ImageProviderConfig | null {
   if (provider === "openai") {
     const saved = desktopMediaProvider("openai", env);
     const savedLLM = resolveProviderConnection("openai", {}, env);
-    const apiKey = (env.MEDIA_OPENAI_API_KEY || env.OPENAI_API_KEY || saved?.apiKey || savedLLM.apiKey || "").trim();
+    const apiKey = (saved?.apiKey || savedLLM.apiKey || env.MEDIA_OPENAI_API_KEY || env.OPENAI_API_KEY || "").trim();
     if (!apiKey) return null;
-    return { provider: "openai", apiKey, baseUrl: (env.MEDIA_OPENAI_BASE_URL || saved?.baseUrl || savedLLM.baseUrl || "https://api.openai.com/v1").replace(/\/$/, "") };
+    return { provider: "openai", apiKey, baseUrl: (saved?.baseUrl || savedLLM.baseUrl || env.MEDIA_OPENAI_BASE_URL || "https://api.openai.com/v1").replace(/\/$/, "") };
   }
   if (provider === "xai") {
     const saved = desktopMediaProvider("xai", env);
-    const apiKey = (env.MEDIA_XAI_API_KEY || env.XAI_API_KEY || saved?.apiKey || "").trim();
+    const apiKey = (saved?.apiKey || env.MEDIA_XAI_API_KEY || env.XAI_API_KEY || "").trim();
     if (!apiKey) return null;
-    return { provider: "xai", apiKey, baseUrl: (env.MEDIA_XAI_BASE_URL || saved?.baseUrl || "https://api.x.ai/v1").replace(/\/$/, "") };
+    return { provider: "xai", apiKey, baseUrl: (saved?.baseUrl || env.MEDIA_XAI_BASE_URL || "https://api.x.ai/v1").replace(/\/$/, "") };
   }
   if (provider === "custom-image") {
     const saved = desktopMediaProvider("custom-image", env);
-    const apiKey = (env.MEDIA_IMAGE_API_KEY || saved?.apiKey || "").trim();
-    const baseUrl = (env.MEDIA_IMAGE_BASE_URL || saved?.baseUrl || "").trim().replace(/\/$/, "");
+    const apiKey = (saved?.apiKey || env.MEDIA_IMAGE_API_KEY || "").trim();
+    const baseUrl = (saved?.baseUrl || env.MEDIA_IMAGE_BASE_URL || "").trim().replace(/\/$/, "");
     if (!apiKey || !baseUrl) return null;
     return { provider: "custom-image", apiKey, baseUrl };
   }
@@ -186,9 +189,9 @@ export function getAudioProviderConfig(provider: string | undefined, env: NodeJS
   if (provider === "openai") {
     const saved = desktopMediaProvider("openai", env);
     const savedLLM = resolveProviderConnection("openai", {}, env);
-    const apiKey = (env.MEDIA_OPENAI_API_KEY || env.OPENAI_API_KEY || saved?.apiKey || savedLLM.apiKey || "").trim();
+    const apiKey = (saved?.apiKey || savedLLM.apiKey || env.MEDIA_OPENAI_API_KEY || env.OPENAI_API_KEY || "").trim();
     if (!apiKey) return null;
-    return { provider: "openai", apiKey, baseUrl: (env.MEDIA_OPENAI_BASE_URL || saved?.baseUrl || savedLLM.baseUrl || "https://api.openai.com/v1").replace(/\/$/, "") };
+    return { provider: "openai", apiKey, baseUrl: (saved?.baseUrl || savedLLM.baseUrl || env.MEDIA_OPENAI_BASE_URL || "https://api.openai.com/v1").replace(/\/$/, "") };
   }
   return null;
 }

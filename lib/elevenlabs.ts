@@ -21,7 +21,8 @@ export class ElevenError extends Error {
 }
 
 function apiKey(override?: string): string {
-  const k = override || process.env.ELEVENLABS_API_KEY || desktopMediaProvider("elevenlabs")?.apiKey;
+  // Settings-UI key first; env is a hosted/dev fallback and must not shadow it.
+  const k = override || desktopMediaProvider("elevenlabs")?.apiKey || process.env.ELEVENLABS_API_KEY;
   if (!k) throw new ElevenError(500, "config", "ElevenLabs isn't connected. Add your key in Settings → Studio integrations to enable voiceovers.");
   return k;
 }

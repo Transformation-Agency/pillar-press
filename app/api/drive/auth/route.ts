@@ -21,13 +21,6 @@ export async function GET(req: Request) {
   try {
     const user = await requireUser();
 
-    if (isLocalFirstMode()) {
-      return NextResponse.json(
-        { error: "Google Drive linking is disabled in local-first desktop mode. Use local exports instead.", code: "local_first" },
-        { status: 400 },
-      );
-    }
-
     const url = new URL(req.url);
     const folderId = url.searchParams.get("folderId") ?? "";
 
@@ -37,7 +30,15 @@ export async function GET(req: Request) {
       folderId,
     });
 
-    return NextResponse.redirect(await consentUrl(state));
+    // Local-first desktop: the server's port is dynamic, so derive the OAuth
+    // callback from this request's own origin instead of a fixed env URI. Use a
+    // Google "Desktop app" OAuth client — those allow loopback redirects on any
+    // port.
+    const redirectOverride = isLocalFirstMode()
+      ? new URL("/api/drive/auth/callback", url).toString()
+      : undefined;
+
+    return NextResponse.redirect(await consentUrl(state, redirectOverride));
   } catch (err) {
     return toErrorResponse(err);
   }

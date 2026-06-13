@@ -6,9 +6,9 @@ import { db, mediaJobs, settings } from "@/lib/db";
 import { uploadBinaryFile, DriveError } from "@/lib/drive";
 import { safeName } from "@/lib/exporters";
 import { toErrorResponse } from "@/lib/errors";
-import { getLocalMediaJob } from "@/lib/local/database";
+import { getLocalMediaJob, getOrCreateLocalSettings } from "@/lib/local/database";
 import { isLocalFirstMode } from "@/lib/local/mode";
-import { isLocalStoredUrl, writeLocalPublicFile } from "@/lib/local/storage";
+import { writeLocalPublicFile } from "@/lib/local/storage";
 
 const bodySchema = z.object({ mediaId: z.string().uuid() });
 
@@ -57,15 +57,17 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "This media isn't ready to save yet.", code: "validation" }, { status: 422 });
     }
 
-    if (isLocalFirstMode() && isLocalStoredUrl(url)) {
-      const base = safeName(media.prompt || media.modelName || media.type || "media");
-      return NextResponse.json({ file: { id: url, name: base, webViewLink: url } }, { status: 201 });
-    }
-
+    // (Local-first requests fall through: the bytes are fetched below — relative
+    // /api/local-files URLs resolve against this request's own origin — and go
+    // to Drive when linked, or the local exports folder otherwise.)
+    const localSetting = isLocalFirstMode()
+      ? getOrCreateLocalSettings(user.id, user.workspaceId ?? "local-workspace")
+      : null;
     const [setting] = isLocalFirstMode()
       ? []
       : await db.select().from(settings).where(settingsScope(user)).limit(1);
-    const driveRefreshToken = setting?.driveRefreshToken;
+    const driveRefreshToken = isLocalFirstMode() ? localSetting?.driveRefreshToken : setting?.driveRefreshToken;
+    const driveFolderId = isLocalFirstMode() ? localSetting?.driveFolderId : setting?.driveFolderId;
     if (!isLocalFirstMode() && !driveRefreshToken) {
       throw new DriveError("Google Drive is not linked.", 400, "drive_not_linked");
     }
@@ -88,12 +90,12 @@ export async function POST(req: Request) {
     const base = safeName(media.prompt || media.modelName || media.type || "media");
     const name = `${base}-${media.id.slice(0, 8)}.${ext}`;
 
-    if (isLocalFirstMode()) {
+    if (isLocalFirstMode() && !driveRefreshToken) {
       const localUrl = writeLocalPublicFile(bytes, name, mime, "exports");
       return NextResponse.json({ file: { id: localUrl, name, webViewLink: localUrl } }, { status: 201 });
     }
 
-    const file = await uploadBinaryFile(driveRefreshToken!, setting.driveFolderId, name, bytes, mime);
+    const file = await uploadBinaryFile(driveRefreshToken!, driveFolderId, name, bytes, mime);
     return NextResponse.json({ file }, { status: 201 });
   } catch (err) {
     return toErrorResponse(err);

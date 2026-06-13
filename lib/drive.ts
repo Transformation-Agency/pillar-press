@@ -20,17 +20,37 @@
  */
 import { Readable } from "node:stream";
 import { DriveError } from "@/lib/driveError";
+import { readDesktopSettings } from "@/lib/desktopSettings";
 
 export { DriveError } from "@/lib/driveError";
 
 /** Scope: drive.file — per-file access to files the app creates (same as proto). */
 export const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 
-/** Read + validate the Google OAuth env config. Throws a clear server error. */
-function oauthConfig(): { clientId: string; clientSecret: string; redirectUri: string } {
-  const clientId = process.env.GOOGLE_CLIENT_ID;
-  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-  const redirectUri = process.env.GOOGLE_REDIRECT_URI || process.env.GOOGLE_OAUTH_REDIRECT_URL;
+/** Google OAuth client credentials: desktop settings UI first, env fallback.
+ *  The desktop setup saves them encrypted as the "google" integration
+ *  (clientId in baseUrl, client secret in apiKey). */
+function googleCredentials(): { clientId?: string; clientSecret?: string } {
+  const saved = readDesktopSettings()?.integrations?.google;
+  return {
+    clientId: saved?.baseUrl?.trim() || process.env.GOOGLE_CLIENT_ID,
+    clientSecret: saved?.apiKey?.trim() || process.env.GOOGLE_CLIENT_SECRET,
+  };
+}
+
+/** Whether OAuth client credentials exist (so the UI can offer linking). */
+export function driveOauthConfigured(): boolean {
+  const { clientId, clientSecret } = googleCredentials();
+  return Boolean(clientId && clientSecret);
+}
+
+/** Read + validate the Google OAuth config. Throws a clear server error.
+ *  `redirectOverride` lets routes derive the callback URL from the request
+ *  origin (the desktop server's port is dynamic, so a fixed env URI can't
+ *  know it). */
+function oauthConfig(redirectOverride?: string): { clientId: string; clientSecret: string; redirectUri: string } {
+  const { clientId, clientSecret } = googleCredentials();
+  const redirectUri = redirectOverride || process.env.GOOGLE_REDIRECT_URI || process.env.GOOGLE_OAUTH_REDIRECT_URL;
   if (!clientId || !clientSecret || !redirectUri) {
     throw new DriveError(
       "Google Drive is not configured on the server.",
@@ -46,9 +66,9 @@ async function googleApi() {
   return mod.google;
 }
 
-/** Build a fresh OAuth2 client from env config. */
-export async function oauthClient() {
-  const { clientId, clientSecret, redirectUri } = oauthConfig();
+/** Build a fresh OAuth2 client from the resolved config. */
+export async function oauthClient(redirectOverride?: string) {
+  const { clientId, clientSecret, redirectUri } = oauthConfig(redirectOverride);
   const google = await googleApi();
   return new google.auth.OAuth2(clientId, clientSecret, redirectUri);
 }
@@ -58,8 +78,8 @@ export async function oauthClient() {
  * refresh token even on re-consent. `state` round-trips an opaque value (we use
  * it to tie the callback back to the initiating user/workspace).
  */
-export async function consentUrl(state: string): Promise<string> {
-  return (await oauthClient()).generateAuthUrl({
+export async function consentUrl(state: string, redirectOverride?: string): Promise<string> {
+  return (await oauthClient(redirectOverride)).generateAuthUrl({
     access_type: "offline",
     prompt: "consent",
     scope: [DRIVE_SCOPE],
@@ -72,8 +92,8 @@ export async function consentUrl(state: string): Promise<string> {
  * Exchange an authorization code for tokens. Returns the refresh token (to
  * persist) — Google only returns it with offline access + consent.
  */
-export async function exchangeCode(code: string): Promise<{ refreshToken: string | null }> {
-  const client = await oauthClient();
+export async function exchangeCode(code: string, redirectOverride?: string): Promise<{ refreshToken: string | null }> {
+  const client = await oauthClient(redirectOverride);
   try {
     const { tokens } = await client.getToken(code);
     return { refreshToken: tokens.refresh_token ?? null };

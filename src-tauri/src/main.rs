@@ -92,6 +92,9 @@ struct DesktopSettings {
     task_defaults: Option<HashMap<String, String>>,
     #[serde(default, rename = "mediaProviders")]
     media_providers: Option<HashMap<String, DesktopMediaProviderSettings>>,
+    // Gather connector keys (brave / x / youtube / ncbi); apiKey stored encrypted.
+    #[serde(default)]
+    integrations: Option<HashMap<String, DesktopMediaProviderSettings>>,
 }
 
 #[derive(Deserialize)]
@@ -99,6 +102,16 @@ struct SaveMediaProviderKeyArgs {
     provider: String,
     #[serde(default, rename = "apiKey")]
     api_key: Option<String>,
+    #[serde(default, rename = "baseUrl")]
+    base_url: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct SaveIntegrationKeyArgs {
+    integration: String,
+    #[serde(default, rename = "apiKey")]
+    api_key: Option<String>,
+    // Secondary non-secret field (e.g. the Google OAuth client id).
     #[serde(default, rename = "baseUrl")]
     base_url: Option<String>,
 }
@@ -131,8 +144,19 @@ struct SaveExportArgs {
     base64: String,
 }
 
+#[derive(Deserialize)]
+struct SaveAudioArgs {
+    filename: String,
+    base64: String,
+}
+
 #[derive(Serialize)]
 struct SaveExportResult {
+    path: String,
+}
+
+#[derive(Serialize)]
+struct SaveAudioResult {
     path: String,
 }
 
@@ -231,6 +255,7 @@ fn read_desktop_settings(app: &AppHandle) -> Result<DesktopSettings, String> {
             default_profile_id: None,
             task_defaults: None,
             media_providers: None,
+            integrations: None,
         });
     }
     let text = fs::read_to_string(path).map_err(|e| e.to_string())?;
@@ -513,6 +538,31 @@ fn open_path(path: PathBuf) -> Result<(), String> {
     let mut command = {
         let mut cmd = Command::new("xdg-open");
         cmd.arg(path);
+        cmd
+    };
+
+    command.spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
+fn reveal_path(path: PathBuf) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut cmd = Command::new("open");
+        cmd.arg("-R").arg(path);
+        cmd
+    };
+
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut cmd = Command::new("explorer");
+        cmd.arg(format!("/select,{}", path.to_string_lossy()));
+        cmd
+    };
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut command = {
+        let mut cmd = Command::new("xdg-open");
+        cmd.arg(path.parent().map(PathBuf::from).unwrap_or(path));
         cmd
     };
 
@@ -984,6 +1034,11 @@ fn start_packaged_server(app: &AppHandle) -> Result<Option<String>, String> {
             .env("KINGS_PRESS_STORAGE_DIR", &storage_path)
             .env("KINGS_PRESS_LLM_SETTINGS_PATH", &settings)
             .env("KINGS_PRESS_DESKTOP_SETTINGS_KEY", desktop_settings_key)
+            // The basic-auth gate is for public hosted URLs. The desktop server
+            // binds to localhost only, and the background scheduler's raw POST
+            // sends no credentials — an inherited SITE_PASSWORD would silently
+            // 401 every scheduled gather.
+            .env_remove("SITE_PASSWORD")
             .stdout(Stdio::null())
             .stderr(Stdio::null());
 
@@ -1156,6 +1211,9 @@ fn save_model_choice(app: AppHandle, model: String) -> Result<(), String> {
         media_providers: read_desktop_settings(&app)
             .ok()
             .and_then(|s| s.media_providers),
+        integrations: read_desktop_settings(&app)
+            .ok()
+            .and_then(|s| s.integrations),
     };
     let json = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
     fs::write(settings_path(&app)?, json).map_err(|e| e.to_string())
@@ -1278,7 +1336,8 @@ fn save_llm_settings(app: AppHandle, settings: DesktopSettings) -> Result<(), St
                 })
                 .collect()
         }),
-        media_providers: existing.and_then(|s| s.media_providers),
+        media_providers: existing.as_ref().and_then(|s| s.media_providers.clone()),
+        integrations: existing.and_then(|s| s.integrations),
     };
     let json = serde_json::to_string_pretty(&cleaned).map_err(|e| e.to_string())?;
     fs::write(settings_path(&app)?, json).map_err(|e| e.to_string())
@@ -1314,6 +1373,50 @@ fn save_media_provider_key(app: AppHandle, args: SaveMediaProviderKeyArgs) -> Re
         },
     );
     settings.media_providers = Some(media);
+    let json = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
+    fs::write(settings_path(&app)?, json).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn save_integration_key(app: AppHandle, args: SaveIntegrationKeyArgs) -> Result<(), String> {
+    let integration = args.integration.trim().to_lowercase();
+    if !["brave", "x", "youtube", "ncbi", "google"].contains(&integration.as_str()) {
+        return Err("Unsupported integration.".into());
+    }
+    let api_key = args
+        .api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_string);
+    let base_url = args
+        .base_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_string);
+    let mut settings = read_desktop_settings(&app)?;
+    let mut integrations = settings.integrations.unwrap_or_default();
+    match api_key {
+        // An empty key disconnects the integration.
+        None => {
+            integrations.remove(&integration);
+        }
+        Some(key) => {
+            integrations.insert(
+                integration,
+                DesktopMediaProviderSettings {
+                    api_key: encrypt_setting_secret(&app, Some(key))?,
+                    base_url,
+                },
+            );
+        }
+    }
+    settings.integrations = if integrations.is_empty() {
+        None
+    } else {
+        Some(integrations)
+    };
     let json = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
     fs::write(settings_path(&app)?, json).map_err(|e| e.to_string())
 }
@@ -1395,15 +1498,86 @@ fn save_export_file(app: AppHandle, args: SaveExportArgs) -> Result<SaveExportRe
         .decode(args.base64.as_bytes())
         .map_err(|_| "Could not decode export data.".to_string())?;
     let filename = safe_export_filename(&args.filename);
-    let dir = match app.path().download_dir() {
+    let fallback_dir = match app.path().download_dir() {
         Ok(path) => path,
         Err(_) => app_data_dir(&app)?.join("exports"),
     };
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let path = unique_path(dir.join(filename));
+    let Some(path) = save_panel_path(&filename)? else {
+        return Err("Save canceled.".to_string());
+    };
+    let path = if path.file_name().is_some() {
+        path
+    } else {
+        fallback_dir.join(filename)
+    };
+    let path = unique_path(path);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
     fs::write(&path, bytes).map_err(|e| e.to_string())?;
-    let _ = open_path(path.clone());
+    let _ = reveal_path(path.clone());
     Ok(SaveExportResult {
+        path: path.to_string_lossy().to_string(),
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn save_panel_path(filename: &str) -> Result<Option<PathBuf>, String> {
+    let script = r#"on run argv
+set defaultName to item 1 of argv
+set downloadsFolder to path to downloads folder
+set targetFile to choose file name with prompt "Save file as:" default name defaultName default location downloadsFolder
+return POSIX path of targetFile
+end run"#;
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(script)
+        .arg(filename)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr);
+        if err.contains("User canceled") || err.contains("-128") {
+            return Ok(None);
+        }
+        return Err(err.trim().to_string());
+    }
+    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if path.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(PathBuf::from(path)))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn save_panel_path(_filename: &str) -> Result<Option<PathBuf>, String> {
+    Ok(None)
+}
+
+#[tauri::command]
+fn save_audio_file(app: AppHandle, args: SaveAudioArgs) -> Result<SaveAudioResult, String> {
+    let bytes = BASE64
+        .decode(args.base64.as_bytes())
+        .map_err(|_| "Could not decode audio data.".to_string())?;
+    let filename = safe_export_filename(&args.filename);
+    let fallback_dir = match app.path().download_dir() {
+        Ok(path) => path,
+        Err(_) => app_data_dir(&app)?.join("exports"),
+    };
+    let Some(path) = save_panel_path(&filename)? else {
+        return Err("Save canceled.".to_string());
+    };
+    let path = if path.file_name().is_some() {
+        path
+    } else {
+        fallback_dir.join(filename)
+    };
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    fs::write(&path, bytes).map_err(|e| e.to_string())?;
+    let _ = reveal_path(path.clone());
+    Ok(SaveAudioResult {
         path: path.to_string_lossy().to_string(),
     })
 }
@@ -1786,10 +1960,12 @@ fn main() {
             save_model_choice,
             save_llm_settings,
             save_media_provider_key,
+            save_integration_key,
             get_model_choice,
             init_local_database,
             create_local_backup,
             save_export_file,
+            save_audio_file,
             desktop_runtime_status,
             start_voice_session,
             speak_text,

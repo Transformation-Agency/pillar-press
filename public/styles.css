@@ -207,6 +207,42 @@ a { color: var(--accent-ink); text-decoration: none; }
 .btn.sm { font-size: 13px; padding: 6px 12px; }
 .btn .ico { width: 15px; height: 15px; }
 
+/* ---- Revision actions ---- */
+.revision-actions {
+  display: grid;
+  grid-template-columns: minmax(340px, 1.25fr) minmax(270px, 0.9fr) minmax(190px, 0.55fr);
+  align-items: stretch;
+  gap: 12px;
+  width: 100%;
+}
+.revision-action-card {
+  border: 1px solid var(--hair);
+  background: var(--paper-2);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  box-shadow: var(--shadow-sm);
+}
+.revision-action-label {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 7px;
+}
+.revision-action-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 1120px) {
+  .revision-actions {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ---- Chips / badges ---- */
 .chip {
   display: inline-flex; align-items: center; gap: 6px;

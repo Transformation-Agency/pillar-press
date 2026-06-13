@@ -90,7 +90,7 @@
     return { path: filename };
   }
 
-  function downloadText(text, filename, mime) { downloadBlob(blobFor(text, mime), filename); }
+  function downloadText(text, filename, mime) { return downloadBlob(blobFor(text, mime), filename); }
 
   /* ---- minimal ZIP (store method) ---- */
   const CRC_TABLE = (() => {

@@ -47,10 +47,10 @@ export async function POST(req: Request) {
       );
     }
 
-    const { id: providedId, name } = createCampaignSchema.parse(await req.json());
+    const { id: providedId, name, meta } = createCampaignSchema.parse(await req.json());
 
     if (isLocalFirstMode()) {
-      const campaign = createLocalCampaign({ id: providedId, name, workspaceId: user.workspaceId });
+      const campaign = createLocalCampaign({ id: providedId, name, workspaceId: user.workspaceId, meta });
       return NextResponse.json({ campaign }, { status: 201 });
     }
 

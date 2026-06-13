@@ -31,15 +31,49 @@ describe("runGather", () => {
       { id: "s2", kind: "rss" as const, config: "", enabled: true }, // skipped (no config)
     ];
     global.fetch = mockFetch(RSS) as any;
-    const { items, perSource } = await runGather(sources);
+    const { items, perSource, errors } = await runGather(sources);
     expect(items.length).toBeGreaterThan(0);
     expect(perSource.s1).toBeGreaterThan(0);
+    expect(errors).toEqual({});
+  });
+
+  it("reports a failed source's error message in `errors`", async () => {
+    const { runGather } = await import("../lib/gather");
+    delete process.env.BRAVE_SEARCH_API_KEY;
+    delete process.env.Brave_Kings_Press;
+    delete process.env.Brave_Pillar_Press;
+    const { items, perSource, errors } = await runGather([
+      { id: "bad", kind: "web" as const, config: "anything", enabled: true }, // fails: no key
+    ]);
+    expect(items).toEqual([]);
+    expect(perSource.bad).toBe(0);
+    expect(errors.bad).toMatch(/BRAVE_SEARCH_API_KEY/);
+  });
+});
+
+describe("integration keys", () => {
+  it("prefers the desktop settings key over env", async () => {
+    const { writeFileSync, rmSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const path = join(tmpdir(), `pp-test-settings-${process.pid}.json`);
+    writeFileSync(path, JSON.stringify({ integrations: { brave: { apiKey: "from-settings" } } }));
+    try {
+      const { braveSearchKey } = await import("../lib/gather/integrationKeys");
+      expect(braveSearchKey({ KINGS_PRESS_LLM_SETTINGS_PATH: path, BRAVE_SEARCH_API_KEY: "from-env" })).toBe("from-settings");
+      expect(braveSearchKey({ BRAVE_SEARCH_API_KEY: "from-env" })).toBe("from-env");
+      expect(braveSearchKey({})).toBeUndefined();
+    } finally {
+      rmSync(path, { force: true });
+    }
   });
 });
 
 describe("websearch connector", () => {
   it("throws a config error (not a leak) when the provider key is missing", async () => {
     delete process.env.BRAVE_SEARCH_API_KEY;
+    delete process.env.Brave_Kings_Press;
+    delete process.env.Brave_Pillar_Press;
     const { runWebSearch } = await import("../lib/gather/websearch");
     await expect(runWebSearch("test")).rejects.toMatchObject({ code: "config" });
   });

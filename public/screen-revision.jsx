@@ -68,9 +68,12 @@ function RevisionTab({ piece, onUpdate, refCtx }) {
   // Toggle: light firewall pass vs full restructure-then-polish pass.
   const FullToggle = (
     <label title="Full revision: restructure the piece (strategy, audience, rigor, structure) then polish (clarity, tone, inoculation). Off = the light clarity/tone/inoculation pass only."
-      style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: full ? "var(--accent-ink)" : "var(--ink-3)", cursor: "pointer", userSelect: "none" }}>
-      <input type="checkbox" checked={full} onChange={(e) => setFull(e.target.checked)} disabled={busy} />
-      Full revision — apply strategy &amp; structure too
+      style={{ display: "flex", alignItems: "flex-start", gap: 9, fontSize: 13, color: full ? "var(--accent-ink)" : "var(--ink-3)", cursor: "pointer", userSelect: "none", maxWidth: 310 }}>
+      <input type="checkbox" checked={full} onChange={(e) => setFull(e.target.checked)} disabled={busy} style={{ marginTop: 3 }} />
+      <span>
+        <span style={{ display: "block", color: full ? "var(--accent-ink)" : "var(--ink)", fontWeight: 650 }}>Revise structure too</span>
+        <span style={{ display: "block", lineHeight: 1.35 }}>Also revisit strategy, audience, rigor, and organization.</span>
+      </span>
     </label>
   );
 
@@ -93,10 +96,14 @@ function RevisionTab({ piece, onUpdate, refCtx }) {
           <p className="muted" style={{ fontSize: 14.5, fontStyle: "italic", marginBottom: 24 }}>
             Where a clarity rule would flatten a line that sounds like you, your line wins.
           </p>
-          <div style={{ display: "flex", justifyContent: "center", marginBottom: 16 }}>{FullToggle}</div>
-          <button className="btn primary" onClick={generate} disabled={busy}>
-            {busy ? <><Spinner size={15} /> {busyLabel}</> : <><Icon name="play" size={15} /> Generate revision</>}
-          </button>
+          <div className="revision-action-card" style={{ maxWidth: 500, margin: "0 auto" }}>
+            <div className="revision-action-main" style={{ justifyContent: "center" }}>
+              <button className="btn primary" onClick={generate} disabled={busy}>
+                {busy ? <><Spinner size={15} /> {busyLabel}</> : <><Icon name="play" size={15} /> Generate revision</>}
+              </button>
+              {FullToggle}
+            </div>
+          </div>
           {err && <p style={{ color: "var(--sev-must)", marginTop: 16, fontSize: 14 }}>{err}</p>}
         </div>
       </div>
@@ -108,8 +115,8 @@ function RevisionTab({ piece, onUpdate, refCtx }) {
       <div style={{ maxWidth: 1080, margin: "0 auto", padding: isMobile ? "20px 16px 80px" : "26px 32px 90px",
         display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 320px", gap: isMobile ? 18 : 36, alignItems: "start" }}>
         <div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-            <div style={{ display: "flex", gap: 4, background: "var(--paper-sunk)", borderRadius: 999, padding: 3 }}>
+          <div style={{ display: "grid", gap: 14, marginBottom: 16 }}>
+            <div style={{ display: "flex", gap: 4, background: "var(--paper-sunk)", borderRadius: 999, padding: 3, width: "fit-content" }}>
               {[["clean", "Clean"], ["diff", "Show changes"]].map(([id, l]) => (
                 <button key={id} onClick={() => setMode(id)} className="mono"
                   style={{ fontSize: 11.5, padding: "6px 14px", borderRadius: 999, border: "none", cursor: "pointer",
@@ -117,13 +124,28 @@ function RevisionTab({ piece, onUpdate, refCtx }) {
                     boxShadow: mode === id ? "var(--shadow-sm)" : "none" }}>{l}</button>
               ))}
             </div>
-            <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-              {FullToggle}
-              {window.AudioActions && <AudioActions text={() => rev.text} label="revision" filename={(piece.title || "revision") + "-revision.mp3"} pieceId={piece.id} campaignId={piece.campaignId} />}
-              <CopyButton text={() => rev.text} label="Copy revision" />
-              <button className="btn ghost sm" onClick={generate} disabled={busy}>
-                {busy ? <Spinner size={14} /> : <Icon name="play" size={14} />} Regenerate
-              </button>
+            <div className="revision-actions">
+              <div className="revision-action-card">
+                <div className="revision-action-label">Regenerate</div>
+                <div className="revision-action-main">
+                  <button className="btn primary sm" onClick={generate} disabled={busy}>
+                    {busy ? <><Spinner size={14} /> {busyLabel}</> : <><Icon name="play" size={14} /> Regenerate</>}
+                  </button>
+                  {FullToggle}
+                </div>
+              </div>
+              <div className="revision-action-card">
+                <div className="revision-action-label">Audio</div>
+                <div className="revision-action-main">
+                  {window.AudioActions && <AudioActions text={() => rev.text} label="revision" filename={(piece.title || "revision") + "-revision.mp3"} pieceId={piece.id} campaignId={piece.campaignId} />}
+                </div>
+              </div>
+              <div className="revision-action-card">
+                <div className="revision-action-label">Other</div>
+                <div className="revision-action-main">
+                  <CopyButton text={() => rev.text} label="Copy revision" />
+                </div>
+              </div>
             </div>
           </div>
           <div className="card" style={{ padding: "34px 40px" }}>

@@ -1145,6 +1145,7 @@ function DesktopOnboarding() {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 12 }}>
               <HedraIntegrationCard />
               <ElevenLabsIntegrationCard />
+              {window.GoogleDriveIntegrationCard && <GoogleDriveIntegrationCard />}
             </div>
           </div>
 
@@ -1376,7 +1377,8 @@ function App() {
       )}
       {activeCampaign && view === "book" && (
         <BookWriter campaigns={campaigns} allPieces={state.pieces} role={role}
-          onOpenPiece={openPiece} onActivateCampaign={(id) => window.Store.setActiveCampaign(id)} />
+          onOpenPiece={openPiece} onActivateCampaign={(id) => window.Store.setActiveCampaign(id)}
+          onShowLibrary={(id) => { window.Store.setActive(id); setView("library"); }} />
       )}
       {activeCampaign && view === "library" && (
         <Library pieces={campaignPieces} campaignName={activeCampaign && activeCampaign.name} onOpen={openPiece}

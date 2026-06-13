@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS campaigns (
   workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   slug TEXT NOT NULL,
   name TEXT NOT NULL,
+  meta_json TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(workspace_id, slug)

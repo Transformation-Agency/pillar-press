@@ -17,8 +17,9 @@ function SourceRow({ source }) {
       <div style={{ minWidth: 0 }}>
         <div className="mono" style={{ fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--ink-3)" }}>{k.label}{source.lastCount != null ? ` · ${source.lastCount} found` : ""}</div>
         <input className="field" value={source.config || ""} placeholder={k.placeholder}
-          onChange={(e) => window.Store.updateGatherSource(source.id, { config: e.target.value })}
+          onChange={(e) => window.Store.updateGatherSource(source.id, { config: e.target.value, lastError: null })}
           style={{ background: "transparent", border: "1px solid transparent", padding: "3px 0", fontSize: 14.5, marginTop: 1 }} />
+        {source.lastError && <div style={{ fontSize: 12, color: "var(--sev-must)", marginTop: 3 }}>{source.lastError}</div>}
       </div>
       <GToggle on={source.enabled} onChange={() => window.Store.updateGatherSource(source.id, { enabled: !source.enabled })} />
       <button className="icon-btn" style={{ width: 28, height: 28 }} onClick={() => window.Store.removeGatherSource(source.id)} title="Remove"><Icon name="trash" size={13} /></button>
@@ -74,6 +75,8 @@ function SummaryCard({ summary, onSendToWeave, onDismiss }) {
 function SchedulePanel({ campaignId }) {
   const [version, setVersion] = React.useState(0);
   const [syncing, setSyncing] = React.useState(false);
+  const [saving, setSaving] = React.useState(false);
+  const [schedErr, setSchedErr] = React.useState(null);
   const [cadence, setCadence] = React.useState("daily");
   const [time, setTime] = React.useState("08:00");
   const [dayOfWeek, setDayOfWeek] = React.useState(String(new Date().getDay()));
@@ -82,21 +85,34 @@ function SchedulePanel({ campaignId }) {
 
   React.useEffect(() => {
     let cancelled = false;
-    setSyncing(true);
-    window.GATHER.syncSchedules(campaignId)
-      .then(() => { if (!cancelled) setVersion((v) => v + 1); })
-      .finally(() => { if (!cancelled) setSyncing(false); });
-    return () => { cancelled = true; };
+    const sync = (showSpinner) => {
+      if (showSpinner) setSyncing(true);
+      window.GATHER.syncSchedules(campaignId)
+        .then(() => { if (!cancelled) setVersion((v) => v + 1); })
+        .finally(() => { if (!cancelled && showSpinner) setSyncing(false); });
+    };
+    sync(true);
+    // The desktop scheduler stamps runs into SQLite in the background; re-sync
+    // periodically so "last run" doesn't go stale while the panel stays open.
+    const timer = setInterval(() => sync(false), 60000);
+    return () => { cancelled = true; clearInterval(timer); };
   }, [campaignId]);
 
-  const save = () => {
+  const save = async () => {
+    setSchedErr(null); setSaving(true);
     const base = { campaignId, cadence, time, timeOfDay: time, dayOfWeek: Number(dayOfWeek) };
-    window.GATHER.saveSchedule(cadence === "once" ? { campaignId, cadence, runAt } : base);
-    setVersion((v) => v + 1);
+    try {
+      await window.GATHER.saveSchedule(cadence === "once" ? { campaignId, cadence, runAt } : base);
+      setVersion((v) => v + 1);
+    } catch (e) { setSchedErr((e && e.message) || "Could not save the schedule."); }
+    setSaving(false);
   };
-  const remove = (id) => {
-    window.GATHER.deleteSchedule(id);
-    setVersion((v) => v + 1);
+  const remove = async (id) => {
+    setSchedErr(null);
+    try {
+      await window.GATHER.deleteSchedule(id);
+      setVersion((v) => v + 1);
+    } catch (e) { setSchedErr((e && e.message) || "Could not delete the schedule."); }
   };
   const label = (s) => {
     if (s.cadence === "once") return "Once · " + (s.runAt ? new Date(s.runAt).toLocaleString() : "not set");
@@ -123,8 +139,9 @@ function SchedulePanel({ campaignId }) {
             {["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"].map((d, i) => <option key={d} value={i}>{d}</option>)}
           </select>
         )}
-        <button className="btn sm" onClick={save} disabled={cadence === "once" && !runAt}><Icon name="gear" size={13} /> Save schedule</button>
+        <button className="btn sm" onClick={save} disabled={saving || (cadence === "once" && !runAt)}>{saving ? <Spinner size={13} /> : <Icon name="gear" size={13} />} Save schedule</button>
       </div>
+      {schedErr && <p style={{ color: "var(--sev-must)", fontSize: 13, marginTop: 8, marginBottom: 0 }}>{schedErr}</p>}
       {schedules.length > 0 && (
         <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 7 }}>
           {schedules.map((s) => (
@@ -136,6 +153,95 @@ function SchedulePanel({ campaignId }) {
         </div>
       )}
       <p className="muted" style={{ fontSize: 13, marginTop: 10 }}>Schedules run while Pillar Press is open. In the desktop app, the local scheduler runs in the background.</p>
+    </div>
+  );
+}
+
+/* Connector keys. Saved encrypted into the native desktop settings file via the
+   Tauri bridge (never through a server route); env vars remain a dev fallback. */
+const GATHER_INTEGRATIONS = [
+  { id: "brave", name: "Brave Search", powers: "Web search", hint: "Get a free key at brave.com/search/api" },
+  { id: "x", name: "X API", powers: "X posts", hint: "App bearer token — needs a paid X API tier" },
+  { id: "youtube", name: "YouTube Data API", powers: "video titles & channels", optional: true, hint: "Optional — transcripts work without it" },
+  { id: "ncbi", name: "NCBI", powers: "PubMed lookups", optional: true, hint: "Optional — raises PubMed rate limits" },
+];
+
+function IntegrationRow({ def, configured, onSaved }) {
+  const [open, setOpen] = React.useState(false);
+  const [apiKey, setApiKey] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const [msg, setMsg] = React.useState(null);
+  const desktop = window.KINGS_DESKTOP;
+  const canSave = !!(desktop && desktop.isDesktop && desktop.isDesktop() && desktop.saveIntegrationKey);
+
+  const save = async (value) => {
+    setBusy(true); setMsg(null);
+    try {
+      if (!canSave) throw new Error("Keys save from the desktop app only. For browser dev, set the env var instead.");
+      await desktop.saveIntegrationKey(def.id, value);
+      setApiKey(""); setOpen(false);
+      setMsg(value ? "Saved encrypted." : "Disconnected.");
+      if (onSaved) await onSaved();
+    } catch (e) { setMsg((e && e.message) || "Could not save the key."); }
+    setBusy(false);
+  };
+
+  return (
+    <div style={{ padding: "9px 0", borderBottom: "1px solid var(--hair)" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, alignItems: "center" }}>
+        <div style={{ minWidth: 0 }}>
+          <span style={{ fontSize: 14 }}>{def.name}</span>
+          <span className="mono" style={{ fontSize: 10, marginLeft: 7, color: configured ? "var(--st-approved)" : "var(--ink-3)" }}>
+            {configured == null ? "…" : configured ? "Connected" : def.optional ? "Optional" : "Not connected"}
+          </span>
+          <div className="muted" style={{ fontSize: 12 }}>Powers {def.powers}. {def.hint}</div>
+        </div>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button className="btn ghost sm" disabled={busy} onClick={() => { setOpen(!open); setMsg(null); }} title={configured ? "Replace the saved key" : "Connect " + def.name}>
+            <Icon name="key" size={12} /> {configured ? "Update" : "Connect"}
+          </button>
+          {configured && (
+            <button className="icon-btn" style={{ width: 26, height: 26 }} disabled={busy} onClick={() => save("")} title={"Disconnect " + def.name}>
+              <Icon name="trash" size={12} />
+            </button>
+          )}
+        </div>
+      </div>
+      {open && (
+        <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+          <input className="field" type="password" value={apiKey} placeholder={def.name + " API key"}
+            onChange={(e) => setApiKey(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && apiKey.trim()) save(apiKey.trim()); }}
+            style={{ flex: 1, fontSize: 13, padding: "7px 9px" }} />
+          <button className="btn primary sm" disabled={busy || !apiKey.trim()} onClick={() => save(apiKey.trim())}>
+            {busy ? <Spinner size={12} /> : <Icon name="check" size={12} />} Save
+          </button>
+        </div>
+      )}
+      {msg && <div style={{ fontSize: 12, marginTop: 6, color: /saved|disconnected/i.test(msg) ? "var(--st-approved)" : "var(--sev-must)" }}>{msg}</div>}
+    </div>
+  );
+}
+
+function IntegrationsPanel() {
+  const [status, setStatus] = React.useState(null);
+  const refresh = React.useCallback(() => {
+    return fetch("/api/gather/integrations", { headers: { Accept: "application/json" }, cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((s) => setStatus((s && s.integrations) || {}))
+      .catch(() => setStatus({}));
+  }, []);
+  React.useEffect(() => { refresh(); }, [refresh]);
+
+  return (
+    <div className="card" style={{ padding: "16px 18px", marginTop: 16 }}>
+      <div className="eyebrow" style={{ marginBottom: 4 }}>Integrations</div>
+      <p className="muted" style={{ fontSize: 12.5, margin: "0 0 6px" }}>Keys are saved encrypted on this Mac and never leave the local server.</p>
+      {GATHER_INTEGRATIONS.map((def) => (
+        <IntegrationRow key={def.id} def={def}
+          configured={status == null ? null : !!(status[def.id] && status[def.id].configured)}
+          onSaved={refresh} />
+      ))}
     </div>
   );
 }
@@ -216,11 +322,11 @@ function Gather({ campaignId, refCtx, onGoWeave }) {
         <div className="eyebrow" style={{ marginBottom: 8 }}>Research</div>
         <h1 style={{ fontSize: 42, letterSpacing: "-0.02em" }}>Gather</h1>
         <p className="muted" style={{ fontSize: 16, marginTop: 12, maxWidth: "62ch" }}>
-          Connect news feeds, web &amp; database searches, verified journal libraries, X trends, and YouTube transcripts. Run a gather, curate the results, and send the keepers straight into Weave.
+          Connect news feeds, web &amp; database searches, verified journal libraries, X posts, and YouTube transcripts. Run a gather, curate the results, and send the keepers straight into Weave.
         </p>
         <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 14px", borderRadius: "var(--radius)", background: "var(--paper-sunk)", marginTop: 16, fontSize: 13, color: "var(--ink-2)", maxWidth: "74ch" }}>
           <Icon name="sparkle" size={15} style={{ color: "var(--accent-ink)", flexShrink: 0 }} />
-          <span>Each enabled source fetches live results, then writes its own research brief. Send any brief — or individual results — to Weave. <strong>RSS, journals, scrape &amp; YouTube</strong> need no key; <strong>web search</strong> needs a key configured.</span>
+          <span>Each enabled source fetches live results, then writes its own research brief. Send any brief — or individual results — to Weave. <strong>RSS, journals, scrape &amp; YouTube</strong> need no key; <strong>web search</strong> and <strong>X posts</strong> need a key — connect them under <strong>Integrations</strong> below.</span>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "400px 1fr", gap: isMobile ? 18 : 32, alignItems: "start", marginTop: isMobile ? 18 : 28 }}>
@@ -251,6 +357,7 @@ function Gather({ campaignId, refCtx, onGoWeave }) {
               {uploading ? <><Spinner size={14} /> Reading…</> : <><Icon name="doc" size={14} /> Upload documents</>}
             </button>
             <SchedulePanel campaignId={campaignId} />
+            <IntegrationsPanel />
             {progLabel && <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, fontSize: 13, color: "var(--accent-ink)" }}><Spinner size={14} /> {progLabel}</div>}
             {err && <p style={{ color: "var(--sev-must)", fontSize: 13.5, marginTop: 12 }}>{err}</p>}
           </div>
@@ -273,7 +380,7 @@ function Gather({ campaignId, refCtx, onGoWeave }) {
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
               <div className="eyebrow" style={{ marginRight: "auto" }}>{items.length} gathered{selected.length ? ` · ${selected.length} selected` : ""}</div>
               {items.length > 0 && <>
-                <button className="btn ghost sm" onClick={() => items.forEach((i) => window.Store.updateGatherItem(i.id, { selected: !shown.every((s) => s.selected) }))}>Select all</button>
+                <button className="btn ghost sm" onClick={() => { const target = !shown.every((s) => s.selected); shown.forEach((i) => window.Store.updateGatherItem(i.id, { selected: target })); }}>Select all</button>
                 <button className="btn sm" disabled={!selected.length} onClick={sendToWeave}><Icon name="arrowR" size={13} /> Send {selected.length || ""} to Weave</button>
                 <button className="btn ghost sm" onClick={() => window.Store.clearGatherItems(campaignId)} title="Clear results"><Icon name="trash" size={13} /></button>
               </>}

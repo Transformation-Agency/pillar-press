@@ -11,7 +11,12 @@
     try {
       if (window.crypto && typeof window.crypto.randomUUID === "function") return window.crypto.randomUUID();
     } catch (e) { /* fall through */ }
-    return "id-" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+    // Server schemas validate ids as UUIDs, so the fallback must be UUID-shaped
+    // (v4 format from Math.random) or background persistence 400s silently.
+    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+      const r = (Math.random() * 16) | 0;
+      return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+    });
   }
   function now() { return Date.now(); }
 
@@ -286,7 +291,7 @@
       ]);
 
       const camps = (campRes && campRes.campaigns) || [];
-      state.campaigns = camps.map((c) => ({ id: c.id, name: c.name, slug: c.slug, references: null }));
+      state.campaigns = camps.map((c) => ({ id: c.id, name: c.name, slug: c.slug, references: null, meta: c.meta || null }));
 
       normSettings((setRes && setRes.settings) || setRes || {});
 
@@ -392,17 +397,18 @@
     // new book never hijacks the active article campaign ("Me").
     addCampaign(name, opts) {
       const activate = !opts || opts.activate !== false;
+      const meta = opts && opts.meta && typeof opts.meta === "object" ? opts.meta : null;
       const id = uid();
-      state.campaigns.push({ id, name: name || "New campaign", references: {} });
+      state.campaigns.push({ id, name: name || "New campaign", references: {}, meta });
       loadedCampaigns.add(id); // brand-new, nothing to fetch
       if (activate) { state.activeCampaignId = id; state.activePieceId = null; }
       emit();
-      const created = apiSend("POST", "/campaigns", { name: name || "New campaign" }).then((res) => {
+      const created = apiSend("POST", "/campaigns", { name: name || "New campaign", ...(meta ? { meta } : {}) }).then((res) => {
         const serverCampaign = res && res.campaign;
         if (!serverCampaign || !serverCampaign.id) return ensureCampaign(id);
         replaceCampaignId(id, serverCampaign.id);
         const c = ensureCampaign(serverCampaign.id);
-        if (c) Object.assign(c, { name: serverCampaign.name || c.name, slug: serverCampaign.slug || c.slug });
+        if (c) Object.assign(c, { name: serverCampaign.name || c.name, slug: serverCampaign.slug || c.slug, meta: serverCampaign.meta || c.meta || null });
         emit();
         persistPrefs();
         return c || ensureCampaign(serverCampaign.id);

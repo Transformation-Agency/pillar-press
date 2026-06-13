@@ -100,26 +100,122 @@ async function driveSave(files, setMsg) {
   } catch (e) { setMsg({ t: "err", m: e.message || "Drive save failed." }); }
 }
 
+/* Google Drive connect card. Runs the real server-side OAuth flow:
+   /api/drive/auth → Google consent → callback persists the refresh token
+   (Postgres row hosted, local SQLite settings on desktop). On desktop the
+   consent page opens in the system browser — Google blocks OAuth inside
+   embedded webviews — and the card polls /api/drive/status until linked.
+   Shared by this Outputs dialog, the model-setup Integrations section, and
+   the onboarding Connect step. */
+function GoogleDriveIntegrationCard() {
+  const [status, setStatus] = React.useState(null); // null = loading
+  const [folderId, setFolderId] = React.useState("");
+  const [clientId, setClientId] = React.useState("");
+  const [clientSecret, setClientSecret] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const [linking, setLinking] = React.useState(false);
+  const [msg, setMsg] = React.useState("");
+  const pollRef = React.useRef(null);
+  const isDesktop = !!(window.KINGS_DESKTOP && window.KINGS_DESKTOP.isDesktop && window.KINGS_DESKTOP.isDesktop());
+
+  const refresh = React.useCallback(async () => {
+    try {
+      const r = await fetch("/api/drive/status", { headers: { Accept: "application/json" }, cache: "no-store" });
+      const s = r.ok ? await r.json() : null;
+      if (s) { setStatus(s); if (s.folderId) setFolderId((f) => f || s.folderId); }
+      else setStatus({ linked: false, oauthConfigured: false });
+      return s;
+    } catch (e) { setStatus({ linked: false, oauthConfigured: false }); return null; }
+  }, []);
+  React.useEffect(() => { refresh(); return () => clearInterval(pollRef.current); }, [refresh]);
+
+  const saveCreds = async () => {
+    if (!isDesktop || !window.KINGS_DESKTOP.saveIntegrationKey) { setMsg("On a hosted install, set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in the server environment."); return; }
+    if (!clientId.trim() || !clientSecret.trim()) { setMsg("Paste both the Client ID and the Client Secret."); return; }
+    setBusy(true); setMsg("");
+    try {
+      await window.KINGS_DESKTOP.saveIntegrationKey("google", clientSecret.trim(), { baseUrl: clientId.trim() });
+      setClientSecret("");
+      setMsg("Credentials saved encrypted. Now connect your account.");
+      await refresh();
+    } catch (e) { setMsg((e && e.message) || "Could not save the credentials."); }
+    setBusy(false);
+  };
+
+  const startLink = () => {
+    const path = "/api/drive/auth" + (folderId.trim() ? "?folderId=" + encodeURIComponent(folderId.trim()) : "");
+    if (isDesktop && window.KINGS_DESKTOP.openExternalUrl) {
+      // Google rejects OAuth in embedded webviews — use the system browser.
+      window.KINGS_DESKTOP.openExternalUrl(window.location.origin + path);
+    } else {
+      window.open(path, "_blank", "width=520,height=680,noopener");
+    }
+    setLinking(true);
+    setMsg(isDesktop ? "Finish signing in with Google in your browser…" : "Finish signing in with Google in the popup…");
+    clearInterval(pollRef.current);
+    let ticks = 0;
+    pollRef.current = setInterval(async () => {
+      ticks += 1;
+      const s = await refresh();
+      if (s && s.linked) { clearInterval(pollRef.current); setLinking(false); setMsg("Google Drive linked."); }
+      else if (ticks > 90) { clearInterval(pollRef.current); setLinking(false); setMsg("Still not linked — try connecting again."); }
+    }, 2000);
+  };
+
+  const linked = !!(status && status.linked);
+  const oauthConfigured = !!(status && status.oauthConfigured);
+  const statusText = status == null ? "Checking…" : linked ? "Linked" + (status.folderName ? " · " + status.folderName : "") : "Not linked";
+
+  return (
+    <div style={{ border: "1.5px solid " + (linked ? "var(--st-approved)" : "var(--hair)"), borderRadius: 8, background: "var(--paper-2)", padding: 18 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "44px 1fr auto", gap: 14, alignItems: "start" }}>
+        <span style={{ width: 42, height: 42, display: "grid", placeItems: "center", color: "var(--ink-2)" }}><GoogleIcon size={30} /></span>
+        <span style={{ display: "grid", gap: 5 }}>
+          <strong style={{ fontSize: 21, lineHeight: 1 }}>Google Drive</strong>
+          <em style={{ fontStyle: "normal", color: linked ? "var(--st-approved)" : "var(--accent-ink)", fontSize: 14 }}>{statusText}</em>
+          <span style={{ color: "var(--muted)", fontSize: 14.5, lineHeight: 1.35 }}>Save outputs and Studio media straight into a Drive folder. Optional — Download and local exports work without it.</span>
+        </span>
+        {oauthConfigured && (
+          <button className="btn sm" disabled={linking} onClick={startLink}>
+            {linking ? <Spinner size={13} /> : <Icon name="key" size={13} />} {linked ? "Re-link" : "Connect"}
+          </button>
+        )}
+      </div>
+      {!oauthConfigured && status != null && (
+        <div style={{ marginTop: 14 }}>
+          <p className="muted" style={{ fontSize: 12.5, margin: "0 0 8px", lineHeight: 1.5 }}>
+            Linking needs a Google OAuth client (console.cloud.google.com → Credentials → OAuth client ID, type <strong>Desktop app</strong>, with the Drive API enabled). Paste its Client ID and Client Secret — they're stored encrypted on this Mac. Files use the <span className="mono">drive.file</span> scope.
+          </p>
+          <div style={{ display: "grid", gap: 8 }}>
+            <input className="field" value={clientId} onChange={(e) => setClientId(e.target.value)} placeholder="Client ID — xxxxxx.apps.googleusercontent.com" style={{ fontSize: 13, fontFamily: "var(--font-mono)" }} />
+            <div style={{ display: "flex", gap: 8 }}>
+              <input className="field" type="password" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} placeholder="Client Secret" style={{ flex: 1, fontSize: 13 }} />
+              <button className="btn primary sm" disabled={busy || !clientId.trim() || !clientSecret.trim()} onClick={saveCreds}>
+                {busy ? <Spinner size={13} /> : <Icon name="check" size={13} />} Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {oauthConfigured && !linked && (
+        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+          <input className="field" value={folderId} onChange={(e) => setFolderId(e.target.value)} placeholder="Destination folder ID (optional — blank = My Drive root)" style={{ flex: 1, fontSize: 13, fontFamily: "var(--font-mono)" }} />
+        </div>
+      )}
+      {msg && <p style={{ margin: "10px 0 0", fontSize: 13.5, color: "var(--accent-ink)" }}>{msg}</p>}
+    </div>
+  );
+}
+
 function DriveDialog({ onClose }) {
-  const cfg = window.Store.getSettings().drive || {};
-  const [clientId, setClientId] = React.useState(cfg.clientId || "");
-  const [folderId, setFolderId] = React.useState(cfg.folderId || "");
-  const save = () => { window.Store.setDriveConfig({ clientId: clientId.trim(), folderId: folderId.trim() }); onClose(); };
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "oklch(0 0 0 / 0.4)", display: "grid", placeItems: "center", zIndex: 80 }}>
-      <div className="card" onClick={(e) => e.stopPropagation()} style={{ width: 540, maxWidth: "92vw", padding: "26px 28px" }}>
+      <div className="card" onClick={(e) => e.stopPropagation()} style={{ width: 560, maxWidth: "92vw", padding: "26px 28px" }}>
         <div className="eyebrow" style={{ marginBottom: 6 }}>Connect</div>
-        <h2 style={{ fontSize: 24, marginBottom: 10 }}>Link a Google Drive folder</h2>
-        <p className="muted" style={{ fontSize: 14, marginBottom: 18 }}>
-          Saving to your Drive needs your own Google OAuth <strong>Client ID</strong> (Web application, with this app's URL added as an authorized JavaScript origin) and the destination <strong>Folder ID</strong> (the long string at the end of the folder's URL). Files use the <span className="mono">drive.file</span> scope. If sign-in is blocked here, use Download instead — it produces the same files.
-        </p>
-        <label className="eyebrow" style={{ display: "block", marginBottom: 5 }}>OAuth Client ID</label>
-        <input className="field" value={clientId} onChange={(e) => setClientId(e.target.value)} placeholder="xxxxxx.apps.googleusercontent.com" style={{ marginBottom: 14, fontFamily: "var(--font-mono)", fontSize: 13 }} />
-        <label className="eyebrow" style={{ display: "block", marginBottom: 5 }}>Destination Folder ID <span style={{ textTransform: "none", letterSpacing: 0 }} className="muted">(optional — blank = My Drive root)</span></label>
-        <input className="field" value={folderId} onChange={(e) => setFolderId(e.target.value)} placeholder="1AbC…folderId" style={{ marginBottom: 22, fontFamily: "var(--font-mono)", fontSize: 13 }} />
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-          <button className="btn ghost" onClick={onClose}>Cancel</button>
-          <button className="btn primary" onClick={save}>Save link</button>
+        <h2 style={{ fontSize: 24, marginBottom: 14 }}>Link Google Drive</h2>
+        <GoogleDriveIntegrationCard />
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 16 }}>
+          <button className="btn primary" onClick={onClose}>Done</button>
         </div>
       </div>
     </div>
@@ -370,4 +466,4 @@ function OutputsTab({ piece, onUpdate, refCtx, onGoStudio }) {
   );
 }
 
-Object.assign(window, { OutputsTab });
+Object.assign(window, { OutputsTab, GoogleDriveIntegrationCard });

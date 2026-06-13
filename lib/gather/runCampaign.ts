@@ -24,14 +24,21 @@ interface SourceSummary {
   text: string;
 }
 
-export async function runGatherForCampaign(campaignId: string, user: { id: string; workspaceId?: string | null }) {
-  const sources = isLocalFirstMode()
+export async function runGatherForCampaign(
+  campaignId: string,
+  user: { id: string; workspaceId?: string | null },
+  opts: { sourceIds?: string[] } = {},
+) {
+  const loaded = isLocalFirstMode()
     ? listLocalGatherSources(campaignId, user.id, user.workspaceId || undefined)
     : await db.select().from(gatherSources)
         .where(and(eq(gatherSources.userId, user.id), eq(gatherSources.campaignId, campaignId)));
-  if (!sources) return null;
+  if (!loaded) return null;
+  // Optional subset run (the UI runs one source at a time for real progress).
+  const wanted = opts.sourceIds?.length ? new Set(opts.sourceIds) : null;
+  const sources = wanted ? loaded.filter((s) => wanted.has(s.id)) : loaded;
 
-  const { items, perSource } = await runGather(sources as any);
+  const { items, perSource, errors } = await runGather(sources as any);
 
   if (isLocalFirstMode()) {
     Object.entries(perSource).forEach(([id, count]) =>
@@ -136,5 +143,5 @@ export async function runGatherForCampaign(campaignId: string, user: { id: strin
     console.error(JSON.stringify({ level: "error", msg: "gather summary block failed", detail: (e as Error)?.message ?? String(e) }));
   }
 
-  return { items: saved, found: items.length, saved: saved.length, perSource, summaries };
+  return { items: saved, found: items.length, saved: saved.length, perSource, errors, summaries };
 }

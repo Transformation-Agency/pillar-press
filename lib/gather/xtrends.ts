@@ -1,9 +1,10 @@
 /** X (Twitter) recent search / trends. Needs an app bearer token (paid tiers). SERVER ONLY. */
 import { fetchJSON, GatherError, type GatherItem } from "./index";
+import { xBearerToken } from "./integrationKeys";
 
 export async function runXTrends(query: string, max = 5): Promise<GatherItem[]> {
-  const token = process.env.X_BEARER_TOKEN;
-  if (!token) throw new GatherError(500, "config", "Missing X_BEARER_TOKEN.");
+  const token = xBearerToken();
+  if (!token) throw new GatherError(500, "config", "X isn't connected. Add a bearer token under Gather → Integrations (or set X_BEARER_TOKEN).");
   // Recent search; for a #hashtag this surfaces the conversation. Trends use /2/trends.
   const q = query.startsWith("@") ? `from:${query.slice(1)}` : query;
   const url = `https://api.twitter.com/2/tweets/search/recent?max_results=${Math.max(10, max)}` +

@@ -9,7 +9,7 @@ export const SOURCE_KIND_LABELS: Record<string, string> = {
   web: "Web search",
   database: "Database scrape",
   journal: "Journal library",
-  x: "X trending",
+  x: "X posts",
   youtube: "YouTube transcript",
 };
 
@@ -33,7 +33,12 @@ export const updateSourceSchema = z.object({
   summary: z.string().nullable().optional(),
 });
 
-export const runSchema = z.object({ campaignId: z.string().min(1) });
+export const runSchema = z.object({
+  campaignId: z.string().min(1),
+  // Optional subset: run only these sources (the UI runs one at a time so it
+  // can report real per-source progress). Omitted = all enabled sources.
+  sourceIds: z.array(z.string().min(1)).max(50).optional(),
+});
 
 // Items can also be uploaded documents (kind "upload"), not just fetched.
 export const itemKindSchema = z.enum(["rss", "web", "database", "journal", "x", "youtube", "upload"]);

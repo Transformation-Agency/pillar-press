@@ -1,6 +1,7 @@
 /** Journal libraries: Crossref + arXiv + PubMed. Mostly keyless. SERVER ONLY. */
 import { XMLParser } from "fast-xml-parser";
 import { fetchJSON, fetchText, stripHtml, type GatherItem } from "./index";
+import { ncbiApiKey } from "./integrationKeys";
 
 const MAILTO = process.env.GATHER_CONTACT_EMAIL ?? "research@pillar.com";
 
@@ -45,7 +46,8 @@ async function arxiv(query: string, max = 4): Promise<GatherItem[]> {
 }
 
 async function pubmed(query: string, max = 4): Promise<GatherItem[]> {
-  const key = process.env.NCBI_API_KEY ? `&api_key=${process.env.NCBI_API_KEY}` : "";
+  const ncbi = ncbiApiKey();
+  const key = ncbi ? `&api_key=${ncbi}` : "";
   const search = await fetchJSON<any>(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&retmode=json&retmax=${max}&term=${encodeURIComponent(query)}${key}`);
   const ids: string[] = search?.esearchresult?.idlist ?? [];
   if (!ids.length) return [];

@@ -9,6 +9,7 @@ import { z } from "zod";
 export const createCampaignSchema = z.object({
   id: z.string().uuid().optional(),
   name: z.string().trim().min(1, "Name is required.").max(120),
+  meta: z.record(z.string(), z.unknown()).optional(),
 });
 export type CreateCampaignInput = z.infer<typeof createCampaignSchema>;
 

@@ -27,7 +27,8 @@ export class HedraError extends Error {
 }
 
 function apiKey(override?: string): string {
-  const k = override || process.env.HEDRA_API_KEY || desktopMediaProvider("hedra")?.apiKey;
+  // Settings-UI key first; env is a hosted/dev fallback and must not shadow it.
+  const k = override || desktopMediaProvider("hedra")?.apiKey || process.env.HEDRA_API_KEY;
   if (!k) throw new HedraError(500, "config", "Hedra isn't connected. Add your key in Settings → Studio integrations to enable video and avatars.");
   return k;
 }
