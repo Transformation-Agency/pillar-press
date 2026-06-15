@@ -66,9 +66,10 @@ function Workspace({ piece, refs, onBack, onGoStudio }) {
           if (!r.ok) continue;
           const st = await r.json();
           applyCompleted(st.completed);
-          if (st.done) break;
+          if (st.done) return st;
         } catch (e) { /* transient — keep polling */ }
       }
+      return null;
     };
 
     try {
@@ -80,10 +81,24 @@ function Workspace({ piece, refs, onBack, onGoStudio }) {
       });
 
       const pollPromise = poll();
-      const r = await fetch("/api/pieces/" + piece.id + "/review", {
+      const postPromise = fetch("/api/pieces/" + piece.id + "/review", {
         method: "POST",
         headers: { "content-type": "application/json" },
       });
+      const first = await Promise.race([
+        postPromise.then((r) => ({ kind: "post", r })),
+        pollPromise.then((st) => st && st.done ? { kind: "status", st } : null),
+      ]);
+      if (first && first.kind === "status") {
+        const packet = first.st.packet;
+        const status = first.st.done ? "Reviewed" : (first.st.status || "Reviewed");
+        const finalStatus = {}; window.GATES.forEach((g) => finalStatus[g.id] = (packet && packet[g.id]) ? "done" : "pending"); setGateStatus(finalStatus);
+        window.Store.updatePiece(piece.id, { packet, status });
+        setRunning(false);
+        if (packet && Object.keys(packet).length) setTab("review");
+        return;
+      }
+      const r = first && first.kind === "post" ? first.r : await postPromise;
       polling = false;
       await pollPromise;
       if (!r.ok) throw new Error("review failed: " + r.status);
@@ -1196,9 +1211,164 @@ function DesktopOnboarding() {
             </div>
           )}
           {message && <p style={{ marginTop: 12, color: "var(--accent-ink)", fontSize: 14 }}>{message}</p>}
+          <UpdatePanel />
         </div>
       </div>
     </div>
+  );
+}
+
+const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
+const UPDATE_LAST_CHECKED_KEY = "pillarpress.updateLastCheckedAt";
+
+function formatUpdateCheckedAt(value) {
+  if (!value) return "Not checked yet";
+  try {
+    return new Date(value).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+  } catch (_) {
+    return "Recently";
+  }
+}
+
+function formatUpdateBytes(value) {
+  const bytes = Number(value || 0);
+  if (!bytes || bytes < 0) return "";
+  if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + " KB";
+  return (bytes / 1024 / 1024).toFixed(bytes > 100 * 1024 * 1024 ? 0 : 1) + " MB";
+}
+
+function UpdatePanel() {
+  const desktop = window.PILLAR_DESKTOP;
+  const hasUpdater = !!(desktop && desktop.isDesktop && desktop.isDesktop() && desktop.checkForUpdates);
+  const [status, setStatus] = React.useState("idle");
+  const [currentVersion, setCurrentVersion] = React.useState("");
+  const [lastChecked, setLastChecked] = React.useState(() => Number(localStorage.getItem(UPDATE_LAST_CHECKED_KEY) || 0));
+  const [update, setUpdate] = React.useState(null);
+  const [message, setMessage] = React.useState("");
+  const [progress, setProgress] = React.useState({ downloaded: 0, total: 0 });
+
+  React.useEffect(() => {
+    if (!hasUpdater || !desktop.appVersion) return undefined;
+    let cancelled = false;
+    desktop.appVersion()
+      .then((version) => { if (!cancelled) setCurrentVersion(version || ""); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [hasUpdater]);
+
+  async function checkNow() {
+    if (!hasUpdater) {
+      setStatus("error");
+      setMessage("Updates are available in the packaged desktop app.");
+      return;
+    }
+    setStatus("checking");
+    setMessage("");
+    setProgress({ downloaded: 0, total: 0 });
+    try {
+      const result = await desktop.checkForUpdates();
+      const checkedAt = Date.now();
+      localStorage.setItem(UPDATE_LAST_CHECKED_KEY, String(checkedAt));
+      setLastChecked(checkedAt);
+      if (result) {
+        setUpdate(result);
+        setStatus("available");
+      } else {
+        setUpdate(null);
+        setStatus("upToDate");
+        setMessage("Pillar Press is up to date.");
+      }
+    } catch (error) {
+      setStatus("error");
+      setMessage((error && error.message) || "Could not check for updates. Check your connection and try again.");
+    }
+  }
+
+  async function installUpdate() {
+    if (!update || !hasUpdater) return;
+    setStatus("downloading");
+    setMessage("");
+    setProgress({ downloaded: 0, total: 0 });
+    try {
+      let downloaded = 0;
+      let total = 0;
+      await desktop.downloadAndInstallUpdate(update, (event) => {
+        const name = String((event && (event.event || event.type)) || "").toLowerCase();
+        const data = (event && event.data) || {};
+        if (name === "started") {
+          downloaded = 0;
+          total = Number(data.contentLength || data.total || 0);
+        } else if (name === "progress") {
+          downloaded += Number(data.chunkLength || data.downloaded || 0);
+          if (data.contentLength || data.total) total = Number(data.contentLength || data.total || total);
+        } else if (name === "finished") {
+          downloaded = total || downloaded;
+        }
+        setProgress({ downloaded, total });
+      });
+      setStatus("readyToRestart");
+      setMessage("Update installed. Restart Pillar Press to finish.");
+    } catch (error) {
+      setStatus("error");
+      setMessage((error && error.message) || "Could not install the update. Try again.");
+    }
+  }
+
+  const availableVersion = update && update.version ? update.version : "";
+  const updateNotes = update && (update.body || (update.rawJson && update.rawJson.notes));
+  const progressLabel = progress.total
+    ? formatUpdateBytes(progress.downloaded) + " / " + formatUpdateBytes(progress.total)
+    : progress.downloaded ? formatUpdateBytes(progress.downloaded) : "Preparing download";
+
+  return (
+    <section className="card" style={{ marginTop: 18, padding: 18, borderRadius: 8 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start" }}>
+        <div>
+          <div className="eyebrow" style={{ marginBottom: 5 }}>Updates</div>
+          <h3 style={{ margin: 0, fontSize: 22 }}>Keep Pillar Press current</h3>
+          <p className="muted" style={{ margin: "6px 0 0", fontSize: 14.5, lineHeight: 1.45 }}>
+            Current version{currentVersion ? ": " + currentVersion : ""}. Last checked: {formatUpdateCheckedAt(lastChecked)}.
+          </p>
+        </div>
+        <button className="btn sm" disabled={!hasUpdater || status === "checking" || status === "downloading"} onClick={checkNow}>
+          {status === "checking" ? <><Spinner size={13} /> Checking</> : "Check for updates"}
+        </button>
+      </div>
+
+      {status === "available" && (
+        <div style={{ marginTop: 14, padding: 14, border: "1px solid var(--hair)", borderRadius: 8, background: "var(--paper-sunk)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+            <div>
+              <strong>Version {availableVersion} is available.</strong>
+              {updateNotes && <p className="muted" style={{ margin: "6px 0 0", fontSize: 13.5, lineHeight: 1.45, whiteSpace: "pre-wrap" }}>{String(updateNotes).slice(0, 700)}</p>}
+            </div>
+            <button className="btn primary" onClick={installUpdate}>Update</button>
+          </div>
+        </div>
+      )}
+
+      {status === "downloading" && (
+        <div style={{ marginTop: 14 }}>
+          <div className="muted" style={{ fontSize: 13.5, marginBottom: 8 }}>Downloading update: {progressLabel}</div>
+          <div style={{ height: 8, borderRadius: 999, background: "var(--paper-sunk)", overflow: "hidden", border: "1px solid var(--hair)" }}>
+            <div style={{ width: progress.total ? Math.min(100, Math.round((progress.downloaded / progress.total) * 100)) + "%" : "35%", height: "100%", background: "var(--accent)" }} />
+          </div>
+        </div>
+      )}
+
+      {status === "readyToRestart" && (
+        <div style={{ marginTop: 14, display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+          <span className="muted">{message}</span>
+          <button className="btn primary" onClick={() => desktop.restartApp()}>Restart to update</button>
+        </div>
+      )}
+
+      {(status === "upToDate" || status === "error") && message && (
+        <p style={{ margin: "12px 0 0", color: status === "error" ? "var(--sev-must)" : "var(--muted)", fontSize: 14 }}>
+          {message}
+        </p>
+      )}
+    </section>
   );
 }
 
@@ -1253,6 +1423,34 @@ function App() {
     });
     return () => { cancelled = true; };
   }, []);
+
+  React.useEffect(() => {
+    if (!hasDesktopBridge || !window.PILLAR_DESKTOP.checkForUpdates) return undefined;
+    let cancelled = false;
+    async function checkQuietly() {
+      const lastChecked = Number(localStorage.getItem(UPDATE_LAST_CHECKED_KEY) || 0);
+      if (lastChecked && Date.now() - lastChecked < UPDATE_CHECK_INTERVAL_MS) return;
+      try {
+        const result = await window.PILLAR_DESKTOP.checkForUpdates();
+        localStorage.setItem(UPDATE_LAST_CHECKED_KEY, String(Date.now()));
+        if (!cancelled && result && result.version) {
+          setDesktopNotice({
+            type: "ok",
+            text: "Pillar Press " + result.version + " is available. Open Setup to update.",
+          });
+        }
+      } catch (_) {
+        if (!lastChecked) localStorage.setItem(UPDATE_LAST_CHECKED_KEY, String(Date.now()));
+      }
+    }
+    checkQuietly();
+    const timer = window.setInterval(checkQuietly, UPDATE_CHECK_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [hasDesktopBridge]);
+
   const completeSetup = (payload) => {
     const result = payload || {};
     const handoff = window.Store.getPref(handoffPref, null);

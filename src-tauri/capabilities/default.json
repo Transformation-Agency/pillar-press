@@ -6,5 +6,5 @@
   "remote": {
     "urls": ["http://127.0.0.1:*", "http://localhost:*"]
   },
-  "permissions": ["core:default", "desktop-setup"]
+  "permissions": ["core:default", "desktop-setup", "updater:default", "process:allow-restart"]
 }

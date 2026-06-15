@@ -6,14 +6,39 @@
 
   /* ---- minimal REST helper (same-origin, no auth headers) ---- */
   async function apiSend(method, path, body) {
-    const r = await fetch("/api" + path, {
-      method,
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: body == null ? undefined : JSON.stringify(body),
-    });
-    if (!r.ok) throw new Error(method + " " + path + " -> " + r.status);
+    let r;
+    try {
+      r = await fetch("/api" + path, {
+        method,
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: body == null ? undefined : JSON.stringify(body),
+      });
+    } catch (e) {
+      throw new Error("Connection to the local Pillar Press server was interrupted. Try again; if it keeps happening, restart the app. (" + ((e && e.message) || "request failed") + ")");
+    }
+    if (!r.ok) {
+      let msg = "";
+      try {
+        const data = await r.json();
+        msg = data && (data.error || data.message) ? " " + (data.error || data.message) : "";
+      } catch (e) {
+        try { msg = " " + (await r.text()).slice(0, 160); } catch (_e) {}
+      }
+      throw new Error(method + " " + path + " -> " + r.status + msg);
+    }
     const ct = r.headers.get("content-type") || "";
     return ct.indexOf("application/json") >= 0 ? r.json() : null;
+  }
+
+  async function apiGet(path) {
+    let r;
+    try {
+      r = await fetch("/api" + path, { headers: { Accept: "application/json" } });
+    } catch (e) {
+      throw new Error("Connection to the local Pillar Press server was interrupted. Try again; if it keeps happening, restart the app. (" + ((e && e.message) || "request failed") + ")");
+    }
+    if (!r.ok) throw new Error("GET " + path + " -> " + r.status);
+    return r.json();
   }
 
   /* ---------- Proposed Revision ----------
@@ -79,9 +104,44 @@
     // returns { piece } with piece.revision = { text, changelog }.
     // opts.mode "full" runs a whole-document restructure (strategy/structure/
     // etc.) before the per-passage clarity/tone/inoculation polish.
-    const body = opts && opts.mode ? { mode: opts.mode } : null;
-    const res = await apiSend("POST", "/pieces/" + piece.id + "/revision", body);
-    const rev = (res && res.piece && res.piece.revision) || {};
+    const runId = (window.crypto && window.crypto.randomUUID)
+      ? window.crypto.randomUUID()
+      : String(Date.now()) + "-" + Math.random().toString(36).slice(2);
+    const body = Object.assign({}, opts && opts.mode ? { mode: opts.mode } : {}, { runId });
+    let polling = true;
+    let latest = null;
+    const poll = async () => {
+      while (polling) {
+        await new Promise((r) => setTimeout(r, 900));
+        if (!polling) break;
+        try {
+          const st = await apiGet("/pieces/" + piece.id + "/revision/status?runId=" + encodeURIComponent(runId));
+          latest = st;
+          if (onProgress) onProgress(st.done || 0, st.total || 1);
+          if (st.status === "done" || st.status === "error") break;
+        } catch (_e) { /* transient */ }
+      }
+      return latest;
+    };
+    const pollPromise = poll();
+    let res;
+    try {
+      res = await apiSend("POST", "/pieces/" + piece.id + "/revision", body);
+    } catch (e) {
+      polling = false;
+      const st = latest || await apiGet("/pieces/" + piece.id + "/revision/status?runId=" + encodeURIComponent(runId)).catch(() => null);
+      if (st && st.status === "done" && st.revision && st.revision.text) {
+        if (onProgress) onProgress(st.total || 1, st.total || 1);
+        return {
+          revision: st.revision.text || "",
+          changelog: Array.isArray(st.revision.changelog) ? st.revision.changelog : [],
+        };
+      }
+      throw e;
+    }
+    polling = false;
+    await pollPromise;
+    const rev = (res && res.piece && res.piece.revision) || (latest && latest.revision) || {};
     if (onProgress) onProgress(1, 1);
     return {
       revision: rev.text || "",

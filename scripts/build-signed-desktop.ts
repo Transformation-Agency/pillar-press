@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 
 const root = process.cwd();
 const appPath = join(root, "src-tauri", "target", "release", "bundle", "macos", "Pillar Press.app");
-const dmgPath = join(root, "src-tauri", "target", "release", "bundle", "dmg", "Pillar Press_0.1.0_aarch64.dmg");
+const dmgPath = join(root, "src-tauri", "target", "release", "bundle", "dmg", "Pillar Press_0.1.1_aarch64.dmg");
 
 function required(name: string) {
   const value = process.env[name]?.trim();

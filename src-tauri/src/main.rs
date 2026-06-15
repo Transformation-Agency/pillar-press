@@ -5,6 +5,8 @@ use aes_gcm::{
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use hound::{SampleFormat as WavSampleFormat, WavSpec, WavWriter};
+#[cfg(target_os = "macos")]
+use objc2_foundation::{NSProcessInfo, NSString};
 use rand::RngCore;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -31,8 +33,6 @@ use tauri::{
     menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu},
     AppHandle, Emitter, Manager, Url,
 };
-#[cfg(target_os = "macos")]
-use objc2_foundation::{NSProcessInfo, NSString};
 
 const MENU_SETUP_MODEL: &str = "setup-local-model";
 const MENU_OPEN_DATA_DIR: &str = "open-data-folder";
@@ -1039,8 +1039,20 @@ fn start_packaged_server(app: &AppHandle) -> Result<Option<String>, String> {
             // sends no credentials — an inherited SITE_PASSWORD would silently
             // 401 every scheduled gather.
             .env_remove("SITE_PASSWORD")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
+            .stdout(
+                std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(data_dir.join("desktop-server.stdout.log"))
+                    .map_err(|e| format!("Could not open desktop server stdout log: {e}"))?,
+            )
+            .stderr(
+                std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(data_dir.join("desktop-server.stderr.log"))
+                    .map_err(|e| format!("Could not open desktop server stderr log: {e}"))?,
+            );
 
         let child = command.spawn().map_err(|e| {
             append_startup_log(&data_dir, &format!("server spawn failed: {e}"));
@@ -1471,13 +1483,20 @@ fn unique_path(mut path: PathBuf) -> PathBuf {
     if !path.exists() {
         return path;
     }
-    let parent = path.parent().map(PathBuf::from).unwrap_or_else(PathBuf::new);
+    let parent = path
+        .parent()
+        .map(PathBuf::from)
+        .unwrap_or_else(PathBuf::new);
     let stem = path
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("pillar-press-export")
         .to_string();
-    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_string();
+    let ext = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_string();
     for i in 2..1000 {
         let filename = if ext.is_empty() {
             format!("{stem}-{i}")
@@ -1926,6 +1945,11 @@ fn stop_voice_session(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn desktop_app_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
 fn main() {
     #[cfg(target_os = "macos")]
     set_macos_process_name();
@@ -1934,6 +1958,8 @@ fn main() {
     disable_macos_window_restoration();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .menu(build_menu)
         .on_menu_event(|app, event| handle_menu_event(app, event.id().as_ref()))
         .manage(DesktopServer::new())
@@ -1967,6 +1993,7 @@ fn main() {
             save_export_file,
             save_audio_file,
             desktop_runtime_status,
+            desktop_app_version,
             start_voice_session,
             speak_text,
             stop_speaking,

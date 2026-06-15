@@ -1,0 +1,84 @@
+name: Publish updater manifest
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, for example v0.1.1"
+        required: true
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  publish-latest-json:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Resolve release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ inputs.tag || github.ref_name }}"
+          version="${tag#v}"
+          echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Wait for updater assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          assets=(
+            "Pillar.Press_${VERSION}_aarch64.app.tar.gz"
+            "Pillar.Press_${VERSION}_aarch64.app.tar.gz.sig"
+            "Pillar.Press_${VERSION}_x64.app.tar.gz"
+            "Pillar.Press_${VERSION}_x64.app.tar.gz.sig"
+            "Pillar.Press_${VERSION}_x64-setup.exe"
+            "Pillar.Press_${VERSION}_x64-setup.exe.sig"
+          )
+          for attempt in {1..60}; do
+            missing=0
+            for asset in "${assets[@]}"; do
+              if [ ! -f "release/$asset" ]; then
+                if ! gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "$asset" --dir release --clobber >/dev/null 2>&1; then
+                  missing=1
+                fi
+              fi
+            done
+            if [ "$missing" = "0" ]; then
+              ls -lh release
+              exit 0
+            fi
+            echo "Waiting for updater assets for $RELEASE_TAG (attempt $attempt/60)..."
+            sleep 30
+          done
+          echo "Timed out waiting for updater assets."
+          exit 1
+
+      - name: Fetch release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json body -q .body > "$RUNNER_TEMP/release-notes.md" || true
+          echo "RELEASE_NOTES_FILE=$RUNNER_TEMP/release-notes.md" >> "$GITHUB_ENV"
+
+      - name: Generate latest.json
+        run: node scripts/generate-updater-manifest.mjs
+
+      - name: Upload latest.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: gh release upload "$RELEASE_TAG" release/latest.json --repo "$GITHUB_REPOSITORY" --clobber

@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 
 const root = process.cwd();
 const appPath = join(root, "src-tauri", "target", "release", "bundle", "macos", "Pillar Press.app");
-const dmgPath = join(root, "src-tauri", "target", "release", "bundle", "dmg", "Pillar Press_0.1.0_aarch64.dmg");
+const dmgPath = join(root, "src-tauri", "target", "release", "bundle", "dmg", "Pillar Press_0.1.1_aarch64.dmg");
 const appResources = join(appPath, "Contents", "Resources");
 const requireDeveloperId =
   process.argv.includes("--require-developer-id") || process.env.PILLAR_PRESS_REQUIRE_DEVELOPER_ID === "true";
@@ -101,7 +101,7 @@ async function verifyAppBundleMetadata(bundlePath: string) {
     assertPlistValue(plist, "CFBundleDisplayName", "Pillar Press"),
     assertPlistValue(plist, "CFBundleName", "Pillar Press"),
     assertPlistValue(plist, "CFBundleIdentifier", "com.pillar.press"),
-    assertPlistValue(plist, "CFBundleShortVersionString", "0.1.0"),
+    assertPlistValue(plist, "CFBundleShortVersionString", "0.1.1"),
     assertPlistValue(plist, "LSMinimumSystemVersion", "12.0"),
     assertPlistValue(plist, "CFBundleIconFile", "icon.icns"),
     assertPlistBool(plist, "NSQuitAlwaysKeepsWindows", false),

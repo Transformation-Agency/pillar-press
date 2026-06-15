@@ -39,6 +39,8 @@ jobs:
       APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
       CARGO_BUILD_TARGET: ${{ matrix.target }}
       MACOSX_DEPLOYMENT_TARGET: "12.0"
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
       npm_config_arch: ${{ matrix.node_arch }}
 
     steps:
@@ -158,6 +160,13 @@ jobs:
           asset="release/Pillar.Press_${version}_${{ matrix.suffix }}.dmg"
           cp "$dmg" "$asset"
           shasum -a 256 "$asset" > "${asset}.sha256"
+          updater_archive="$(find "src-tauri/target/${{ matrix.target }}/release/bundle/macos" -name '*.app.tar.gz' -print -quit)"
+          test -n "$updater_archive"
+          updater_sig="${updater_archive}.sig"
+          test -f "$updater_sig"
+          updater_asset="release/Pillar.Press_${version}_${{ matrix.suffix }}.app.tar.gz"
+          cp "$updater_archive" "$updater_asset"
+          cp "$updater_sig" "${updater_asset}.sig"
           ls -lh release
 
       - uses: actions/upload-artifact@v4

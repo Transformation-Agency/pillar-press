@@ -60,11 +60,17 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     // The draft under review is the piece's original text (prototype: task(draft)).
     const draft = piece.original ?? "";
 
-    // Accumulate into a fresh packet keyed by gate id. Start from any existing
-    // packet so a re-review overwrites gate-by-gate rather than wiping it first.
-    const packet: Record<string, GateResult> = {
-      ...((piece.packet as Record<string, GateResult> | null) ?? {}),
-    };
+    // Accumulate into a fresh packet keyed by gate id. Clear stale packets at
+    // the start so /review/status reflects the current run, not a prior review.
+    const packet: Record<string, GateResult> = {};
+    if (isLocalFirstMode()) {
+      updateLocalPiece(piece.id, user.id, { packet }, user.workspaceId);
+    } else {
+      await db
+        .update(pieces)
+        .set({ packet, updatedAt: new Date() })
+        .where(and(eq(pieces.id, piece.id), eq(pieces.userId, user.id)));
+    }
 
     // Run gates IN ORDER, persisting incrementally after each one.
     const reviewAI = getAIForTask("review");

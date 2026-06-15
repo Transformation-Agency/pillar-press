@@ -15,13 +15,13 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Transformation-Agency/pillar-press/releases/download/v0.1.0/Pillar.Press_0.1.0_aarch64.dmg">
+  <a href="https://github.com/Transformation-Agency/pillar-press/releases/download/v0.1.1/Pillar.Press_0.1.1_aarch64.dmg">
     <img src="https://img.shields.io/badge/Download-M--series%20Macs-black?style=for-the-badge&logo=apple" alt="Download for M-series Macs" />
   </a>
-  <a href="https://github.com/Transformation-Agency/pillar-press/releases/download/v0.1.0/Pillar.Press_0.1.0_x64.dmg">
+  <a href="https://github.com/Transformation-Agency/pillar-press/releases/download/v0.1.1/Pillar.Press_0.1.1_x64.dmg">
     <img src="https://img.shields.io/badge/Download-Intel%20Macs-333333?style=for-the-badge&logo=apple" alt="Download for Intel Macs" />
   </a>
-  <a href="https://github.com/Transformation-Agency/pillar-press/releases/download/v0.1.0/Pillar.Press_0.1.0_x64-setup.exe">
+  <a href="https://github.com/Transformation-Agency/pillar-press/releases/download/v0.1.1/Pillar.Press_0.1.1_x64-setup.exe">
     <img src="https://img.shields.io/badge/Download-Windows-0078D4?style=for-the-badge" alt="Download for Windows" />
   </a>
 </p>
@@ -40,7 +40,7 @@
 
 ## Latest Release
 
-**v0.1.0** is the first Pillar Press desktop release track.
+**v0.1.1** is the first updater-enabled Pillar Press desktop release track.
 
 It packages the local-first editorial desk with:
 
@@ -51,9 +51,14 @@ It packages the local-first editorial desk with:
 - Local SQLite storage, local file exports, and provider settings stored on the
   user's machine.
 - Signed release workflows for Apple Silicon Macs, Intel Macs, and Windows.
+- Signed in-app updates from GitHub Releases once an updater-enabled build is
+  installed.
 
 See all versions on the
 [GitHub releases page](https://github.com/Transformation-Agency/pillar-press/releases).
+
+Note: the first updater-enabled build must be installed manually. Older builds
+that shipped before the updater plugin cannot update themselves.
 
 ## What It Does
 
@@ -86,6 +91,7 @@ voice, sources, model choices, or local data.
 - Optional voice read-aloud and audio export using configured voice providers.
 - Studio media provider setup for image, voice, and video workflows.
 - Signed desktop packaging for macOS and Windows release artifacts.
+- In-app update checks from Setup, plus startup and hourly checks while open.
 
 ## Quick Start
 

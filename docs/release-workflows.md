@@ -6,6 +6,12 @@ Pillar Press has GitHub Actions workflows for desktop release artifacts:
   for Apple Silicon and Intel.
 - `.github/workflows/windows-build.yml` builds the Windows installer with Azure
   Trusted Signing.
+- `.github/workflows/publish-updater-manifest.yml` publishes the signed
+  `latest.json` updater feed after all updater assets are present on the
+  GitHub Release.
+
+The first updater-enabled release must still be downloaded manually. Releases
+after that can be installed from inside Pillar Press.
 
 ## macOS Secrets
 
@@ -21,6 +27,16 @@ Add these repository secrets before running the macOS workflow:
 - `APPLE_ID`: Apple ID email used for notarization.
 - `APPLE_PASSWORD`: app-specific password for that Apple ID.
 - `APPLE_TEAM_ID`: Apple Developer Team ID.
+- `TAURI_SIGNING_PRIVATE_KEY`: private Tauri updater signing key.
+- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: optional password for the updater key,
+  if the key was generated with one.
+
+The updater private key is separate from the Apple signing certificate. Losing
+the updater private key or its password means already-installed apps cannot
+trust future update packages.
+
+For this release track, a local backup copy of the updater key can be kept at
+`~/.tauri/pillar-press-updater.key`. Do not commit it.
 
 Create the base64 certificate value locally:
 
@@ -42,6 +58,12 @@ Add these repository secrets before running the Windows workflow:
 The Windows workflow signs with Azure Trusted Signing and produces an NSIS
 installer.
 
+Windows also needs:
+
+- `TAURI_SIGNING_PRIVATE_KEY`: same updater signing key used by macOS.
+- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: optional password for the updater key,
+  if the key was generated with one.
+
 ## Release Flow
 
 The release workflows run on:
@@ -52,8 +74,8 @@ The release workflows run on:
 For a public release:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.1
+git push origin v0.1.1
 ```
 
 On a tag, the workflows upload these release assets:
@@ -64,6 +86,22 @@ On a tag, the workflows upload these release assets:
 - `Pillar.Press_<version>_x64.dmg.sha256`
 - `Pillar.Press_<version>_x64-setup.exe`
 - `Pillar.Press_<version>_x64-setup.exe.sha256`
+- `Pillar.Press_<version>_aarch64.app.tar.gz`
+- `Pillar.Press_<version>_aarch64.app.tar.gz.sig`
+- `Pillar.Press_<version>_x64.app.tar.gz`
+- `Pillar.Press_<version>_x64.app.tar.gz.sig`
+- `Pillar.Press_<version>_x64-setup.exe.sig`
+- `latest.json`
+
+The app reads update metadata from:
+
+```text
+https://github.com/Transformation-Agency/pillar-press/releases/latest/download/latest.json
+```
+
+`latest.json` is generated only for stable tag releases. It contains platform
+entries for `darwin-aarch64`, `darwin-x86_64`, and `windows-x86_64`, with HTTPS
+asset URLs and inline signatures.
 
 ## macOS Notes
 

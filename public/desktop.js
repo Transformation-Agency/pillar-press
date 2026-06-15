@@ -30,6 +30,27 @@
     return event.listen(name, handler);
   }
 
+  async function checkForUpdates(options) {
+    if (!isDesktop()) throw new Error("Desktop runtime is not available.");
+    return core.invoke("plugin:updater|check", clean(options || {}));
+  }
+
+  async function downloadAndInstallUpdate(update, onEvent) {
+    if (!isDesktop()) throw new Error("Desktop runtime is not available.");
+    if (!update || update.rid === undefined || update.rid === null) {
+      throw new Error("No update is ready to install.");
+    }
+    if (!core.Channel) {
+      throw new Error("Updater progress channel is not available in this desktop runtime.");
+    }
+    const channel = new core.Channel();
+    if (typeof onEvent === "function") channel.onmessage = onEvent;
+    return core.invoke("plugin:updater|download_and_install", {
+      rid: update.rid,
+      onEvent: channel,
+    });
+  }
+
   window.PILLAR_DESKTOP = {
     isDesktop,
     ollamaStatus: () => invoke("ollama_status"),
@@ -48,6 +69,10 @@
     saveExportFile: (filename, base64) => invoke("save_export_file", { args: { filename, base64 } }),
     saveAudioFile: (filename, base64) => invoke("save_audio_file", { args: { filename, base64 } }),
     runtimeStatus: () => invoke("desktop_runtime_status"),
+    appVersion: () => invoke("desktop_app_version"),
+    checkForUpdates,
+    downloadAndInstallUpdate,
+    restartApp: () => core.invoke("plugin:process|restart"),
     startVoiceSession: () => invoke("start_voice_session"),
     speakText: (text, options) => invoke("speak_text", { args: { text, interrupt: !!(options && options.interrupt) } }),
     stopSpeaking: () => invoke("stop_speaking"),

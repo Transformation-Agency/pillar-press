@@ -7,6 +7,7 @@ import { isLocalFirstMode } from "@/lib/local/mode";
 import { getAIForTask } from "@/lib/llm";
 import { buildRefContext, type ReferencesDoc } from "@/lib/refContext";
 import { generateRevision, type RevisionPacket, type RevisionPieceInput } from "@/lib/revision";
+import { failRevisionProgress, finishRevisionProgress, startRevisionProgress, updateRevisionProgress } from "@/lib/revisionStatus";
 import { toErrorResponse } from "@/lib/errors";
 import type { SessionUser } from "@/lib/auth";
 import type { Piece } from "@/lib/db";
@@ -53,9 +54,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     // Optional { mode: "light" | "full" }. Default light (the firewall pass).
     // "full" runs a whole-document restructure (strategy/structure/etc.) first.
     let mode: "light" | "full" = "light";
+    let runId = "";
     try {
-      const body = (await req.json()) as { mode?: unknown } | null;
+      const body = (await req.json()) as { mode?: unknown; runId?: unknown } | null;
       if (body && body.mode === "full") mode = "full";
+      if (body && typeof body.runId === "string") runId = body.runId.slice(0, 120);
     } catch {
       /* empty/no body → light */
     }
@@ -80,7 +83,21 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       direction: piece.direction ?? null,
     };
 
-    const result = await generateRevision(input, refCtx, getAIForTask("revision"), undefined, { mode });
+    if (runId) startRevisionProgress(piece.id, runId, mode);
+
+    let result;
+    try {
+      result = await generateRevision(
+        input,
+        refCtx,
+        getAIForTask("revision"),
+        runId ? (done, total) => updateRevisionProgress(piece.id, runId, done, total) : undefined,
+        { mode },
+      );
+    } catch (err) {
+      if (runId) failRevisionProgress(piece.id, runId, (err as Error)?.message || "Revision failed.");
+      throw err;
+    }
 
     if (isLocalFirstMode()) {
       const updated = updateLocalPiece(
@@ -93,6 +110,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         user.workspaceId,
       );
       if (!updated) return notFound();
+      if (runId) finishRevisionProgress(piece.id, runId, result);
       return NextResponse.json({ piece: updated });
     }
 
@@ -107,6 +125,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       .where(and(eq(pieces.id, piece.id), eq(pieces.userId, user.id)))
       .returning();
 
+    if (runId) finishRevisionProgress(piece.id, runId, result);
     return NextResponse.json({ piece: updated });
   } catch (err) {
     return toErrorResponse(err);
