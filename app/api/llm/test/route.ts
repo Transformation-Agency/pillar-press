@@ -52,7 +52,7 @@ function normalizeConfig(body: z.infer<typeof Body>) {
     model: body.model.trim(),
     baseUrl,
     apiKey,
-    maxTokens: Math.min(DEFAULT_MAX_TOKENS, 32),
+    maxTokens: Math.min(DEFAULT_MAX_TOKENS, 256),
   };
 }
 

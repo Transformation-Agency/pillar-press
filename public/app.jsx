@@ -627,7 +627,7 @@ function DesktopOnboarding() {
   const setupCompleteKey = (window.KP_CONVERSATIONAL_ONBOARDING &&
     window.KP_CONVERSATIONAL_ONBOARDING.flags &&
     window.KP_CONVERSATIONAL_ONBOARDING.flags.computeSetupLocalStorageKey) || "kingspress.desktopSetupComplete";
-  const modelOptions = ["llama3.2", "mistral", "qwen2.5:7b", "gemma3:4b"];
+  const fallbackOllamaModels = ["gemma4:26b-mlx", "llama3.2", "qwen2.5:latest", "mistral"];
   const cloudModels = {
     openai: ["gpt-4o-mini", "gpt-4.1-mini", "gpt-4o"],
     anthropic: ["claude-haiku-4-5", "claude-sonnet-4-5"],
@@ -662,6 +662,14 @@ function DesktopOnboarding() {
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-+|-+$/g, "")
       .slice(0, 80) || "llm-profile";
+  const preferGemma = (items) => {
+    const values = (items || []).filter((item) => item && !/embed/i.test(item));
+    return values.slice().sort((a, b) => {
+      const aGemma = /^gemma4/i.test(a) ? 0 : /^gemma/i.test(a) ? 1 : 2;
+      const bGemma = /^gemma4/i.test(b) ? 0 : /^gemma/i.test(b) ? 1 : 2;
+      return aGemma - bGemma || a.localeCompare(b);
+    });
+  };
 
   const profilesFromSettings = (settings) => {
     if (settings && Array.isArray(settings.profiles) && settings.profiles.length) return settings.profiles;
@@ -839,14 +847,15 @@ function DesktopOnboarding() {
         desktop.getModelChoice().catch(() => null),
       ]);
       setStatus(s);
-      setModels(list || []);
+      const localModels = preferGemma(list || []);
+      setModels(localModels);
       let savedDockerModels = [];
       const activeSaved = activeProfileFromSettings(saved);
       if (isDockerModelRunnerSettings(activeSaved)) {
         savedDockerModels = await fetchOpenAICompatibleModels(activeSaved.baseUrl).catch(() => []);
         setDockerModels(savedDockerModels);
       }
-      const hasSavedModelChoice = savedModelChoiceComplete(saved, s, list || [], savedDockerModels);
+      const hasSavedModelChoice = savedModelChoiceComplete(saved, s, localModels, savedDockerModels);
       setSavedSettings(saved);
       setTaskDefaults((saved && saved.taskDefaults) || {});
       if (activeSaved && activeSaved.provider) {
@@ -866,7 +875,7 @@ function DesktopOnboarding() {
         setModel(activeSaved.model);
         setProfileName(activeSaved.label || providerLabel(activeSaved.provider) + " " + activeSaved.model);
       }
-      else if (list && list.length) setModel(list[0]);
+      else if (localModels.length) setModel(localModels[0]);
       if (options && options.syncSetupOpen) {
         if (hasSavedModelChoice) {
           window.localStorage.setItem(setupCompleteKey, "true");
@@ -973,6 +982,24 @@ function DesktopOnboarding() {
       setMessage("Setup status updated.");
     } catch (e) {
       setMessage((e && e.message) || "Could not refresh setup status.");
+    }
+    setBusy(false);
+  };
+
+  const refreshOllamaModels = async () => {
+    setBusy(true); setMessage("Refreshing Ollama models.");
+    try {
+      const [s, list] = await Promise.all([
+        desktop.ollamaStatus().catch((e) => ({ installed: false, running: false, message: e.message })),
+        desktop.listOllamaModels().catch(() => []),
+      ]);
+      const localModels = preferGemma(list || []);
+      setStatus(s);
+      setModels(localModels);
+      if (localModels.length && (!model.trim() || !localModels.includes(model.trim()))) setModel(localModels[0]);
+      setMessage(localModels.length ? "Loaded " + localModels.length + " Ollama model" + (localModels.length === 1 ? "" : "s") + "." : "Ollama responded, but no local chat models were listed.");
+    } catch (e) {
+      setMessage((e && e.message) || "Could not refresh Ollama models.");
     }
     setBusy(false);
   };
@@ -1178,7 +1205,7 @@ function DesktopOnboarding() {
         <div style={{ maxWidth: 980, margin: "0 auto" }}>
         {!isHostedSetup && (
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 16 }}>
-            <button className={"btn " + (setupMode === "ollama" ? "primary" : "ghost")} onClick={() => { setSetupMode("ollama"); if (models.length) setModel(models[0]); setProfileName(""); }} disabled={busy}>Ollama</button>
+            <button className={"btn " + (setupMode === "ollama" ? "primary" : "ghost")} onClick={() => { setSetupMode("ollama"); setModel(models.length ? models[0] : fallbackOllamaModels[0]); setProfileName(""); }} disabled={busy}>Ollama</button>
             <button className={"btn " + (setupMode === "docker" ? "primary" : "ghost")} onClick={() => { setSetupMode("docker"); setModel(dockerModels.length ? dockerModels[0] : ""); setProfileName(""); }} disabled={busy}>Docker Model Runner</button>
             <button className={"btn " + (setupMode === "cloud" ? "primary" : "ghost")} onClick={() => { setSetupMode("cloud"); setModel((cloudModels[cloudProvider] || [""])[0]); setProfileName(""); }} disabled={busy}>Cloud API key</button>
           </div>
@@ -1242,11 +1269,14 @@ function DesktopOnboarding() {
           </div>
         )}
         <label className="eyebrow" style={{ display: "block", marginTop: 18, marginBottom: 6 }}>Model</label>
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(180px, 1fr) auto auto auto", gap: 8 }}>
-          <input className="field" value={model} onChange={(e) => setModel(e.target.value)} list="desktop-model-options" placeholder={setupMode === "cloud" ? "model name" : "llama3.2"} />
-          <datalist id="desktop-model-options">{(setupMode === "docker" ? dockerModels : setupMode === "cloud" ? (cloudModels[cloudProvider] || []) : modelOptions).map((m) => <option key={m} value={m} />)}</datalist>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(180px, 1fr) repeat(4, max-content)", gap: 8, alignItems: "center", overflowX: "auto" }}>
+          <input className="field" value={model} onChange={(e) => setModel(e.target.value)} list="desktop-model-options" placeholder={setupMode === "cloud" ? "model name" : "gemma4:26b-mlx"} />
+          <datalist id="desktop-model-options">{(setupMode === "docker" ? dockerModels : setupMode === "cloud" ? (cloudModels[cloudProvider] || []) : (models.length ? models : fallbackOllamaModels)).map((m) => <option key={m} value={m} />)}</datalist>
           {setupMode === "ollama" && (
             <button className="btn" disabled={busy || !installed || !running || hasModel || !model.trim()} onClick={pullModel}><Icon name="doc" size={14} /> Pull</button>
+          )}
+          {setupMode === "ollama" && (
+            <button className="btn" disabled={busy || !installed || !running} onClick={refreshOllamaModels}><Icon name="check" size={14} /> Refresh models</button>
           )}
           {setupMode === "cloud" && (
             <button className="btn" disabled={busy || (cloudProvider !== "openai-compatible" && !apiKey.trim()) || (cloudProvider === "openai-compatible" && !cloudBaseUrl.trim())} onClick={listCloudModels}><Icon name="check" size={14} /> List models</button>

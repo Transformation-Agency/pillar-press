@@ -5,7 +5,7 @@
   "identifier": "com.kingspress.editorialdesk",
   "build": {
     "beforeDevCommand": "npm run desktop:web",
-    "devUrl": "http://localhost:3000",
+    "devUrl": "http://127.0.0.1:41739/index.html",
     "beforeBuildCommand": "npm run desktop:web:build",
     "beforeBundleCommand": "npm run desktop:sign-macos-resources",
     "frontendDist": "../public"

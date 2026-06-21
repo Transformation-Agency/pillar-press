@@ -526,8 +526,16 @@ function InlineModelSetup({ status, onSaved }) {
     xai: ["grok-4.3", "grok-3-mini"],
     "openai-compatible": ["local-model"],
   };
-  const ollamaModels = ["llama3.2", "mistral", "qwen2.5:7b", "gemma3:4b"];
+  const fallbackOllamaModels = ["gemma4:26b-mlx", "llama3.2", "qwen2.5:latest", "mistral"];
   const dockerUrl = "http://localhost:12434/engines/v1";
+  const preferGemma = (items) => {
+    const values = (items || []).filter((item) => item && !/embed/i.test(item));
+    return values.slice().sort((a, b) => {
+      const aGemma = /^gemma4/i.test(a) ? 0 : /^gemma/i.test(a) ? 1 : 2;
+      const bGemma = /^gemma4/i.test(b) ? 0 : /^gemma/i.test(b) ? 1 : 2;
+      return aGemma - bGemma || a.localeCompare(b);
+    });
+  };
 
   const providerLabel = (value) => ({
     openai: "OpenAI / ChatGPT",
@@ -560,7 +568,8 @@ function InlineModelSetup({ status, onSaved }) {
     setMessage("");
     if (nextMode === "ollama") {
       setProvider("ollama");
-      setModel("llama3.2");
+      const localModels = preferGemma(listedModels.length ? listedModels : fallbackOllamaModels);
+      setModel(localModels[0] || "gemma4:26b-mlx");
       return;
     }
     if (nextMode === "docker") {
@@ -600,8 +609,9 @@ function InlineModelSetup({ status, onSaved }) {
       const body = await response.json().catch(() => null);
       if (!response.ok) throw new Error((body && body.error) || "Could not load models.");
       const models = body && Array.isArray(body.models) ? body.models : [];
-      setListedModels(models);
-      if (models[0]) setModel(models[0]);
+      const nextModels = config.provider === "ollama" ? preferGemma(models) : models;
+      setListedModels(nextModels);
+      if (nextModels[0]) setModel(nextModels[0]);
       setMessage(models.length ? "Models loaded." : "Provider responded, but no models were listed. You can still type one.");
     } catch (error) {
       setMessage((error && error.message) || "Could not load models. You can still type one.");
@@ -710,8 +720,8 @@ function InlineModelSetup({ status, onSaved }) {
     }
   }
 
-  const options = mode === "ollama" ? ollamaModels : (listedModels.length ? listedModels : (cloudModels[provider] || []));
-  const canList = mode !== "ollama";
+  const options = mode === "ollama" ? (listedModels.length ? listedModels : fallbackOllamaModels) : (listedModels.length ? listedModels : (cloudModels[provider] || []));
+  const canList = true;
   const currentStatus = status && status.provider && status.model
     ? providerLabel(status.provider) + " · " + status.model
     : "Not connected";
@@ -775,7 +785,7 @@ function InlineModelSetup({ status, onSaved }) {
       </div>
       <div className="kp-inline-model-actions">
         {mode === "ollama" && <button className="kp-setup-outline" type="button" disabled={busy || !model.trim()} onClick={pullModel}>Pull</button>}
-        {canList && <button className="kp-setup-outline" type="button" disabled={busy} onClick={listModels}>List models</button>}
+        {canList && <button className="kp-setup-outline" type="button" disabled={busy} onClick={listModels}>{mode === "ollama" ? "Refresh models" : "List models"}</button>}
         <button className="kp-setup-outline" type="button" disabled={busy || !model.trim()} onClick={testModel}>Test</button>
         <button className="kp-setup-primary" type="button" disabled={busy || !model.trim()} onClick={saveModel}>{busy ? "Working..." : "Use model"}</button>
       </div>

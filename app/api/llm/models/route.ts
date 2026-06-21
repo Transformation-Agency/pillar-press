@@ -24,7 +24,7 @@ const Body = z.object({
 
 type ModelsResponse = {
   data?: Array<{ id?: string }>;
-  models?: Array<{ name?: string; id?: string } | string>;
+  models?: Array<{ name?: string; model?: string; id?: string; capabilities?: string[] } | string>;
 };
 
 type GeminiModelsResponse = {
@@ -34,7 +34,9 @@ type GeminiModelsResponse = {
 function normalizeModels(payload: ModelsResponse): string[] {
   const fromData = Array.isArray(payload.data) ? payload.data.map((m) => m.id) : [];
   const fromModels = Array.isArray(payload.models)
-    ? payload.models.map((m) => (typeof m === "string" ? m : m.name || m.id))
+    ? payload.models
+        .filter((m) => typeof m === "string" || !Array.isArray(m.capabilities) || m.capabilities.includes("completion"))
+        .map((m) => (typeof m === "string" ? m : m.model || m.name || m.id))
     : [];
   return [...fromData, ...fromModels]
     .filter((m): m is string => Boolean(m && m.trim()))
