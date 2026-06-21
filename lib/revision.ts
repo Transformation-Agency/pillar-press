@@ -72,6 +72,7 @@ export interface RevisionPacket {
 export interface RevisionPieceInput {
   original?: string;
   packet?: RevisionPacket | null;
+  categoryContext?: unknown;
   // The author's explicit guidance — overrides findings where they conflict (as
   // long as voice is preserved). gateNotes is keyed by gate id (all seven), so it
   // can carry intent for strategy/identity gates the firewall excludes from findings.

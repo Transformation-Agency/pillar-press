@@ -6,7 +6,101 @@ beforeEach(() => {
   vi.unstubAllGlobals();
 });
 
+function mockLocalRouteUser() {
+  vi.doMock("@/lib/auth", () => ({
+    requireUser: vi.fn(async () => ({ id: "local-user", workspaceId: "local-workspace", role: "author" })),
+  }));
+  vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => true }));
+  vi.doMock("@/lib/billing/entitlements", () => ({ requireByokProviderAccess: vi.fn() }));
+  vi.doMock("@/lib/providerSettings", () => ({ getHostedProviderProfile: vi.fn() }));
+}
+
 describe("hosted LLM provider utility routes", () => {
+  it("filters and prioritizes OpenAI chat models when listing models", async () => {
+    mockLocalRouteUser();
+    const fetch = vi.fn(async () => new Response(JSON.stringify({
+      data: [
+        { id: "babbage-2" },
+        { id: "text-embedding-3-large" },
+        { id: "dall-e-3" },
+        { id: "gpt-4o-mini" },
+        { id: "gpt-4.1" },
+        { id: "gpt-5-mini" },
+        { id: "o3-mini" },
+      ],
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetch);
+
+    const { POST } = await import("../app/api/llm/models/route");
+    const res = await POST(new Request("http://test.local/api/llm/models", {
+      method: "POST",
+      body: JSON.stringify({
+        provider: "openai",
+        apiKey: "sk-openai-test",
+      }),
+    }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.models).toEqual(["gpt-5-mini", "gpt-4.1", "gpt-4o-mini", "o3-mini"]);
+    expect(body.models).not.toContain("babbage-2");
+    expect(body.models).not.toContain("text-embedding-3-large");
+    expect(body.totalModels).toBe(7);
+    expect(body.warning).toBeUndefined();
+    expect(fetch).toHaveBeenCalledWith("https://api.openai.com/v1/models", expect.objectContaining({
+      headers: expect.objectContaining({ Authorization: "Bearer sk-openai-test" }),
+    }));
+  });
+
+  it("returns a readable OpenAI filtering warning without leaking API keys", async () => {
+    mockLocalRouteUser();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      data: [
+        { id: "babbage-2" },
+        { id: "davinci-002" },
+        { id: "text-embedding-3-small" },
+      ],
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+
+    const { POST } = await import("../app/api/llm/models/route");
+    const res = await POST(new Request("http://test.local/api/llm/models", {
+      method: "POST",
+      body: JSON.stringify({
+        provider: "openai",
+        apiKey: "sk-openai-secret",
+      }),
+    }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.models).toEqual([]);
+    expect(body.warning).toContain("none matched the ChatGPT chat-model filter");
+    expect(JSON.stringify(body)).not.toContain("sk-openai-secret");
+  });
+
+  it("keeps provider listing errors readable without leaking OpenAI credentials", async () => {
+    mockLocalRouteUser();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      error: {
+        message: "Bearer sk-openai-secret is invalid for this project",
+      },
+    }), { status: 401, headers: { "content-type": "application/json" } })));
+
+    const { POST } = await import("../app/api/llm/models/route");
+    const res = await POST(new Request("http://test.local/api/llm/models", {
+      method: "POST",
+      body: JSON.stringify({
+        provider: "openai",
+        apiKey: "sk-openai-secret",
+      }),
+    }));
+    const body = await res.json();
+
+    expect(res.status).toBe(401);
+    expect(body.error).toBe("OpenAI rejected the API key. Reconnect the provider or paste a fresh key.");
+    expect(JSON.stringify(body)).not.toContain("sk-openai-secret");
+  });
+
   it("requires BYOK provider access before testing a hosted LLM profile", async () => {
     const getHostedProviderProfile = vi.fn();
     const createAIFromConfig = vi.fn();
@@ -81,5 +175,79 @@ describe("hosted LLM provider utility routes", () => {
     expect(requireByokProviderAccess).toHaveBeenCalledWith({ id: "user_1", workspaceId: "workspace_1", role: "author" });
     expect(getHostedProviderProfile).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("lists local Ollama Gemma 4 models before other completion models", async () => {
+    const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/api/tags")) {
+        return new Response(JSON.stringify({
+          models: [
+            { name: "llama3.2:latest" },
+            { name: "gemma4:26b-mlx" },
+            { name: "nomic-embed-text:latest", details: { family: "bert" } },
+          ],
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (url.endsWith("/api/show")) {
+        const body = JSON.parse(String(init?.body || "{}"));
+        return new Response(JSON.stringify({
+          capabilities: body.model === "nomic-embed-text:latest" ? ["embedding"] : ["completion"],
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      throw new Error("Unexpected URL " + url);
+    });
+    vi.stubGlobal("fetch", fetch);
+
+    vi.doMock("@/lib/auth", () => ({
+      requireUser: vi.fn(async () => ({ id: "local_user", role: "owner" })),
+    }));
+    vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => true }));
+    vi.doMock("@/lib/billing/entitlements", () => ({ requireByokProviderAccess: vi.fn() }));
+    vi.doMock("@/lib/providerSettings", () => ({ getHostedProviderProfile: vi.fn() }));
+
+    const { POST } = await import("../app/api/llm/models/route");
+    const res = await POST(new Request("http://test.local/api/llm/models", {
+      method: "POST",
+      body: JSON.stringify({
+        provider: "ollama",
+        baseUrl: "http://127.0.0.1:11434",
+      }),
+    }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.models).toEqual(["gemma4:26b-mlx", "llama3.2:latest"]);
+  });
+
+  it("keeps Ollama tag models when show metadata is unavailable but still filters embedding names", async () => {
+    const fetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/api/tags")) {
+        return new Response(JSON.stringify({
+          models: [
+            { name: "qwen2.5:latest" },
+            { name: "mxbai-embed-large:latest" },
+          ],
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify({ error: "not found" }), { status: 404, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetch);
+
+    vi.doMock("@/lib/auth", () => ({
+      requireUser: vi.fn(async () => ({ id: "local_user", role: "owner" })),
+    }));
+    vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => true }));
+    vi.doMock("@/lib/billing/entitlements", () => ({ requireByokProviderAccess: vi.fn() }));
+    vi.doMock("@/lib/providerSettings", () => ({ getHostedProviderProfile: vi.fn() }));
+
+    const { POST } = await import("../app/api/llm/models/route");
+    const res = await POST(new Request("http://test.local/api/llm/models", {
+      method: "POST",
+      body: JSON.stringify({ provider: "ollama" }),
+    }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.models).toEqual(["qwen2.5:latest"]);
   });
 });

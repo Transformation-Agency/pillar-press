@@ -32,6 +32,8 @@ function addColumn(db: Database.Database, table: string, column: string, definit
 function migrateLooseColumns(db: Database.Database): void {
   // Keeps early desktop-dev databases usable after local schema expansion.
   addColumn(db, "pieces", "user_id", "TEXT NOT NULL DEFAULT 'local-owner'");
+  addColumn(db, "pieces", "category", "TEXT NOT NULL DEFAULT 'article'");
+  addColumn(db, "pieces", "category_context_json", "TEXT NOT NULL DEFAULT '{}'");
   addColumn(db, "gather_sources", "user_id", "TEXT NOT NULL DEFAULT 'local-owner'");
   addColumn(db, "gather_items", "user_id", "TEXT NOT NULL DEFAULT 'local-owner'");
   addColumn(db, "gather_schedules", "user_id", "TEXT NOT NULL DEFAULT 'local-owner'");
@@ -121,12 +123,53 @@ export interface LocalPiece {
   title: string;
   status: "Draft" | "Reviewed" | "Revised" | "Approved" | "Formatted";
   original: string;
+  category: "article" | "letter" | "book" | "other";
+  categoryContext: Record<string, unknown>;
   packet: unknown | null;
   revision: unknown | null;
   outputs: unknown | null;
   outputOrder: unknown | null;
   direction: string | null;
   gateNotes: Record<string, string>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LocalLetterRecipient {
+  id: string;
+  userId: string;
+  workspaceId: string;
+  displayName: string;
+  sortName: string | null;
+  organization: string | null;
+  role: string | null;
+  relationship: string | null;
+  defaultSalutation: string | null;
+  defaultSignoff: string | null;
+  defaultTone: string | null;
+  notes: string | null;
+  preferences: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LocalLetterWorkflow {
+  id: string;
+  userId: string;
+  workspaceId: string;
+  campaignId: string;
+  pieceId: string | null;
+  recipientId: string | null;
+  recipientSnapshot: Record<string, unknown>;
+  purpose: string;
+  desiredOutcome: string | null;
+  occasion: string | null;
+  tone: string | null;
+  constraints: string | null;
+  sourceContext: string | null;
+  uploads: unknown[];
+  dictationTranscript: string | null;
+  status: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -297,12 +340,57 @@ function rowPiece(row: any): LocalPiece {
     title: row.title,
     status: row.status,
     original: row.original ?? "",
+    category: ["article", "letter", "book", "other"].includes(row.category) ? row.category : "article",
+    categoryContext: parseJson<Record<string, unknown>>(row.category_context_json, {}),
     packet: parseJson(row.packet_json, null),
     revision: parseJson(row.revision_json, null),
     outputs: parseJson(row.outputs_json, null),
     outputOrder: parseJson(row.output_order_json, null),
     direction: row.direction,
     gateNotes: parseJson<Record<string, string>>(row.gate_notes_json, {}),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function rowLetterRecipient(row: any): LocalLetterRecipient {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    workspaceId: row.workspace_id,
+    displayName: row.display_name,
+    sortName: row.sort_name,
+    organization: row.organization,
+    role: row.role,
+    relationship: row.relationship,
+    defaultSalutation: row.default_salutation,
+    defaultSignoff: row.default_signoff,
+    defaultTone: row.default_tone,
+    notes: row.notes,
+    preferences: parseJson<Record<string, unknown>>(row.preferences_json, {}),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function rowLetterWorkflow(row: any): LocalLetterWorkflow {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    workspaceId: row.workspace_id,
+    campaignId: row.campaign_id,
+    pieceId: row.piece_id,
+    recipientId: row.recipient_id,
+    recipientSnapshot: parseJson<Record<string, unknown>>(row.recipient_snapshot_json, {}),
+    purpose: row.purpose ?? "",
+    desiredOutcome: row.desired_outcome,
+    occasion: row.occasion,
+    tone: row.tone,
+    constraints: row.constraints,
+    sourceContext: row.source_context,
+    uploads: parseJson<unknown[]>(row.uploads_json, []),
+    dictationTranscript: row.dictation_transcript,
+    status: row.status ?? "draft",
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -588,7 +676,15 @@ export function listLocalPieces(campaignId: string, workspaceId = LOCAL_WORKSPAC
 }
 
 export function createLocalPiece(
-  input: { id?: string; campaignId: string; userId: string; title: string; original?: string },
+  input: {
+    id?: string;
+    campaignId: string;
+    userId: string;
+    title: string;
+    original?: string;
+    category?: "article" | "letter" | "book" | "other";
+    categoryContext?: Record<string, unknown>;
+  },
   workspaceId = LOCAL_WORKSPACE_ID,
 ): LocalPiece | null {
   if (!getLocalCampaign(input.campaignId, workspaceId)) return null;
@@ -596,10 +692,18 @@ export function createLocalPiece(
   localDb()
     .prepare(
       `INSERT INTO pieces (
-        id, campaign_id, user_id, title, status, original, gate_notes_json, updated_at
-      ) VALUES (?, ?, ?, ?, 'Draft', ?, '{}', CURRENT_TIMESTAMP)`,
+        id, campaign_id, user_id, title, status, original, category, category_context_json, gate_notes_json, updated_at
+      ) VALUES (?, ?, ?, ?, 'Draft', ?, ?, ?, '{}', CURRENT_TIMESTAMP)`,
     )
-    .run(pieceId, input.campaignId, input.userId, input.title, input.original ?? "");
+    .run(
+      pieceId,
+      input.campaignId,
+      input.userId,
+      input.title,
+      input.original ?? "",
+      input.category ?? "article",
+      JSON.stringify(input.categoryContext ?? {}),
+    );
   return getLocalPiece(pieceId, input.userId, workspaceId);
 }
 
@@ -619,7 +723,7 @@ export function getLocalPiece(id: string, userId: string, workspaceId = LOCAL_WO
 export function updateLocalPiece(
   id: string,
   userId: string,
-  patch: Partial<Pick<LocalPiece, "title" | "original" | "status" | "direction" | "packet" | "revision" | "outputs" | "outputOrder">> & { gateNotes?: Record<string, string> },
+  patch: Partial<Pick<LocalPiece, "title" | "original" | "status" | "category" | "categoryContext" | "direction" | "packet" | "revision" | "outputs" | "outputOrder">> & { gateNotes?: Record<string, string> },
   workspaceId = LOCAL_WORKSPACE_ID,
 ): LocalPiece | null {
   const existing = getLocalPiece(id, userId, workspaceId);
@@ -631,6 +735,8 @@ export function updateLocalPiece(
        SET title = ?,
            original = ?,
            status = ?,
+           category = ?,
+           category_context_json = ?,
            direction = ?,
            packet_json = ?,
            revision_json = ?,
@@ -644,6 +750,8 @@ export function updateLocalPiece(
       patch.title ?? existing.title,
       patch.original ?? existing.original,
       patch.status ?? existing.status,
+      patch.category ?? existing.category,
+      JSON.stringify(patch.categoryContext !== undefined ? patch.categoryContext : existing.categoryContext),
       patch.direction ?? existing.direction,
       JSON.stringify(patch.packet !== undefined ? patch.packet : existing.packet),
       JSON.stringify(patch.revision !== undefined ? patch.revision : existing.revision),
@@ -660,6 +768,298 @@ export function deleteLocalPiece(id: string, userId: string, workspaceId = LOCAL
   const existing = getLocalPiece(id, userId, workspaceId);
   if (!existing) return false;
   const result = localDb().prepare("DELETE FROM pieces WHERE id = ? AND user_id = ?").run(id, userId);
+  return result.changes > 0;
+}
+
+export function listLocalLetterRecipients(
+  userId = LOCAL_USER_ID,
+  workspaceId = LOCAL_WORKSPACE_ID,
+): LocalLetterRecipient[] {
+  ensureLocalWorkspace(userId);
+  return localDb()
+    .prepare(
+      `SELECT * FROM letter_recipients
+       WHERE user_id = ? AND workspace_id = ?
+       ORDER BY COALESCE(sort_name, display_name) COLLATE NOCASE ASC, display_name COLLATE NOCASE ASC`,
+    )
+    .all(userId, workspaceId)
+    .map(rowLetterRecipient);
+}
+
+export function getLocalLetterRecipient(
+  id: string,
+  userId = LOCAL_USER_ID,
+  workspaceId = LOCAL_WORKSPACE_ID,
+): LocalLetterRecipient | null {
+  ensureLocalWorkspace(userId);
+  const row = localDb()
+    .prepare("SELECT * FROM letter_recipients WHERE id = ? AND user_id = ? AND workspace_id = ?")
+    .get(id, userId, workspaceId);
+  return row ? rowLetterRecipient(row) : null;
+}
+
+export function createLocalLetterRecipient(
+  input: {
+    id?: string;
+    displayName: string;
+    sortName?: string | null;
+    organization?: string | null;
+    role?: string | null;
+    relationship?: string | null;
+    defaultSalutation?: string | null;
+    defaultSignoff?: string | null;
+    defaultTone?: string | null;
+    notes?: string | null;
+    preferences?: Record<string, unknown>;
+  },
+  userId = LOCAL_USER_ID,
+  workspaceId = LOCAL_WORKSPACE_ID,
+): LocalLetterRecipient {
+  ensureLocalWorkspace(userId);
+  const recipientId = input.id || randomUUID();
+  localDb()
+    .prepare(
+      `INSERT INTO letter_recipients (
+        id, user_id, workspace_id, display_name, sort_name, organization, role,
+        relationship, default_salutation, default_signoff, default_tone, notes,
+        preferences_json, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+    )
+    .run(
+      recipientId,
+      userId,
+      workspaceId,
+      input.displayName,
+      input.sortName ?? null,
+      input.organization ?? null,
+      input.role ?? null,
+      input.relationship ?? null,
+      input.defaultSalutation ?? null,
+      input.defaultSignoff ?? null,
+      input.defaultTone ?? null,
+      input.notes ?? null,
+      JSON.stringify(input.preferences ?? {}),
+    );
+  return getLocalLetterRecipient(recipientId, userId, workspaceId)!;
+}
+
+export function updateLocalLetterRecipient(
+  id: string,
+  userId: string,
+  workspaceId: string,
+  patch: Partial<Omit<LocalLetterRecipient, "id" | "userId" | "workspaceId" | "createdAt" | "updatedAt">>,
+): LocalLetterRecipient | null {
+  const existing = getLocalLetterRecipient(id, userId, workspaceId);
+  if (!existing) return null;
+  localDb()
+    .prepare(
+      `UPDATE letter_recipients
+       SET display_name = ?,
+           sort_name = ?,
+           organization = ?,
+           role = ?,
+           relationship = ?,
+           default_salutation = ?,
+           default_signoff = ?,
+           default_tone = ?,
+           notes = ?,
+           preferences_json = ?,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = ? AND user_id = ? AND workspace_id = ?`,
+    )
+    .run(
+      patch.displayName ?? existing.displayName,
+      patch.sortName !== undefined ? patch.sortName : existing.sortName,
+      patch.organization !== undefined ? patch.organization : existing.organization,
+      patch.role !== undefined ? patch.role : existing.role,
+      patch.relationship !== undefined ? patch.relationship : existing.relationship,
+      patch.defaultSalutation !== undefined ? patch.defaultSalutation : existing.defaultSalutation,
+      patch.defaultSignoff !== undefined ? patch.defaultSignoff : existing.defaultSignoff,
+      patch.defaultTone !== undefined ? patch.defaultTone : existing.defaultTone,
+      patch.notes !== undefined ? patch.notes : existing.notes,
+      JSON.stringify(patch.preferences !== undefined ? patch.preferences : existing.preferences),
+      id,
+      userId,
+      workspaceId,
+    );
+  return getLocalLetterRecipient(id, userId, workspaceId);
+}
+
+export function deleteLocalLetterRecipient(
+  id: string,
+  userId = LOCAL_USER_ID,
+  workspaceId = LOCAL_WORKSPACE_ID,
+): boolean {
+  const existing = getLocalLetterRecipient(id, userId, workspaceId);
+  if (!existing) return false;
+  const result = localDb()
+    .prepare("DELETE FROM letter_recipients WHERE id = ? AND user_id = ? AND workspace_id = ?")
+    .run(id, userId, workspaceId);
+  return result.changes > 0;
+}
+
+export function listLocalLetterWorkflows(
+  campaignId: string,
+  userId = LOCAL_USER_ID,
+  workspaceId = LOCAL_WORKSPACE_ID,
+): LocalLetterWorkflow[] | null {
+  if (!getLocalCampaign(campaignId, workspaceId)) return null;
+  return localDb()
+    .prepare(
+      `SELECT * FROM letter_workflows
+       WHERE campaign_id = ? AND user_id = ? AND workspace_id = ?
+       ORDER BY updated_at DESC, created_at DESC`,
+    )
+    .all(campaignId, userId, workspaceId)
+    .map(rowLetterWorkflow);
+}
+
+export function getLocalLetterWorkflow(
+  id: string,
+  userId = LOCAL_USER_ID,
+  workspaceId = LOCAL_WORKSPACE_ID,
+): LocalLetterWorkflow | null {
+  ensureLocalWorkspace(userId);
+  const row = localDb()
+    .prepare(
+      `SELECT lw.*
+       FROM letter_workflows lw
+       JOIN campaigns c ON c.id = lw.campaign_id
+       WHERE lw.id = ? AND lw.user_id = ? AND lw.workspace_id = ? AND c.workspace_id = ?`,
+    )
+    .get(id, userId, workspaceId, workspaceId);
+  return row ? rowLetterWorkflow(row) : null;
+}
+
+export function getLocalLetterWorkflowForPiece(
+  pieceId: string,
+  userId = LOCAL_USER_ID,
+  workspaceId = LOCAL_WORKSPACE_ID,
+): LocalLetterWorkflow | null {
+  ensureLocalWorkspace(userId);
+  const row = localDb()
+    .prepare(
+      `SELECT lw.*
+       FROM letter_workflows lw
+       JOIN campaigns c ON c.id = lw.campaign_id
+       WHERE lw.piece_id = ? AND lw.user_id = ? AND lw.workspace_id = ? AND c.workspace_id = ?
+       ORDER BY lw.updated_at DESC
+       LIMIT 1`,
+    )
+    .get(pieceId, userId, workspaceId, workspaceId);
+  return row ? rowLetterWorkflow(row) : null;
+}
+
+export function createLocalLetterWorkflow(
+  input: {
+    id?: string;
+    campaignId: string;
+    pieceId?: string | null;
+    recipientId?: string | null;
+    recipientSnapshot?: Record<string, unknown>;
+    purpose?: string;
+    desiredOutcome?: string | null;
+    occasion?: string | null;
+    tone?: string | null;
+    constraints?: string | null;
+    sourceContext?: string | null;
+    uploads?: unknown[];
+    dictationTranscript?: string | null;
+    status?: string;
+  },
+  userId = LOCAL_USER_ID,
+  workspaceId = LOCAL_WORKSPACE_ID,
+): LocalLetterWorkflow | null {
+  if (!getLocalCampaign(input.campaignId, workspaceId)) return null;
+  if (input.recipientId && !getLocalLetterRecipient(input.recipientId, userId, workspaceId)) return null;
+  const workflowId = input.id || randomUUID();
+  localDb()
+    .prepare(
+      `INSERT INTO letter_workflows (
+        id, user_id, workspace_id, campaign_id, piece_id, recipient_id,
+        recipient_snapshot_json, purpose, desired_outcome, occasion, tone,
+        constraints, source_context, uploads_json, dictation_transcript, status,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+    )
+    .run(
+      workflowId,
+      userId,
+      workspaceId,
+      input.campaignId,
+      input.pieceId ?? null,
+      input.recipientId ?? null,
+      JSON.stringify(input.recipientSnapshot ?? {}),
+      input.purpose ?? "",
+      input.desiredOutcome ?? null,
+      input.occasion ?? null,
+      input.tone ?? null,
+      input.constraints ?? null,
+      input.sourceContext ?? null,
+      JSON.stringify(input.uploads ?? []),
+      input.dictationTranscript ?? null,
+      input.status ?? "draft",
+    );
+  return getLocalLetterWorkflow(workflowId, userId, workspaceId);
+}
+
+export function updateLocalLetterWorkflow(
+  id: string,
+  userId: string,
+  workspaceId: string,
+  patch: Partial<Omit<LocalLetterWorkflow, "id" | "userId" | "workspaceId" | "campaignId" | "createdAt" | "updatedAt">>,
+): LocalLetterWorkflow | null {
+  const existing = getLocalLetterWorkflow(id, userId, workspaceId);
+  if (!existing) return null;
+  if (patch.recipientId && !getLocalLetterRecipient(patch.recipientId, userId, workspaceId)) return null;
+  localDb()
+    .prepare(
+      `UPDATE letter_workflows
+       SET piece_id = ?,
+           recipient_id = ?,
+           recipient_snapshot_json = ?,
+           purpose = ?,
+           desired_outcome = ?,
+           occasion = ?,
+           tone = ?,
+           constraints = ?,
+           source_context = ?,
+           uploads_json = ?,
+           dictation_transcript = ?,
+           status = ?,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = ? AND user_id = ? AND workspace_id = ?`,
+    )
+    .run(
+      patch.pieceId !== undefined ? patch.pieceId : existing.pieceId,
+      patch.recipientId !== undefined ? patch.recipientId : existing.recipientId,
+      JSON.stringify(patch.recipientSnapshot !== undefined ? patch.recipientSnapshot : existing.recipientSnapshot),
+      patch.purpose !== undefined ? patch.purpose : existing.purpose,
+      patch.desiredOutcome !== undefined ? patch.desiredOutcome : existing.desiredOutcome,
+      patch.occasion !== undefined ? patch.occasion : existing.occasion,
+      patch.tone !== undefined ? patch.tone : existing.tone,
+      patch.constraints !== undefined ? patch.constraints : existing.constraints,
+      patch.sourceContext !== undefined ? patch.sourceContext : existing.sourceContext,
+      JSON.stringify(patch.uploads !== undefined ? patch.uploads : existing.uploads),
+      patch.dictationTranscript !== undefined ? patch.dictationTranscript : existing.dictationTranscript,
+      patch.status !== undefined ? patch.status : existing.status,
+      id,
+      userId,
+      workspaceId,
+    );
+  return getLocalLetterWorkflow(id, userId, workspaceId);
+}
+
+export function deleteLocalLetterWorkflow(
+  id: string,
+  userId = LOCAL_USER_ID,
+  workspaceId = LOCAL_WORKSPACE_ID,
+): boolean {
+  const existing = getLocalLetterWorkflow(id, userId, workspaceId);
+  if (!existing) return false;
+  const result = localDb()
+    .prepare("DELETE FROM letter_workflows WHERE id = ? AND user_id = ? AND workspace_id = ?")
+    .run(id, userId, workspaceId);
   return result.changes > 0;
 }
 

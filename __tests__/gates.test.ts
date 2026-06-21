@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { GATES, PREAMBLE, SEVERITY, runGate, type GateResult } from "@/lib/gates";
+import { buildCategoryContext } from "@/lib/editorial/categoryContext";
+import { chooseReviewPlan, runGateWithContext } from "@/lib/editorial/review";
 import type { AI } from "@/lib/llm";
 
 // A fake AI that records the prompts/systems it was called with and returns a
@@ -84,5 +86,27 @@ describe("runGate normalization", () => {
     }));
     const res = (await runGate(GATES[5], "DRAFT", "REF", ai)) as GateResult;
     expect(res.findings[0].anchor).toBeNull();
+  });
+
+  it("injects category context into the gate system prompt", async () => {
+    const ai = fakeAI(() => ({ summary: "ok", findings: [] }));
+    const categoryCtx = buildCategoryContext({ category: "letter", categoryContext: { recipientName: "Ada" } });
+    await runGateWithContext(GATES[0], "DRAFT", { refCtx: "REF", categoryCtx, ai });
+    expect(ai.calls[0].system).toContain("DESK WORKFLOW CONTEXT");
+    expect(ai.calls[0].system).toContain("Letter / direct communication");
+    expect(ai.calls[0].system).toContain("Ada");
+  });
+
+  it("selects chunked review for very long drafts", () => {
+    const categoryCtx = buildCategoryContext({ category: "book" });
+    const plan = chooseReviewPlan({
+      draft: "Long paragraph. ".repeat(40_000),
+      refCtx: "REF",
+      categoryCtx,
+      taskAI: { provider: "ollama", model: "small-local" },
+    });
+    expect(plan.plan).toBe("chunked_reduce");
+    expect(plan.chunks.length).toBeGreaterThan(1);
+    expect(plan.warnings[0]).toContain("long_input_chunked");
   });
 });

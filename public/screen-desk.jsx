@@ -201,7 +201,10 @@ function Desk({ campaignId, onOpenPiece }) {
     const seed = active.messages
       .map((m) => (m.role === "user" ? "Author: " : "Desk: ") + m.content)
       .join("\n\n");
-    const piece = window.Store.createPiece(active.title || "Desk thread", campaignId);
+    const piece = window.Store.createPiece(active.title || "Desk thread", campaignId, {
+      category: "other",
+      categoryContext: { communicationGoal: active.title || "Desk thread" },
+    });
     window.Store.updatePiece(piece.id, { original: seed });
     onOpenPiece && onOpenPiece(piece.id);
   }

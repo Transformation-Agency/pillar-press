@@ -11,6 +11,8 @@ import {
   generateRevision,
   type RevisionPacket,
 } from "@/lib/revision";
+import { buildCategoryContext, withCategoryPrompt } from "@/lib/editorial/categoryContext";
+import { runCategoryAwareRevision } from "@/lib/editorial/revision";
 import type { AI } from "@/lib/llm";
 
 describe("author guidance (direction + gate commentary)", () => {
@@ -184,6 +186,42 @@ describe("REVISION_SYSTEM", () => {
     expect(sys).toContain("@@REVISION@@");
     expect(sys).toContain("@@CHANGELOG@@");
     expect(sys).toContain("@@END@@");
+  });
+
+  it("can include category context additively", () => {
+    const ctx = buildCategoryContext({ category: "book", categoryContext: { chapterRole: "bridge chapter" } });
+    const sys = REVISION_SYSTEM(withCategoryPrompt("REF", ctx));
+    expect(sys).toContain("DESK WORKFLOW CONTEXT");
+    expect(sys).toContain("bridge chapter");
+  });
+});
+
+describe("category-aware revision orchestration", () => {
+  it("uses staged structural planning for long full revisions", async () => {
+    const calls: { prompt: string; system?: string }[] = [];
+    const ai: AI = {
+      calls,
+      async text(prompt: string, opts?: { system?: string }) {
+        calls.push({ prompt, system: opts?.system });
+        return "@@REVISION@@\nrevised\n@@CHANGELOG@@\n- [STRUCT] changed structure :: plan\n@@END@@";
+      },
+      async json() { throw new Error("not used"); },
+      async complete() { throw new Error("not used"); },
+      extractJSON: () => null,
+      repairJSON: () => null,
+    } as AI & { calls: typeof calls };
+    const categoryCtx = buildCategoryContext({ category: "book", categoryContext: { continuityDigest: "Earlier chapter introduced the problem." } });
+    const result = await runCategoryAwareRevision({
+      piece: { original: "Very long. ".repeat(40_000), packet: FULL_PACKET },
+      refCtx: "REF",
+      categoryCtx,
+      taskAI: { provider: "ollama", model: "small-local" },
+      ai,
+      opts: { mode: "full" },
+    });
+    expect(result.revision.trace?.plan).toBe("chunked_structural_plan_then_polish");
+    expect(result.revision.trace?.warnings.some((w) => /^long_input_staged/.test(w))).toBe(true);
+    expect(calls[0].system).toContain("DESK WORKFLOW CONTEXT");
   });
 });
 

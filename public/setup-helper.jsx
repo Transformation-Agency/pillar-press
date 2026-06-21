@@ -536,6 +536,7 @@ function InlineModelSetup({ status, onSaved }) {
       return aGemma - bGemma || a.localeCompare(b);
     });
   };
+  const suggestedOllamaModels = () => fallbackOllamaModels.filter((item) => !listedModels.includes(item));
 
   const providerLabel = (value) => ({
     openai: "OpenAI / ChatGPT",
@@ -561,6 +562,15 @@ function InlineModelSetup({ status, onSaved }) {
   React.useEffect(() => {
     if (!hasDesktop || !desktop.ollamaStatus) return;
     desktop.ollamaStatus().then(setOllamaStatus).catch(() => setOllamaStatus(null));
+    if (desktop.listOllamaModels) {
+      desktop.listOllamaModels()
+        .then((items) => {
+          const localModels = preferGemma(items || []);
+          setListedModels(localModels);
+          if (localModels[0] && (!model.trim() || model === "gpt-4o-mini")) setModel(localModels[0]);
+        })
+        .catch(() => {});
+    }
   }, [hasDesktop]);
 
   function applyMode(nextMode) {
@@ -599,6 +609,18 @@ function InlineModelSetup({ status, onSaved }) {
     setBusy(true);
     setMessage("Looking for models.");
     try {
+      if (config.provider === "ollama" && hasDesktop && desktop.listOllamaModels) {
+        const [status, items] = await Promise.all([
+          desktop.ollamaStatus ? desktop.ollamaStatus().catch(() => null) : Promise.resolve(null),
+          desktop.listOllamaModels(),
+        ]);
+        const localModels = preferGemma(items || []);
+        if (status) setOllamaStatus(status);
+        setListedModels(localModels);
+        if (localModels[0]) setModel(localModels[0]);
+        setMessage(localModels.length ? "Loaded " + localModels.length + " installed Ollama model" + (localModels.length === 1 ? "" : "s") + "." : "Ollama responded, but no installed chat models were listed.");
+        return;
+      }
       if (config.provider === "openai-compatible" && !config.baseUrl) throw new Error("Add a base URL first.");
       if (["openai", "anthropic", "gemini", "xai"].includes(config.provider) && !config.apiKey) throw new Error("Paste an API key first.");
       const response = await fetch("/api/llm/models", {
@@ -612,7 +634,7 @@ function InlineModelSetup({ status, onSaved }) {
       const nextModels = config.provider === "ollama" ? preferGemma(models) : models;
       setListedModels(nextModels);
       if (nextModels[0]) setModel(nextModels[0]);
-      setMessage(models.length ? "Models loaded." : "Provider responded, but no models were listed. You can still type one.");
+      setMessage((body && body.warning) || (models.length ? "Models loaded." : "Provider responded, but no models were listed. You can still type one."));
     } catch (error) {
       setMessage((error && error.message) || "Could not load models. You can still type one.");
     } finally {
@@ -720,7 +742,8 @@ function InlineModelSetup({ status, onSaved }) {
     }
   }
 
-  const options = mode === "ollama" ? (listedModels.length ? listedModels : fallbackOllamaModels) : (listedModels.length ? listedModels : (cloudModels[provider] || []));
+  const ollamaSuggestions = suggestedOllamaModels();
+  const options = mode === "ollama" ? listedModels.concat(ollamaSuggestions) : (listedModels.length ? listedModels : (cloudModels[provider] || []));
   const canList = true;
   const currentStatus = status && status.provider && status.model
     ? providerLabel(status.provider) + " · " + status.model
@@ -749,6 +772,7 @@ function InlineModelSetup({ status, onSaved }) {
               <select className="kp-setup-input" value={provider} onChange={(event) => {
                 const next = event.target.value;
                 setProvider(next);
+                setListedModels([]);
                 setModel((cloudModels[next] || [""])[0]);
                 setBaseUrl(next === "openai-compatible" ? baseUrl : "");
               }}>
@@ -774,13 +798,14 @@ function InlineModelSetup({ status, onSaved }) {
         {mode === "ollama" && (
           <div className="kp-inline-model-local">
             <strong>{ollamaStatus && ollamaStatus.running ? "Ollama is running" : "Ollama local model"}</strong>
-            <span>{hasDesktop ? "Use an existing local model or pull one below." : "Use the desktop app to start or pull local models."}</span>
+            <span>{listedModels.length ? "Installed: " + listedModels.join(", ") : hasDesktop ? "No installed chat models listed yet." : "Use the desktop app to start or pull local models."}</span>
+            {!!ollamaSuggestions.length && <span>Suggested pulls: {ollamaSuggestions.join(", ")}</span>}
           </div>
         )}
         <label>
           <span>Model</span>
           <input className="kp-setup-input" value={model} onChange={(event) => setModel(event.target.value)} list="kp-inline-model-options" placeholder="model name" />
-          <datalist id="kp-inline-model-options">{options.map((item) => <option key={item} value={item} />)}</datalist>
+          <datalist id="kp-inline-model-options">{options.map((item) => <option key={item} value={item} label={mode === "ollama" ? (listedModels.includes(item) ? "Installed local model" : "Suggested pull") : undefined} />)}</datalist>
         </label>
       </div>
       <div className="kp-inline-model-actions">

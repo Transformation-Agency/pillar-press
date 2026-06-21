@@ -64,6 +64,8 @@
       gatherSources: [],
       gatherItems: [],
       gatherSummaries: [], // per-source research briefs from the last run (cache-only)
+      recipients: [],
+      letterWorkflows: [],
       pieces: [],
       activePieceId: null,
       theme: "light",
@@ -125,6 +127,7 @@
     (state.gatherSources || []).forEach((s) => { if (s.campaignId === tempId) s.campaignId = realId; });
     (state.gatherItems || []).forEach((i) => { if (i.campaignId === tempId) i.campaignId = realId; });
     (state.gatherSummaries || []).forEach((s) => { if (s.campaignId === tempId) s.campaignId = realId; });
+    (state.letterWorkflows || []).forEach((w) => { if (w.campaignId === tempId) w.campaignId = realId; });
     (state.media || []).forEach((m) => { if (m.campaignId === tempId) m.campaignId = realId; });
     if (loadedCampaigns.has(tempId)) {
       loadedCampaigns.delete(tempId);
@@ -139,11 +142,13 @@
     p.id = realId;
     if (state.activePieceId === tempId) state.activePieceId = realId;
     (state.media || []).forEach((m) => { if (m.pieceId === tempId) m.pieceId = realId; });
+    (state.letterWorkflows || []).forEach((w) => { if (w.pieceId === tempId) w.pieceId = realId; });
   }
 
   function removeOptimisticCampaign(id) {
     state.campaigns = (state.campaigns || []).filter((c) => c.id !== id);
     state.pieces = (state.pieces || []).filter((p) => p.campaignId !== id);
+    state.letterWorkflows = (state.letterWorkflows || []).filter((w) => w.campaignId !== id);
     loadedCampaigns.delete(id);
     if (state.activeCampaignId === id) {
       state.activeCampaignId = state.campaigns[0] ? state.campaigns[0].id : null;
@@ -163,10 +168,11 @@
         apiGet("/campaigns/" + id + "/pieces").catch(() => ({ pieces: [] })),
         apiGet("/gather/sources?campaignId=" + encodeURIComponent(id)).catch(() => ({ sources: [] })),
         apiGet("/gather/items?campaignId=" + encodeURIComponent(id)).catch(() => ({ items: [] })),
+        apiGet("/letter-workflows?campaignId=" + encodeURIComponent(id)).catch(() => ({ workflows: [] })),
         // media has no documented campaignId filter; fetch all and filter client-side.
         apiGet("/media").catch(() => ({})),
       ]);
-      const [refDoc, pieceRes, srcRes, itemRes, mediaRes] = results;
+      const [refDoc, pieceRes, srcRes, itemRes, workflowRes, mediaRes] = results;
 
       const cc = ensureCampaign(id);
       if (cc) {
@@ -196,6 +202,9 @@
 
       const items = (itemRes && itemRes.items) || [];
       state.gatherItems = (state.gatherItems || []).filter((i) => i.campaignId !== id).concat(items);
+
+      const workflows = (workflowRes && workflowRes.workflows) || [];
+      state.letterWorkflows = (state.letterWorkflows || []).filter((w) => w.campaignId !== id).concat(workflows);
 
       const media = mediaArrayFrom(mediaRes);
       if (media) {
@@ -227,6 +236,7 @@
   function normPiece(p) {
     return Object.assign({
       campaignId: state.activeCampaignId, status: "Draft",
+      category: "article", categoryContext: {},
       original: "", packet: null, revision: null, outputs: {}, outputOrder: [],
       createdAt: now(), updatedAt: now(),
     }, p);
@@ -244,9 +254,10 @@
           return;
         }
       }
-      const [campRes, setRes] = await Promise.all([
+      const [campRes, setRes, recipientRes] = await Promise.all([
         apiGet("/campaigns").catch(() => ({ campaigns: [] })),
         apiGet("/settings").catch(() => ({ settings: {} })),
+        apiGet("/recipients").catch(() => ({ recipients: [] })),
       ]);
       const billingPromise = auth && auth.hosted
         ? apiGet("/billing/status").catch(() => null)
@@ -254,6 +265,7 @@
 
       const camps = (campRes && campRes.campaigns) || [];
       state.campaigns = camps.map((c) => ({ id: c.id, name: c.name, slug: c.slug, references: null }));
+      state.recipients = (recipientRes && recipientRes.recipients) || [];
 
       normSettings((setRes && setRes.settings) || setRes || {});
 
@@ -472,6 +484,98 @@
       return m;
     },
 
+    /* ---- Saved recipients + letter workflows ---- */
+    getRecipients() { if (!Array.isArray(state.recipients)) state.recipients = []; return state.recipients; },
+    async refreshRecipients() {
+      const res = await apiGet("/recipients");
+      state.recipients = (res && res.recipients) || [];
+      emit();
+      return state.recipients;
+    },
+    async createRecipient(input) {
+      const res = await apiSend("POST", "/recipients", input || {});
+      const recipient = res && res.recipient;
+      if (recipient) {
+        state.recipients = api.getRecipients().filter((r) => r.id !== recipient.id).concat([recipient])
+          .sort((a, b) => String(a.displayName || "").localeCompare(String(b.displayName || "")));
+        emit();
+      }
+      return recipient;
+    },
+    async updateRecipient(id, patch) {
+      const res = await apiSend("PATCH", "/recipients/" + id, patch || {});
+      const recipient = res && res.recipient;
+      if (recipient) {
+        state.recipients = api.getRecipients().map((r) => r.id === id ? recipient : r);
+        emit();
+      }
+      return recipient;
+    },
+    async deleteRecipient(id) {
+      await apiSend("DELETE", "/recipients/" + id);
+      state.recipients = api.getRecipients().filter((r) => r.id !== id);
+      (state.letterWorkflows || []).forEach((w) => { if (w.recipientId === id) w.recipientId = null; });
+      emit();
+    },
+    getLetterWorkflows(campaignId) {
+      if (!Array.isArray(state.letterWorkflows)) state.letterWorkflows = [];
+      return state.letterWorkflows.filter((w) => w.campaignId === campaignId);
+    },
+    async refreshLetterWorkflows(campaignId) {
+      const res = await apiGet("/letter-workflows?campaignId=" + encodeURIComponent(campaignId));
+      const workflows = (res && res.workflows) || [];
+      state.letterWorkflows = (state.letterWorkflows || []).filter((w) => w.campaignId !== campaignId).concat(workflows);
+      emit();
+      return workflows;
+    },
+    async createLetterWorkflow(input) {
+      const res = await apiSend("POST", "/letter-workflows", input || {});
+      const workflow = res && res.workflow;
+      if (workflow) {
+        state.letterWorkflows = (state.letterWorkflows || []).filter((w) => w.id !== workflow.id).concat([workflow]);
+        emit();
+      }
+      return workflow;
+    },
+    async updateLetterWorkflow(id, patch) {
+      const res = await apiSend("PATCH", "/letter-workflows/" + id, patch || {});
+      const workflow = res && res.workflow;
+      if (workflow) {
+        state.letterWorkflows = (state.letterWorkflows || []).map((w) => w.id === id ? workflow : w);
+        emit();
+      }
+      return workflow;
+    },
+    async deleteLetterWorkflow(id) {
+      await apiSend("DELETE", "/letter-workflows/" + id);
+      state.letterWorkflows = (state.letterWorkflows || []).filter((w) => w.id !== id);
+      emit();
+    },
+    async draftLetterWorkflow(id) {
+      const res = await apiSend("POST", "/letter-workflows/" + id + "/draft", {});
+      const workflow = res && res.workflow;
+      const piece = res && res.piece;
+      if (workflow) {
+        state.letterWorkflows = (state.letterWorkflows || []).filter((w) => w.id !== workflow.id).concat([workflow]);
+      }
+      if (piece) {
+        const normalized = normPiece(piece);
+        state.pieces = (state.pieces || []).filter((p) => p.id !== piece.id).concat([normalized]);
+        state.activePieceId = piece.id;
+      }
+      emit();
+      return res;
+    },
+    openLetterPiece(workflowId) {
+      const workflow = (state.letterWorkflows || []).find((w) => w.id === workflowId);
+      if (workflow && workflow.pieceId) {
+        state.activePieceId = workflow.pieceId;
+        emit();
+        return workflow.pieceId;
+      }
+      return null;
+    },
+
     /* ---- Gather (research ingestion) ---- */
     getGatherSources(cid) { if (!Array.isArray(state.gatherSources)) state.gatherSources = []; return state.gatherSources.filter((s) => s.campaignId === cid); },
     addGatherSource(obj) {
@@ -563,18 +667,26 @@
 
     // campaignId (optional) targets a specific campaign — the Book Writer passes
     // the book's campaign so chapters land in the book, not the active campaign.
-    createPiece(title, campaignId) {
+    createPiece(title, campaignId, opts) {
+      opts = opts || {};
       const cid = campaignId || state.activeCampaignId;
       const id = uid();
       const p = {
         id, campaignId: cid, title: title || "Untitled piece", status: "Draft",
         createdAt: now(), updatedAt: now(),
+        category: opts.category || "article",
+        categoryContext: opts.categoryContext || {},
         original: "", packet: null, revision: null, outputs: {}, outputOrder: [],
       };
       state.pieces.unshift(p);
       state.activePieceId = p.id;
       emit();
-      bg(apiSend("POST", "/campaigns/" + cid + "/pieces", { title: p.title, original: "" }).then((res) => {
+      bg(apiSend("POST", "/campaigns/" + cid + "/pieces", {
+        title: p.title,
+        original: "",
+        category: p.category,
+        categoryContext: p.categoryContext,
+      }).then((res) => {
         const serverPiece = res && res.piece;
         if (!serverPiece || !serverPiece.id) return;
         replacePieceId(id, serverPiece.id);
@@ -590,7 +702,7 @@
       Object.assign(p, patch, { updatedAt: now() });
       emit();
       const body = {};
-      ["title", "original", "status", "packet", "revision", "outputs", "outputOrder"].forEach((k) => {
+      ["title", "original", "status", "category", "categoryContext", "direction", "gateNotes", "packet", "revision", "outputs", "outputOrder"].forEach((k) => {
         if (Object.prototype.hasOwnProperty.call(patch, k)) body[k] = patch[k];
       });
       if (Object.keys(body).length) bg(apiSend("PATCH", "/pieces/" + id, body), "PATCH /pieces/:id");

@@ -9,19 +9,15 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     fs,
+    io::{Read, Write},
+    net::TcpStream,
     path::PathBuf,
     process::{Child, Command},
     sync::Mutex,
     time::{SystemTime, UNIX_EPOCH},
 };
 #[cfg(not(debug_assertions))]
-use std::{
-    io::{Read, Write},
-    net::{TcpListener, TcpStream},
-    process::Stdio,
-    thread,
-    time::Duration,
-};
+use std::{net::TcpListener, process::Stdio, thread, time::Duration};
 use tauri::{
     menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu},
     AppHandle, Emitter, Manager, Url,
@@ -1010,6 +1006,122 @@ fn is_ollama_running() -> bool {
         .unwrap_or(false)
 }
 
+fn is_embedding_only_model_name(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    lower.contains("embed")
+        || lower.contains("embedding")
+        || lower.contains("nomic-embed")
+        || lower.contains("all-minilm")
+}
+
+fn ollama_model_preference(name: &str) -> u8 {
+    let lower = name.to_lowercase();
+    if lower == "gemma4"
+        || lower.starts_with("gemma4:")
+        || lower.starts_with("gemma4-")
+        || lower.starts_with("gemma4.")
+    {
+        0
+    } else if lower == "gemma"
+        || lower.starts_with("gemma:")
+        || lower.starts_with("gemma-")
+        || lower.starts_with("gemma.")
+    {
+        1
+    } else {
+        2
+    }
+}
+
+fn ollama_api_host() -> (String, u16) {
+    let raw = std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "127.0.0.1:11434".into());
+    let without_scheme = raw
+        .trim()
+        .trim_start_matches("http://")
+        .trim_start_matches("https://");
+    let host_port = without_scheme.split('/').next().unwrap_or(without_scheme);
+    let mut parts = host_port.rsplitn(2, ':');
+    let port = parts
+        .next()
+        .and_then(|part| part.parse::<u16>().ok())
+        .unwrap_or(11434);
+    let host = parts
+        .next()
+        .unwrap_or(host_port)
+        .trim_matches('[')
+        .trim_matches(']');
+    (
+        if host.is_empty() { "127.0.0.1" } else { host }.into(),
+        port,
+    )
+}
+
+fn ollama_show_model_metadata(name: &str) -> Option<serde_json::Value> {
+    let (host, port) = ollama_api_host();
+    let body = serde_json::json!({ "model": name }).to_string();
+    let mut stream = TcpStream::connect((host.as_str(), port)).ok()?;
+    let request = format!(
+        "POST /api/show HTTP/1.1\r\nHost: {host}:{port}\r\nContent-Type: application/json\r\nAccept: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    stream.write_all(request.as_bytes()).ok()?;
+    let mut response = String::new();
+    stream.read_to_string(&mut response).ok()?;
+    let (headers, payload) = response.split_once("\r\n\r\n")?;
+    if !headers.starts_with("HTTP/1.1 200") && !headers.starts_with("HTTP/1.0 200") {
+        return None;
+    }
+    serde_json::from_str(payload).ok()
+}
+
+fn is_ollama_completion_capable_model(name: &str) -> bool {
+    if is_embedding_only_model_name(name) {
+        return false;
+    }
+    let Some(json) = ollama_show_model_metadata(name) else {
+        return true;
+    };
+
+    let capabilities = json
+        .get("capabilities")
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str())
+                .map(|item| item.to_lowercase())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if !capabilities.is_empty() {
+        let can_complete = capabilities
+            .iter()
+            .any(|cap| matches!(cap.as_str(), "completion" | "chat" | "generate"));
+        let can_embed = capabilities
+            .iter()
+            .any(|cap| matches!(cap.as_str(), "embedding" | "embed"));
+        return can_complete || !can_embed;
+    }
+
+    let details = json.get("details");
+    let family = details
+        .and_then(|value| value.get("family"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    if is_embedding_only_model_name(family) {
+        return false;
+    }
+    let families = details
+        .and_then(|value| value.get("families"))
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+    !families
+        .iter()
+        .filter_map(|value| value.as_str())
+        .any(is_embedding_only_model_name)
+}
+
 #[tauri::command]
 fn start_ollama_service(app: AppHandle) -> Result<(), String> {
     if is_ollama_running() {
@@ -1062,13 +1174,21 @@ fn list_ollama_models() -> Result<Vec<String>, String> {
         return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
     }
     let text = String::from_utf8_lossy(&out.stdout);
-    Ok(text
+    let mut models = text
         .lines()
         .skip(1)
         .filter_map(|line| line.split_whitespace().next())
         .filter(|name| !name.is_empty())
+        .filter(|name| is_ollama_completion_capable_model(name))
         .map(str::to_string)
-        .collect())
+        .collect::<Vec<_>>();
+    models.sort_by(|a, b| {
+        ollama_model_preference(a)
+            .cmp(&ollama_model_preference(b))
+            .then_with(|| a.cmp(b))
+    });
+    models.dedup();
+    Ok(models)
 }
 
 #[tauri::command]

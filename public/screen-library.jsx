@@ -81,7 +81,7 @@ function ProgressPip({ on, label }) {
   );
 }
 
-function Library({ pieces, campaignName, onOpen, onNew, onDelete }) {
+function Library({ pieces, campaignName, onOpen, onNew, onDelete, onOpenWeave, onOpenStudio }) {
   const [filter, setFilter] = React.useState("All");
   const filters = ["All", ...window.Store.STATUSES];
   const counts = {};
@@ -105,6 +105,21 @@ function Library({ pieces, campaignName, onOpen, onNew, onDelete }) {
           Every piece you've brought to the desk. You set the status by hand as it moves
           from draft to formatted.
         </p>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10, margin: "24px 0 6px" }}>
+          <button className="btn ghost" onClick={onOpenWeave} style={{ justifyContent: "space-between", padding: "13px 14px", border: "1px solid var(--hair)", background: "var(--paper-2)" }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+              <Icon name="sparkle" size={14} /> Weave sources
+            </span>
+            <Icon name="arrowR" size={14} />
+          </button>
+          <button className="btn ghost" onClick={onOpenStudio} style={{ justifyContent: "space-between", padding: "13px 14px", border: "1px solid var(--hair)", background: "var(--paper-2)" }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+              <Icon name="image" size={14} /> Studio media
+            </span>
+            <Icon name="arrowR" size={14} />
+          </button>
+        </div>
 
         <div style={{ display: "flex", gap: 6, margin: "28px 0 8px", flexWrap: "wrap" }}>
           {filters.map((f) => {

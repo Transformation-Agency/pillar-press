@@ -70,12 +70,53 @@ CREATE TABLE IF NOT EXISTS pieces (
   title TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'Draft',
   original TEXT NOT NULL DEFAULT '',
+  category TEXT NOT NULL DEFAULT 'article',
+  category_context_json TEXT NOT NULL DEFAULT '{}',
   packet_json TEXT,
   revision_json TEXT,
   outputs_json TEXT,
   output_order_json TEXT,
   direction TEXT,
   gate_notes_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS letter_recipients (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  display_name TEXT NOT NULL,
+  sort_name TEXT,
+  organization TEXT,
+  role TEXT,
+  relationship TEXT,
+  default_salutation TEXT,
+  default_signoff TEXT,
+  default_tone TEXT,
+  notes TEXT,
+  preferences_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS letter_workflows (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  campaign_id TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  piece_id TEXT REFERENCES pieces(id) ON DELETE SET NULL,
+  recipient_id TEXT REFERENCES letter_recipients(id) ON DELETE SET NULL,
+  recipient_snapshot_json TEXT NOT NULL DEFAULT '{}',
+  purpose TEXT NOT NULL DEFAULT '',
+  desired_outcome TEXT,
+  occasion TEXT,
+  tone TEXT,
+  constraints TEXT,
+  source_context TEXT,
+  uploads_json TEXT NOT NULL DEFAULT '[]',
+  dictation_transcript TEXT,
+  status TEXT NOT NULL DEFAULT 'draft',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -190,6 +231,8 @@ CREATE INDEX IF NOT EXISTS memberships_user_idx ON memberships(user_id);
 CREATE INDEX IF NOT EXISTS memberships_workspace_idx ON memberships(workspace_id);
 CREATE INDEX IF NOT EXISTS style_feedback_campaign_idx ON style_feedback(campaign_id);
 CREATE INDEX IF NOT EXISTS pieces_campaign_idx ON pieces(campaign_id);
+CREATE INDEX IF NOT EXISTS letter_recipients_workspace_idx ON letter_recipients(workspace_id, user_id, display_name);
+CREATE INDEX IF NOT EXISTS letter_workflows_campaign_idx ON letter_workflows(campaign_id, user_id, updated_at);
 CREATE INDEX IF NOT EXISTS gather_sources_campaign_idx ON gather_sources(campaign_id);
 CREATE INDEX IF NOT EXISTS gather_items_campaign_idx ON gather_items(campaign_id);
 CREATE INDEX IF NOT EXISTS gather_items_url_idx ON gather_items(campaign_id, url);

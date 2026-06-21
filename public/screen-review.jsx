@@ -22,6 +22,25 @@ function gateSectionToText(g, r) {
   return out;
 }
 
+function ReviewTraceStrip({ piece }) {
+  const trace = piece && piece.packet && piece.packet.__trace;
+  if (!trace) return null;
+  const warnings = trace.warnings || [];
+  return (
+    <div className="card" style={{ padding: "10px 12px", marginBottom: 14, display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+      <span className="eyebrow">{trace.categoryLabel || trace.category || "Article"}</span>
+      <span className="mono muted" style={{ fontSize: 11 }}>{String(trace.plan || "single_pass").replace(/_/g, " ")}</span>
+      {trace.chunks > 1 && <span className="mono muted" style={{ fontSize: 11 }}>{trace.chunks} chunks</span>}
+      {trace.model && <span className="mono muted" style={{ fontSize: 11 }}>{trace.provider ? trace.provider + " · " : ""}{trace.model}</span>}
+      {warnings.map((w, i) => (
+        <span key={i} className="mono" style={{ fontSize: 11, color: "var(--accent-ink)" }}>
+          {String(w).startsWith("long_input_chunked") ? "Long draft reviewed in chunks" : w}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function FindingItem({ f, idx, gateId, selected, onSelect }) {
   return (
     <div onClick={() => onSelect(gateId, idx, f.anchor)}
@@ -308,6 +327,7 @@ function ReviewTab({ piece }) {
             <div className="eyebrow">Review Packet</div>
             <CopyButton text={() => packetToText(piece)} label="Copy packet" />
           </div>
+          <ReviewTraceStrip piece={piece} />
           <div style={{ display: "flex", gap: 6, marginBottom: 18 }}>
             {["must", "consider", "note"].map((sv) => {
               const on = sevFilter[sv]; const s = window.SEVERITY[sv];

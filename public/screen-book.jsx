@@ -519,7 +519,14 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
   const flash = (m) => { setNote(m); setTimeout(() => setNote(null), 2200); };
 
   const selectChapter = (id) => { saveNow(); setSelectedId(id); setMobilePane("editor"); };
-  const addChapter = (t) => { if (!bookId) return; const p = window.Store.createPiece(t, bookId); setSelectedId(p.id); setPanel("sources"); setMobilePane("editor"); };
+  const addChapter = (t) => {
+    if (!bookId) return;
+    const p = window.Store.createPiece(t, bookId, {
+      category: "book",
+      categoryContext: { bookId, bookTitle: bookCampaign && bookCampaign.name, chapterRole: "Draft chapter" },
+    });
+    setSelectedId(p.id); setPanel("sources"); setMobilePane("editor");
+  };
 
   // Load a chapter draft from an uploaded file (PDF, image, .docx, or text).
   const uploadDraft = async (e) => {
@@ -574,16 +581,35 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
     if (!p.packet) { setErr("Run Review before Revise."); setPanel("review"); return; }
     setBusy("revise"); setErr(null); setPanel("revision");
     setProg({ label: fullRevise ? "Restructuring, then revising…" : "Writing the revision…" });
+    let polling = true;
+    const poll = async () => {
+      while (polling) {
+        await new Promise((r) => setTimeout(r, 900));
+        if (!polling) break;
+        try {
+          const r = await fetch("/api/pieces/" + selectedId + "/revision/status", { headers: { Accept: "application/json" } });
+          if (!r.ok) continue;
+          const st = await r.json();
+          const trace = st.trace;
+          const running = trace && (trace.stages || []).find((s) => s.status === "running");
+          if (running) setProg({ label: running.label });
+          else if (trace && trace.chunks > 1) setProg({ label: "Revising " + trace.chunks + " chunks…" });
+          if (st.done && !st.running) break;
+        } catch (e) {}
+      }
+    };
     try {
       await persistChapter();
+      const pollP = poll();
       const res = await window.GEN.generateRevision(window.Store.getPiece(selectedId), refCtx,
         (done, total) => setProg({ label: `Revising passage ${done}/${total}…` }),
         { mode: fullRevise ? "full" : "light" });
-      const patch = { revision: { text: res.revision, changelog: res.changelog } };
+      polling = false; await pollP;
+      const patch = { revision: { text: res.revision, changelog: res.changelog, trace: res.trace, status: res.status } };
       if (p.status === "Reviewed") patch.status = "Revised";
       window.Store.updatePiece(p.id, patch);
       flash("Proposed revision ready");
-    } catch (e) { setErr(e.message || "Revision failed."); }
+    } catch (e) { polling = false; setErr(e.message || "Revision failed."); }
     setBusy(null); setProg(null);
   };
 

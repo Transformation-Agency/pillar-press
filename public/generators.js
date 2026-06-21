@@ -86,6 +86,8 @@
     return {
       revision: rev.text || "",
       changelog: Array.isArray(rev.changelog) ? rev.changelog : [],
+      trace: rev.trace || null,
+      status: rev.status || "complete",
     };
   }
 

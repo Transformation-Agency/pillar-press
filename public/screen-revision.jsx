@@ -38,6 +38,29 @@ function revisionToText(rev) {
   return out;
 }
 
+function revisionTraceLabel(trace) {
+  if (!trace) return "";
+  const running = (trace.stages || []).find((s) => s.status === "running");
+  if (running) return running.label;
+  if (trace.plan === "chunked_structural_plan_then_polish") return "Staged long-form revision";
+  if (trace.plan === "structural_then_polish") return "Structural revision";
+  return "Passage polish";
+}
+
+function RevisionTraceStrip({ rev }) {
+  const trace = rev && rev.trace;
+  if (!trace) return null;
+  return (
+    <div className="card" style={{ padding: "10px 12px", marginBottom: 14, display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+      <span className="eyebrow">{trace.categoryLabel || trace.category || "Article"}</span>
+      <span className="mono muted" style={{ fontSize: 11 }}>{String(trace.plan || "light_polish").replace(/_/g, " ")}</span>
+      {trace.chunks > 1 && <span className="mono muted" style={{ fontSize: 11 }}>{trace.chunks} chunks</span>}
+      {trace.model && <span className="mono muted" style={{ fontSize: 11 }}>{trace.provider ? trace.provider + " · " : ""}{trace.model}</span>}
+      {(trace.warnings || []).map((w, i) => <span key={i} className="mono" style={{ fontSize: 11, color: "var(--accent-ink)" }}>{String(w).replace(/_/g, " ")}</span>)}
+    </div>
+  );
+}
+
 function RevisionTab({ piece, onUpdate, refCtx }) {
   const [busy, setBusy] = React.useState(false);
   const [prog, setProg] = React.useState(null);
@@ -49,21 +72,39 @@ function RevisionTab({ piece, onUpdate, refCtx }) {
 
   const generate = async () => {
     setBusy(true); setErr(null); setProg(null);
+    let polling = true;
+    const poll = async () => {
+      while (polling) {
+        await new Promise((r) => setTimeout(r, 900));
+        if (!polling) break;
+        try {
+          const r = await fetch("/api/pieces/" + piece.id + "/revision/status", { headers: { Accept: "application/json" } });
+          if (!r.ok) continue;
+          const st = await r.json();
+          const trace = st.trace;
+          if (trace) setProg({ label: revisionTraceLabel(trace), trace });
+          if (st.done && !st.running) break;
+        } catch (e) {}
+      }
+    };
     try {
+      const pollPromise = poll();
       const res = await window.GEN.generateRevision(piece, refCtx, (done, total) => {
-        setProg({ done, total });
+        setProg((p) => Object.assign({}, p || {}, { done, total }));
       }, { mode: full ? "full" : "light" });
-      const revision = { text: res.revision, changelog: res.changelog };
+      polling = false;
+      await pollPromise;
+      const revision = { text: res.revision, changelog: res.changelog, trace: res.trace, status: res.status };
       const patch = { revision };
       if (piece.status === "Reviewed") patch.status = "Revised";
       onUpdate(patch);
-    } catch (e) { setErr(e.message || "Generation failed."); }
+    } catch (e) { polling = false; setErr(e.message || "Generation failed."); }
     setBusy(false); setProg(null);
   };
 
   const busyLabel = prog && prog.total > 1
     ? `Revising passage ${Math.min(prog.done + 1, prog.total)} of ${prog.total}…`
-    : (full ? "Restructuring, then revising…" : "Writing the revision…");
+    : (prog && prog.label) || (full ? "Restructuring, then revising…" : "Writing the revision…");
 
   // Toggle: light firewall pass vs full restructure-then-polish pass.
   const FullToggle = (
@@ -126,6 +167,7 @@ function RevisionTab({ piece, onUpdate, refCtx }) {
               </button>
             </div>
           </div>
+          <RevisionTraceStrip rev={rev} />
           <div className="card" style={{ padding: "34px 40px" }}>
             {mode === "clean"
               ? <div style={{ whiteSpace: "pre-wrap", fontSize: 17.5, lineHeight: 1.78 }}>{rev.text}</div>

@@ -6,7 +6,9 @@ import { getLocalPiece, getLocalReferences, updateLocalPiece } from "@/lib/local
 import { isLocalFirstMode } from "@/lib/local/mode";
 import { getAIForTaskForUser } from "@/lib/llm";
 import { buildRefContext, type ReferencesDoc } from "@/lib/refContext";
-import { generateRevision, type RevisionPacket, type RevisionPieceInput } from "@/lib/revision";
+import { type RevisionPacket, type RevisionPieceInput } from "@/lib/revision";
+import { buildCategoryContext } from "@/lib/editorial/categoryContext";
+import { runCategoryAwareRevision } from "@/lib/editorial/revision";
 import { toErrorResponse } from "@/lib/errors";
 import { completeUsageReservation, failUsageReservation, reserveUsage, type UsageReservation } from "@/lib/billing/usage";
 import type { SessionUser } from "@/lib/auth";
@@ -78,11 +80,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const input: RevisionPieceInput = {
       original: piece.original,
       packet: (piece.packet ?? null) as RevisionPacket | null,
+      categoryContext: buildCategoryContext(piece),
       gateNotes: (piece.gateNotes ?? null) as Record<string, string> | null,
       direction: piece.direction ?? null,
     };
 
     const taskAI = await getAIForTaskForUser("revision", user);
+    const categoryCtx = buildCategoryContext(piece);
     reservation = await reserveUsage({
       user,
       task: "revision",
@@ -92,10 +96,28 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       providerSource: taskAI.providerSource,
       provider: taskAI.provider,
       model: taskAI.model,
-      metadata: taskAI.profileId ? { profileId: taskAI.profileId } : {},
+      metadata: { ...(taskAI.profileId ? { profileId: taskAI.profileId } : {}), category: categoryCtx.category },
       estimatedCredits: mode === "full" ? 3 : 2,
     });
-    const result = await generateRevision(input, refCtx, taskAI.ai, undefined, { mode });
+    const persistProgress = async (revision: unknown) => {
+      if (isLocalFirstMode()) {
+        updateLocalPiece(piece.id, user.id, { revision }, user.workspaceId);
+        return;
+      }
+      await db
+        .update(pieces)
+        .set({ revision, updatedAt: new Date() })
+        .where(and(eq(pieces.id, piece.id), eq(pieces.userId, user.id)));
+    };
+    const { revision: result, callCount } = await runCategoryAwareRevision({
+      piece: input,
+      refCtx,
+      categoryCtx,
+      taskAI,
+      ai: taskAI.ai,
+      opts: { mode },
+      onProgress: persistProgress,
+    });
 
     if (isLocalFirstMode()) {
       const updated = updateLocalPiece(
@@ -108,7 +130,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         user.workspaceId,
       );
       if (!updated) return notFound();
-      await completeUsageReservation(reservation, { actualCredits: mode === "full" ? 3 : 2 });
+      await completeUsageReservation(reservation, { actualCredits: callCount || (mode === "full" ? 3 : 2) });
       return NextResponse.json({ piece: updated });
     }
 
@@ -123,7 +145,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       .where(and(eq(pieces.id, piece.id), eq(pieces.userId, user.id)))
       .returning();
 
-    await completeUsageReservation(reservation, { actualCredits: mode === "full" ? 3 : 2 });
+    await completeUsageReservation(reservation, { actualCredits: callCount || (mode === "full" ? 3 : 2) });
     return NextResponse.json({ piece: updated });
   } catch (err) {
     await failUsageReservation(reservation, err);
