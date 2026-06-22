@@ -105,7 +105,7 @@ function GateRail({ gateStatus, packet, onJump }) {
   );
 }
 
-function DraftTab({ piece, running, gateStatus, onRun, onChangeOriginal, onGoReview }) {
+function DraftTab({ piece, running, gateStatus, reviewError, onRun, onChangeOriginal, onGoReview }) {
   const [text, setText] = React.useState(piece.original || "");
   const fileRef = React.useRef(null);
   const [uploading, setUploading] = React.useState(false);
@@ -169,6 +169,11 @@ function DraftTab({ piece, running, gateStatus, onRun, onChangeOriginal, onGoRev
             )}
             {dirty && !running && <span className="eyebrow" style={{ color: "var(--accent-ink)" }}>unsaved edits</span>}
           </div>
+          {reviewError && !running && (
+            <p role="alert" style={{ marginTop: 12, color: "var(--sev-must)", fontSize: 14.5 }}>
+              {reviewError}
+            </p>
+          )}
         </div>
 
         {/* Gate rail column */}

@@ -299,11 +299,13 @@ function Workspace({ piece, refs, onBack, onGoStudio }) {
   const [tab, setTab] = React.useState("draft");
   const [running, setRunning] = React.useState(false);
   const [gateStatus, setGateStatus] = React.useState({});
+  const [reviewError, setReviewError] = React.useState("");
   const isMobile = window.useIsMobile();
 
   const update = (patch) => window.Store.updatePiece(piece.id, patch);
 
   const runGates = async () => {
+    setReviewError("");
     setRunning(true); setTab("draft");
     // First gate is "running", rest "pending"; the rail advances as completed[] grows.
     const init = {}; window.GATES.forEach((g, i) => init[g.id] = i === 0 ? "running" : "pending"); setGateStatus(init);
@@ -353,8 +355,9 @@ function Workspace({ piece, refs, onBack, onGoStudio }) {
       });
       polling = false;
       await pollPromise;
-      if (!r.ok) throw new Error("review failed: " + r.status);
-      const { packet, status } = await r.json();
+      const body = await r.json().catch(() => null);
+      if (!r.ok) throw new Error((body && (body.error || body.message)) || ("Review failed: " + r.status));
+      const { packet, status } = body || {};
       // All gates done; sync the local cache (packet already persisted server-side).
       const finalStatus = {}; window.GATES.forEach((g) => finalStatus[g.id] = (packet && packet[g.id]) ? "done" : "pending"); setGateStatus(finalStatus);
       window.Store.updatePiece(piece.id, { packet, status: status || "Reviewed" });
@@ -368,6 +371,7 @@ function Workspace({ piece, refs, onBack, onGoStudio }) {
         window.GATES.forEach((g) => { if (next[g.id] === "running") next[g.id] = "error"; });
         return next;
       });
+      setReviewError((e && e.message) || "Review failed.");
       setRunning(false);
     }
   };
@@ -399,7 +403,7 @@ function Workspace({ piece, refs, onBack, onGoStudio }) {
 
       {/* tab body */}
       {tab === "draft" && (
-        <DraftTab piece={piece} running={running} gateStatus={gateStatus}
+        <DraftTab piece={piece} running={running} gateStatus={gateStatus} reviewError={reviewError}
           onRun={runGates} onChangeOriginal={(t) => update({ original: t })}
           onGoReview={() => setTab("review")} />
       )}
