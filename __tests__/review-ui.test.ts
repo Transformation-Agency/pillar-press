@@ -27,6 +27,11 @@ type DictationHarness = {
   state: () => { listening: unknown; msg: unknown };
 };
 
+type ReviewComponentHarness = {
+  component: Record<string, unknown>;
+  store: { updatePiece: ReturnType<typeof vi.fn> };
+};
+
 function createDictationHarness({
   base = "Existing note",
   recognitionAvailable = true,
@@ -98,6 +103,57 @@ return useDictation;`;
   };
 }
 
+function createReviewComponentHarness(kind: "direction" | "commentary", piece: Record<string, unknown>, gateId = "clarity"): ReviewComponentHarness {
+  const source = readFileSync(new URL("../public/screen-review.jsx", import.meta.url), "utf8");
+  const dictationStart = source.indexOf("function useDictation");
+  const commentaryStart = source.indexOf("function CommentaryBox");
+  const directionStart = source.indexOf("function DirectionBox");
+  const reviewTabStart = source.indexOf("function ReviewTab");
+  if (dictationStart === -1 || commentaryStart === -1 || directionStart === -1 || reviewTabStart === -1) {
+    throw new Error("Could not locate review component source.");
+  }
+  const dictationSource = source.slice(dictationStart, commentaryStart);
+  const componentSource = kind === "direction"
+    ? source.slice(directionStart, reviewTabStart)
+    : source.slice(commentaryStart, directionStart);
+  const stopAt = kind === "direction" ? componentSource.lastIndexOf("\n  return (") : componentSource.indexOf("\n  if (!open)");
+  if (stopAt === -1) throw new Error(`Could not locate ${kind} component JSX return.`);
+  const componentName = kind === "direction" ? "DirectionBox" : "CommentaryBox";
+  const exposed = kind === "direction"
+    ? "return { dict, persist, set, value: () => valRef.current };"
+    : "return { dict, open, openAnd, persist, setVal, value: () => valRef.current };";
+  const executableSource = `${dictationSource}
+${componentSource.slice(0, stopAt)}
+  ${exposed}
+}
+return ${componentName};`;
+
+  const states: unknown[] = [];
+  const refs: Array<{ current: unknown }> = [];
+  let stateIndex = 0;
+  let refIndex = 0;
+  const React = {
+    useRef(initial: unknown) {
+      const index = refIndex++;
+      if (!refs[index]) refs[index] = { current: initial };
+      return refs[index];
+    },
+    useState(initial: unknown) {
+      const index = stateIndex++;
+      states[index] = initial;
+      return [states[index], (next: unknown) => { states[index] = next; }] as const;
+    },
+    useEffect(callback: () => unknown) {
+      callback();
+    },
+  };
+  const store = { updatePiece: vi.fn() };
+  const window = { Store: store };
+  const Component = new Function("React", "window", executableSource)(React, window) as (props: Record<string, unknown>) => Record<string, unknown>;
+  const component = kind === "direction" ? Component({ piece }) : Component({ piece, gateId });
+  return { component, store };
+}
+
 describe("review workspace UI wiring", () => {
   it("surfaces readable review route errors in the draft tab", () => {
     const app = readFileSync(new URL("../public/app.jsx", import.meta.url), "utf8");
@@ -128,6 +184,25 @@ describe("review workspace UI wiring", () => {
     expect(revision).toContain("AUTHOR'S CREATIVE DIRECTION");
     expect(revision).toContain("AUTHOR COMMENTARY BY REVIEW SECTION");
     expect(revision).toContain("buildGuidance(piece)");
+  });
+
+  it("executes direction and commentary persistence payloads", () => {
+    const direction = createReviewComponentHarness("direction", { id: "piece-a", direction: "Old direction" });
+    (direction.component.set as (value: string) => void)("  New direction  ");
+    (direction.component.persist as () => void)();
+
+    expect(direction.store.updatePiece).toHaveBeenCalledWith("piece-a", { direction: "New direction" });
+
+    const commentary = createReviewComponentHarness("commentary", {
+      id: "piece-a",
+      gateNotes: { clarity: "Old note", tone: "Keep warm" },
+    }, "clarity");
+    (commentary.component.setVal as (value: string) => void)("  Sharpen the second paragraph  ");
+    (commentary.component.persist as () => void)();
+
+    expect(commentary.store.updatePiece).toHaveBeenCalledWith("piece-a", {
+      gateNotes: { clarity: "Sharpen the second paragraph", tone: "Keep warm" },
+    });
   });
 
   it("wires review dictation for commentary and direction controls", () => {
