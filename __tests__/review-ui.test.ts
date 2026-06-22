@@ -32,6 +32,39 @@ type ReviewComponentHarness = {
   store: { updatePiece: ReturnType<typeof vi.fn> };
 };
 
+function createPacketTextHarness() {
+  const source = readFileSync(new URL("../public/screen-review.jsx", import.meta.url), "utf8");
+  const start = source.indexOf("function packetToText");
+  const end = source.indexOf("function ReviewTraceStrip");
+  if (start === -1 || end === -1) throw new Error("Could not locate packet text helpers.");
+  const executableSource = `${source.slice(start, end)}
+return { packetToText, gateSectionToText };`;
+  const gates = [
+    { id: "strategy", n: 1, name: "Strategy" },
+    { id: "audience", n: 2, name: "Audience" },
+    { id: "tone", n: 3, name: "Tone" },
+    { id: "rigor", n: 4, name: "Rigor" },
+    { id: "stress", n: 5, name: "Stress" },
+    { id: "clarity", n: 6, name: "Clarity" },
+    { id: "self", n: 7, name: "Self" },
+  ];
+  const window = {
+    GATES: gates,
+    SEVERITY: {
+      must: { label: "Must fix" },
+      consider: { label: "Consider" },
+      note: { label: "Note" },
+    },
+  };
+  return {
+    gates,
+    helpers: new Function("window", executableSource)(window) as {
+      packetToText: (piece: Record<string, any>) => string;
+      gateSectionToText: (gate: Record<string, any>, result: Record<string, any>) => string;
+    },
+  };
+}
+
 function createDictationHarness({
   base = "Existing note",
   recognitionAvailable = true,
@@ -155,6 +188,42 @@ return ${componentName};`;
 }
 
 describe("review workspace UI wiring", () => {
+  it("exports full review packet text with gate summaries, severity labels, and findings", () => {
+    const { gates, helpers } = createPacketTextHarness();
+    const piece = {
+      title: "Field memo",
+      packet: {
+        strategy: {
+          summary: "Strategy summary.",
+          findings: [{ severity: "must", title: "Missing throughline", detail: "Tie it to the core idea." }],
+        },
+        clarity: {
+          summary: "Clarity summary.",
+          findings: [{ severity: "consider", title: "Dense paragraph", detail: "Split the setup." }],
+        },
+        self: {
+          summary: "Self summary.",
+          findings: [{ severity: "note", title: "Strong voice", detail: "Keep the first-person line." }],
+        },
+      },
+    };
+
+    const packetText = helpers.packetToText(piece);
+
+    expect(packetText).toContain("REVIEW PACKET — Field memo");
+    expect(packetText).toContain("1. STRATEGY");
+    expect(packetText).toContain("Strategy summary.");
+    expect(packetText).toContain("[Must fix] Missing throughline — Tie it to the core idea.");
+    expect(packetText).toContain("6. CLARITY");
+    expect(packetText).toContain("[Consider] Dense paragraph — Split the setup.");
+    expect(packetText).toContain("7. SELF");
+    expect(packetText).toContain("[Note] Strong voice — Keep the first-person line.");
+    expect(packetText).not.toContain("2. AUDIENCE");
+
+    const clarityText = helpers.gateSectionToText(gates[5], piece.packet.clarity);
+    expect(clarityText).toBe("6. CLARITY\nClarity summary.\n  [Consider] Dense paragraph — Split the setup.\n");
+  });
+
   it("surfaces readable review route errors in the draft tab", () => {
     const app = readFileSync(new URL("../public/app.jsx", import.meta.url), "utf8");
     const workspace = readFileSync(new URL("../public/screen-workspace.jsx", import.meta.url), "utf8");
