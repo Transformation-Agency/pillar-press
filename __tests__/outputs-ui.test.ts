@@ -164,6 +164,46 @@ return OutputCard;`;
   return { component, onCondensed, window };
 }
 
+function createDriveDialogHarness(settings: Record<string, unknown> = { drive: { clientId: "old-client", folderId: "old-folder" } }) {
+  const source = readFileSync(new URL("../public/screen-outputs.jsx", import.meta.url), "utf8");
+  const start = source.indexOf("function DriveDialog");
+  const end = source.indexOf("\n  return (", start);
+  if (start === -1 || end === -1) throw new Error("Could not locate DriveDialog setup source.");
+  const executableSource = `${source.slice(start, end)}
+  return { clientId, folderId, save, setClientId, setFolderId };
+}
+return DriveDialog;`;
+
+  const states: unknown[] = [];
+  let stateIndex = 0;
+  const React = {
+    useState(initial: unknown) {
+      const index = stateIndex++;
+      states[index] = initial;
+      return [states[index], (next: unknown) => { states[index] = typeof next === "function" ? (next as (value: unknown) => unknown)(states[index]) : next; }] as const;
+    },
+  };
+  const window = {
+    Store: {
+      getSettings: vi.fn(() => settings),
+      setDriveConfig: vi.fn(),
+    },
+  };
+  const onClose = vi.fn();
+  const DriveDialog = new Function("React", "window", executableSource)(
+    React,
+    window,
+  ) as (props: Record<string, unknown>) => {
+    clientId: string;
+    folderId: string;
+    save: () => void;
+    setClientId: (value: string) => void;
+    setFolderId: (value: string) => void;
+  };
+  const component = DriveDialog({ onClose });
+  return { component, onClose, state: () => ({ clientId: states[0], folderId: states[1] }), window };
+}
+
 describe("outputs tab UI wiring", () => {
   it("executes platform generation and persists output settings", async () => {
     const piece = { id: "piece-a", original: "Draft text", outputs: {}, outputOrder: [] };
@@ -265,6 +305,33 @@ describe("outputs tab UI wiring", () => {
       m: "Saved to Drive.",
       link: "https://drive.example/file",
     });
+  });
+
+  it("executes Drive link dialog save with trimmed settings", () => {
+    const harness = createDriveDialogHarness({
+      drive: {
+        clientId: "  new-client.apps.googleusercontent.com  ",
+        folderId: "  folder-123  ",
+      },
+    });
+
+    expect(harness.component.clientId).toBe("  new-client.apps.googleusercontent.com  ");
+    expect(harness.component.folderId).toBe("  folder-123  ");
+
+    harness.component.save();
+
+    expect(harness.window.Store.setDriveConfig).toHaveBeenCalledWith({
+      clientId: "new-client.apps.googleusercontent.com",
+      folderId: "folder-123",
+    });
+    expect(harness.onClose).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(harness.window.Store.setDriveConfig.mock.calls)).not.toContain("refresh_token");
+  });
+
+  it("handles missing Drive settings as blank editable fields", () => {
+    const harness = createDriveDialogHarness({});
+
+    expect(harness.state()).toMatchObject({ clientId: "", folderId: "" });
   });
 
   it("executes output-card condense success and readable failure paths", async () => {
