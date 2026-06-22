@@ -212,12 +212,15 @@ function useDictation(getBase, onText, onDone) {
     rec.continuous = true; rec.interimResults = true; rec.lang = "en-US";
     let base = getBase() ? getBase() + " " : "";
     rec.onresult = (e) => {
-      let interim = "", finalAdd = "";
+      let interim = "";
+      const finalParts = [];
       for (let i = e.resultIndex; i < e.results.length; i++) {
-        const t = e.results[i][0].transcript;
-        if (e.results[i].isFinal) finalAdd += t; else interim += t;
+        const t = String(e.results[i][0].transcript || "").trim();
+        if (e.results[i].isFinal) finalParts.push(t);
+        else interim += " " + t;
       }
-      if (finalAdd) base += finalAdd;
+      const finalAdd = finalParts.filter(Boolean).join(" ");
+      if (finalAdd) base = (base + finalAdd + " ").replace(/\s+/g, " ");
       onText((base + interim).replace(/\s+/g, " ").trim());
     };
     rec.onerror = () => { setMsg("Dictation error."); setListening(false); };

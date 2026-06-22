@@ -32,4 +32,19 @@ describe("review workspace UI wiring", () => {
     expect(revision).toContain("AUTHOR COMMENTARY BY REVIEW SECTION");
     expect(revision).toContain("buildGuidance(piece)");
   });
+
+  it("wires review dictation for commentary and direction with readable fallback behavior", () => {
+    const review = readFileSync(new URL("../public/screen-review.jsx", import.meta.url), "utf8");
+
+    expect(review).toContain("function useDictation(getBase, onText, onDone)");
+    expect(review).toContain("window.SpeechRecognition || window.webkitSpeechRecognition");
+    expect(review).toContain("Voice dictation isn't supported in this browser.");
+    expect(review).toContain("rec.continuous = true");
+    expect(review).toContain("rec.interimResults = true");
+    expect(review).toContain("const finalParts = []");
+    expect(review).toContain("finalParts.filter(Boolean).join(\" \")");
+    expect(review).toContain("onDone && onDone()");
+    expect(review).toContain("title=\"Dictate commentary\"");
+    expect(review).toContain("title=\"Dictate direction\"");
+  });
 });
