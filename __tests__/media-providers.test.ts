@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createCipheriv } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -17,6 +17,85 @@ function encryptDesktopSecret(value: string, keyText = Buffer.alloc(32, 9).toStr
 }
 
 describe("media provider status", () => {
+  it("serves sanitized Studio media provider status through the route", async () => {
+    vi.resetModules();
+    const status = {
+      hedra: {
+        id: "hedra",
+        label: "Hedra",
+        configured: true,
+        sources: ["byok"],
+        profileIds: ["hedra-main"],
+        capabilities: ["image", "video", "avatar"],
+        envVars: ["HEDRA_API_KEY"],
+        models: [],
+        setup: { keyLabel: "Hedra API key", summary: "Use Hedra.", helpUrl: "https://www.hedra.com/", modelPlaceholder: "Selected live" },
+      },
+      elevenlabs: {
+        id: "elevenlabs",
+        label: "ElevenLabs",
+        configured: false,
+        capabilities: ["audio"],
+        envVars: ["ELEVENLABS_API_KEY"],
+        models: [],
+        setup: { keyLabel: "ElevenLabs API key", summary: "Use ElevenLabs.", helpUrl: "https://elevenlabs.io/", modelPlaceholder: "eleven-tts-multilingual-v2" },
+      },
+      openai: {
+        id: "openai",
+        label: "OpenAI",
+        configured: true,
+        sources: ["byok"],
+        profileIds: ["openai-main"],
+        capabilities: ["image", "audio"],
+        envVars: ["MEDIA_OPENAI_API_KEY", "OPENAI_API_KEY"],
+        models: [{ id: "gpt-image-1", name: "gpt-image-1", type: "image", provider: "openai", profileId: "openai-main" }],
+        setup: { keyLabel: "OpenAI API key", summary: "Use OpenAI.", helpUrl: "https://platform.openai.com/api-keys", defaultModel: "gpt-image-1", defaultBaseUrl: "https://api.openai.com/v1", modelPlaceholder: "gpt-image-1" },
+      },
+      xai: {
+        id: "xai",
+        label: "xAI / Grok",
+        configured: false,
+        capabilities: ["image"],
+        envVars: ["MEDIA_XAI_API_KEY", "XAI_API_KEY"],
+        models: [],
+        setup: { keyLabel: "xAI API key", summary: "Use xAI.", helpUrl: "https://console.x.ai/", modelPlaceholder: "grok-2-image" },
+      },
+      customImage: {
+        id: "custom-image",
+        label: "Custom image endpoint",
+        configured: false,
+        capabilities: ["image"],
+        envVars: ["MEDIA_IMAGE_BASE_URL", "MEDIA_IMAGE_API_KEY"],
+        models: [],
+        setup: { keyLabel: "Custom image API key", summary: "Use a custom endpoint.", helpUrl: "https://platform.openai.com/docs/api-reference/images", modelPlaceholder: "Provider model name" },
+      },
+      providers: [] as Array<{ id: string }>,
+    };
+    status.providers = [status.hedra, status.elevenlabs, status.openai, status.xai, status.customImage];
+    const getMediaProviderStatusForUser = vi.fn(async () => status);
+
+    vi.doMock("@/lib/auth", () => ({
+      requireUser: vi.fn(async () => ({ id: "user_1", workspaceId: "workspace_1", role: "author" })),
+    }));
+    vi.doMock("@/lib/mediaProviders", () => ({ getMediaProviderStatusForUser }));
+
+    const { GET } = await import("../app/api/media/providers/route");
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(getMediaProviderStatusForUser).toHaveBeenCalledWith({ id: "user_1", workspaceId: "workspace_1", role: "author" });
+    expect(body.openai).toMatchObject({
+      configured: true,
+      sources: ["byok"],
+      profileIds: ["openai-main"],
+      capabilities: ["image", "audio"],
+    });
+    expect(body.providers.map((provider: { id: string }) => provider.id)).toEqual(["hedra", "elevenlabs", "openai", "xai", "custom-image"]);
+    expect(JSON.stringify(body)).not.toContain("secret");
+    expect(JSON.stringify(body)).not.toContain("sk-");
+  });
+
   it("reports optional media providers without returning secrets", () => {
     const status = getMediaProviderStatus({
       NODE_ENV: "test",
