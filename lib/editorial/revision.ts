@@ -169,16 +169,22 @@ export async function runCategoryAwareRevision(input: {
     const effectiveMode = plan.plan === "light_polish" ? "light" : mode;
     stage(trace, effectiveMode === "full" ? "structure" : "polish", effectiveMode === "full" ? "Restructuring and polishing" : "Polishing passages", "running");
     let progressCalls = 0;
+    let progressTotal = plan.chunks.length;
     const result = await generateRevision(
       { ...input.piece, categoryContext: input.categoryCtx } as RevisionPieceInput,
       withCategoryPrompt(input.refCtx, input.categoryCtx),
       input.ai,
       async (done, total) => {
         progressCalls = Math.max(progressCalls, done);
+        progressTotal = Math.max(progressTotal, total);
         await input.onProgress?.({ text: "", changelog: [], status: "running", trace: { ...trace, chunks: total } });
       },
       { mode: effectiveMode },
     );
+    trace.chunks = Math.max(trace.chunks, progressTotal);
+    if (trace.chunks > 1 && !trace.warnings.some((warning) => /^revision_chunked:/.test(warning))) {
+      trace.warnings.push(`revision_chunked:${trace.chunks}`);
+    }
     callCount = (effectiveMode === "full" ? 1 : 0) + Math.max(progressCalls, plan.chunks.length);
     stage(trace, effectiveMode === "full" ? "structure" : "polish", effectiveMode === "full" ? "Restructuring and polishing" : "Polishing passages", "succeeded");
     return { revision: { ...result, status: "complete", trace }, callCount };

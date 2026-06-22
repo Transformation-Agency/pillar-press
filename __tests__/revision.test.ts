@@ -262,6 +262,40 @@ describe("category-aware revision orchestration", () => {
     expect(result.revision.trace?.warnings.some((w) => /^long_input_staged/.test(w))).toBe(true);
     expect(calls[0].system).toContain("DESK WORKFLOW CONTEXT");
   });
+
+  it("reports the actual light-polish passage count in the final trace", async () => {
+    const calls: { prompt: string; system?: string }[] = [];
+    const ai: AI = {
+      calls,
+      async text(prompt: string, opts?: { system?: string }) {
+        calls.push({ prompt, system: opts?.system });
+        return "@@REVISION@@\nRevised passage.\n@@CHANGELOG@@\n- [C1] tightened the passage :: clearer\n@@END@@";
+      },
+      async json() { throw new Error("not used"); },
+      async complete() { throw new Error("not used"); },
+      extractJSON: () => null,
+      repairJSON: () => null,
+    } as AI & { calls: typeof calls };
+    const paragraph = Array(180).fill("chapter").join(" ");
+    const categoryCtx = buildCategoryContext({ category: "book", categoryContext: { chapterRole: "trust chapter" } });
+
+    const result = await runCategoryAwareRevision({
+      piece: { original: `${paragraph}\n\n${paragraph}`, packet: FULL_PACKET },
+      refCtx: "REF",
+      categoryCtx,
+      taskAI: { provider: "ollama", model: "gemma4:26b-mlx" },
+      ai,
+      opts: { mode: "light" },
+    });
+
+    expect(result.revision.trace).toMatchObject({
+      category: "book",
+      plan: "light_polish",
+      chunks: 2,
+    });
+    expect(result.revision.trace?.warnings).toContain("revision_chunked:2");
+    expect(calls).toHaveLength(2);
+  });
 });
 
 /* ------------------------------------------------------------------ *
