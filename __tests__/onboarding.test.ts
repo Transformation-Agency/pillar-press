@@ -898,6 +898,40 @@ describe("browser onboarding action registry", () => {
     expect(saved).toBe(false);
   });
 
+  it("saves approved setup preferences through the local reference store", async () => {
+    const window = loadBrowserActions();
+    let savedPatch: any = null;
+    window.Store = {
+      updateReferences: async (patch: any) => {
+        savedPatch = patch;
+      },
+    };
+
+    const patch = {
+      setupProfile: {
+        version: 1,
+        approvedAt: "2026-06-21T00:00:00.000Z",
+        profile: {
+          brand: "kings_press",
+          communicationPlatforms: [{ platform: "LinkedIn", priority: "primary" }],
+          permissions: { mayPublishOrSend: false },
+        },
+      },
+      strategy: { body: "Shape drafts for LinkedIn." },
+      voiceRules: { rules: ["Keep the original cadence."] },
+      redLines: { rules: ["Do not publish automatically."] },
+    };
+
+    const result = await window.KP_ONBOARDING_ACTIONS.savePreferences(patch);
+
+    expect(result).toMatchObject({
+      intent: "save_preferences",
+      status: "succeeded",
+      data: { saved: true },
+    });
+    expect(savedPatch).toEqual(patch);
+  });
+
   it("reuses an existing focus name instead of creating a duplicate campaign", async () => {
     const window = loadBrowserActions();
     let created = false;
