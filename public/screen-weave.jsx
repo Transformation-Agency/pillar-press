@@ -111,21 +111,6 @@ function BriefRow({ label, text }) {
   );
 }
 
-function briefToText(result) {
-  const b = result.brief, m = result.mapping;
-  return [
-    `WEAVE BRIEF — ${b.workingTitle}`,
-    `\nCore message: ${b.coreMessage}`,
-    `\nConcept: ${b.concept}`,
-    `\nConnective thread: ${b.thread}`,
-    (b.tensions || []).length ? `\nTensions:\n` + b.tensions.map((t) => "• " + t).join("\n") : "",
-    `\nThroughlines: ` + (m.mapped || []).map((x) => `${x.tag} (${x.how})`).join("; "),
-    m.nearestAngle ? `Nearest angle: ${m.nearestAngle}` : "",
-    `Audience: ${m.audience || "—"}  ·  Register: ${m.register || "—"}`,
-    `\nStructure:\n` + b.structure.map((s, i) => `${i + 1}. ${s.section} — ${s.purpose}`).join("\n"),
-  ].filter(Boolean).join("\n");
-}
-
 function Weave({ weave, refCtx, onOpenPiece }) {
   const sources = weave.sources || [];
   const result = weave.result;
@@ -173,8 +158,7 @@ function Weave({ weave, refCtx, onOpenPiece }) {
   };
 
   const sendToLibrary = () => {
-    const p = window.Store.createPiece(result.brief.workingTitle, null, { original: result.draft });
-    onOpenPiece(p.id);
+    window.WEAVE.sendResultToLibrary(result, onOpenPiece);
   };
 
   return (
@@ -245,7 +229,7 @@ function Weave({ weave, refCtx, onOpenPiece }) {
           </div>
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0,1fr) minmax(0,1fr)", gap: isMobile ? 18 : 28, alignItems: "start", marginTop: isMobile ? 18 : 28 }}>
-            <BriefView result={result} onCopyBrief={() => briefToText(result)} />
+            <BriefView result={result} onCopyBrief={() => window.WEAVE.briefToText(result)} />
             <div className="card" style={{ padding: "30px 34px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
                 <div className="eyebrow">Unified draft</div>
