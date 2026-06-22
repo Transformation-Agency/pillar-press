@@ -141,6 +141,130 @@ describe("hosted LLM provider utility routes", () => {
     expect(createAIFromConfig).not.toHaveBeenCalled();
   });
 
+  it("tests a local OpenAI-compatible provider without requiring an API key", async () => {
+    const text = vi.fn(async () => " OK\n");
+    const createAIFromConfig = vi.fn(() => ({ text }));
+
+    vi.doMock("@/lib/auth", () => ({
+      requireUser: vi.fn(async () => ({ id: "local_user", role: "owner" })),
+    }));
+    vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => true }));
+    vi.doMock("@/lib/billing/entitlements", () => ({ requireByokProviderAccess: vi.fn() }));
+    vi.doMock("@/lib/providerSettings", () => ({ getHostedProviderProfile: vi.fn() }));
+    vi.doMock("@/lib/llm", async () => {
+      const actual = await vi.importActual<any>("@/lib/llm");
+      return { ...actual, createAIFromConfig };
+    });
+
+    const { POST } = await import("../app/api/llm/test/route");
+    const res = await POST(new Request("http://test.local/api/llm/test", {
+      method: "POST",
+      body: JSON.stringify({
+        provider: "openai-compatible",
+        model: "ai/gemma3",
+        baseUrl: "http://localhost:12434/engines/v1/",
+      }),
+    }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body).toEqual({
+      ok: true,
+      provider: "openai-compatible",
+      model: "ai/gemma3",
+      sample: "OK",
+    });
+    expect(createAIFromConfig).toHaveBeenCalledWith(expect.objectContaining({
+      provider: "openai-compatible",
+      model: "ai/gemma3",
+      baseUrl: "http://localhost:12434/engines/v1",
+      apiKey: undefined,
+      maxTokens: 256,
+    }));
+    expect(text).toHaveBeenCalledWith("Reply with exactly OK. No punctuation, no extra words.");
+  });
+
+  it("tests a saved local provider profile without returning stored credentials", async () => {
+    const text = vi.fn(async () => "OK");
+    const createAIFromConfig = vi.fn(() => ({ text }));
+    const getHostedProviderProfile = vi.fn(async () => ({
+      id: "openai-main",
+      label: "OpenAI Main",
+      provider: "openai",
+      model: "gpt-4o-mini",
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: "sk-saved-provider-secret",
+    }));
+
+    vi.doMock("@/lib/auth", () => ({
+      requireUser: vi.fn(async () => ({ id: "local_user", role: "owner" })),
+    }));
+    vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => true }));
+    vi.doMock("@/lib/billing/entitlements", () => ({ requireByokProviderAccess: vi.fn() }));
+    vi.doMock("@/lib/providerSettings", () => ({ getHostedProviderProfile }));
+    vi.doMock("@/lib/llm", async () => {
+      const actual = await vi.importActual<any>("@/lib/llm");
+      return { ...actual, createAIFromConfig };
+    });
+
+    const { POST } = await import("../app/api/llm/test/route");
+    const res = await POST(new Request("http://test.local/api/llm/test", {
+      method: "POST",
+      body: JSON.stringify({
+        provider: "openai",
+        model: "gpt-4o-mini",
+        profileId: "openai-main",
+      }),
+    }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body).toEqual({
+      ok: true,
+      provider: "openai",
+      model: "gpt-4o-mini",
+      sample: "OK",
+    });
+    expect(getHostedProviderProfile).toHaveBeenCalledWith({ id: "local_user", role: "owner" }, "openai-main");
+    expect(createAIFromConfig).toHaveBeenCalledWith(expect.objectContaining({
+      provider: "openai",
+      apiKey: "sk-saved-provider-secret",
+    }));
+    expect(JSON.stringify(body)).not.toContain("sk-saved-provider-secret");
+  });
+
+  it("returns a readable validation error before testing cloud providers without keys", async () => {
+    const createAIFromConfig = vi.fn();
+
+    vi.doMock("@/lib/auth", () => ({
+      requireUser: vi.fn(async () => ({ id: "local_user", role: "owner" })),
+    }));
+    vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => true }));
+    vi.doMock("@/lib/billing/entitlements", () => ({ requireByokProviderAccess: vi.fn() }));
+    vi.doMock("@/lib/providerSettings", () => ({ getHostedProviderProfile: vi.fn() }));
+    vi.doMock("@/lib/llm", async () => {
+      const actual = await vi.importActual<any>("@/lib/llm");
+      return { ...actual, createAIFromConfig };
+    });
+
+    const { POST } = await import("../app/api/llm/test/route");
+    const res = await POST(new Request("http://test.local/api/llm/test", {
+      method: "POST",
+      body: JSON.stringify({
+        provider: "gemini",
+        model: "gemini-2.5-flash",
+      }),
+    }));
+    const body = await res.json();
+
+    expect(res.status).toBe(422);
+    expect(body).toEqual({
+      error: "Add an API key before testing this provider.",
+      code: "validation",
+    });
+    expect(createAIFromConfig).not.toHaveBeenCalled();
+  });
+
   it("requires BYOK provider access before listing hosted LLM models", async () => {
     const getHostedProviderProfile = vi.fn();
     const fetch = vi.fn();
