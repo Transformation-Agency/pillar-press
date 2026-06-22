@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { toErrorResponse } from "@/lib/errors";
 import { safeRecordAuditEvent } from "@/lib/audit";
+import { isLocalFirstMode } from "@/lib/local/mode";
 import {
   BillingError,
   appBaseUrl,
@@ -16,6 +17,15 @@ const PortalBody = z.object({});
 
 export async function POST(req: Request) {
   try {
+    if (isLocalFirstMode()) {
+      await req.json().catch(() => ({}));
+      throw new BillingError(
+        409,
+        "billing_unavailable_local_desktop",
+        "Hosted Stripe customer portal is not available in local desktop mode.",
+      );
+    }
+
     const user = await requireBillingUser();
     PortalBody.parse(await req.json().catch(() => ({})));
     const customer = await getOrCreateBillingCustomer({

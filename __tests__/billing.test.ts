@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 beforeEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
+  vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: vi.fn(() => false) }));
   delete process.env.STRIPE_PRICE_PRO;
 });
 
@@ -380,6 +381,43 @@ describe("hosted billing helpers", () => {
 });
 
 describe("hosted billing status API", () => {
+  it("returns local desktop billing status without hosted Stripe dependencies", async () => {
+    vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: vi.fn(() => true) }));
+
+    const { GET } = await import("../app/api/billing/status/route");
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body).toMatchObject({
+      plans: [{
+        id: "local-desktop",
+        name: "Local Desktop",
+        stripeConfigured: false,
+      }],
+      subscription: {
+        id: "local-desktop",
+        planId: "local-desktop",
+        status: "active",
+      },
+      access: { allowed: true },
+      lifecycle: {
+        planId: "local-desktop",
+        status: "active",
+        primaryAction: "none",
+        upgradeRecommended: false,
+      },
+    });
+    expect(body.usage.dimensions).toMatchObject({
+      llm: { used: 0, limit: 0, remaining: 0 },
+      gather: { used: 0, limit: 0, remaining: 0 },
+      media: { used: 0, limit: 0, remaining: 0 },
+      storage: { used: 0, limit: 0, remaining: 0 },
+    });
+    expect(JSON.stringify(body)).not.toContain("sk_");
+    expect(JSON.stringify(body)).not.toContain("whsec_");
+  });
+
   it("returns plans, subscription, entitlement, and usage summary", async () => {
     const user = { id: "user_1", workspaceId: "workspace_1", role: "author" };
     const subscription = {
@@ -584,6 +622,38 @@ describe("hosted billing status API", () => {
 });
 
 describe("hosted billing session audit events", () => {
+  it("returns readable local desktop errors instead of starting checkout or portal sessions", async () => {
+    vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: vi.fn(() => true) }));
+    vi.doMock("@/lib/billing/stripe", () => ({
+      BillingError: TestBillingError,
+    }));
+
+    const checkoutRoute = await import("../app/api/billing/checkout/route");
+    const portalRoute = await import("../app/api/billing/portal/route");
+
+    const checkout = await checkoutRoute.POST(new Request("http://test.local/api/billing/checkout", {
+      method: "POST",
+      body: JSON.stringify({ planId: "pro" }),
+    }));
+    const checkoutBody = await checkout.json();
+    const portal = await portalRoute.POST(new Request("http://test.local/api/billing/portal", {
+      method: "POST",
+      body: "{}",
+    }));
+    const portalBody = await portal.json();
+
+    expect(checkout.status).toBe(409);
+    expect(checkoutBody).toEqual({
+      error: "Hosted Stripe checkout is not available in local desktop mode.",
+      code: "billing_unavailable_local_desktop",
+    });
+    expect(portal.status).toBe(409);
+    expect(portalBody).toEqual({
+      error: "Hosted Stripe customer portal is not available in local desktop mode.",
+      code: "billing_unavailable_local_desktop",
+    });
+  });
+
   it("records sanitized audit metadata when creating a Checkout session", async () => {
     const createCheckout = vi.fn(async () => ({ id: "cs_123", url: "https://checkout.stripe.test/session" }));
     const getOrCreateBillingCustomer = vi.fn(async () => ({
