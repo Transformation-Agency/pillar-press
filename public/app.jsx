@@ -744,6 +744,13 @@ function DesktopOnboarding() {
     });
   };
   const suggestedOllamaModels = () => fallbackOllamaModels.filter((m) => !models.includes(m));
+  const uniqueModelOptions = (items) => Array.from(new Set((items || []).map((item) => String(item || "").trim()).filter(Boolean)));
+  const modelOptionsForSetup = () => {
+    if (setupMode === "ollama") return uniqueModelOptions(models.concat(suggestedOllamaModels()));
+    if (setupMode === "docker") return uniqueModelOptions(dockerModels);
+    const listed = cloudListedModels[cloudProvider] || [];
+    return uniqueModelOptions(listed.length ? listed : (cloudModels[cloudProvider] || []));
+  };
 
   const profilesFromSettings = (settings) => {
     if (settings && Array.isArray(settings.profiles) && settings.profiles.length) return settings.profiles;
@@ -1256,7 +1263,8 @@ function DesktopOnboarding() {
   const running = !!(status && status.running);
   const hasModel = models.includes(model);
   const ollamaSuggestions = suggestedOllamaModels();
-  const ollamaOptionValues = setupMode === "ollama" ? models.concat(ollamaSuggestions) : [];
+  const visibleModelOptions = modelOptionsForSetup();
+  const listedCloudCount = setupMode === "cloud" && cloudListedModels[cloudProvider] ? cloudListedModels[cloudProvider].length : 0;
   const canUseModel = setupMode === "ollama"
     ? installed && running && hasModel && !!model.trim()
     : setupMode === "docker"
@@ -1336,7 +1344,13 @@ function DesktopOnboarding() {
         {setupMode === "cloud" && (
           <div style={{ marginTop: 18, display: "grid", gap: 10 }}>
             <div style={{ display: "grid", gridTemplateColumns: "minmax(160px, 0.6fr) minmax(220px, 1fr)", gap: 8 }}>
-              <select className="field" value={cloudProvider} onChange={(e) => { setCloudProvider(e.target.value); setModel(((cloudListedModels[e.target.value] || cloudModels[e.target.value]) || [""])[0]); setProfileName(""); }}>
+              <select className="field" value={cloudProvider} onChange={(e) => {
+                const nextProvider = e.target.value;
+                const listed = cloudListedModels[nextProvider] || [];
+                setCloudProvider(nextProvider);
+                setModel(((listed.length ? listed : cloudModels[nextProvider]) || [""])[0] || "");
+                setProfileName("");
+              }}>
                 <option value="openai">OpenAI / ChatGPT</option>
                 <option value="anthropic">Anthropic</option>
                 <option value="gemini">Gemini</option>
@@ -1352,12 +1366,7 @@ function DesktopOnboarding() {
         )}
         <label className="eyebrow" style={{ display: "block", marginTop: 18, marginBottom: 6 }}>Model</label>
         <div style={{ display: "grid", gridTemplateColumns: "minmax(180px, 1fr) repeat(4, max-content)", gap: 8, alignItems: "center", overflowX: "auto" }}>
-          <input className="field" value={model} onChange={(e) => setModel(e.target.value)} list="desktop-model-options" placeholder={setupMode === "cloud" ? "model name" : "gemma4:26b-mlx"} />
-          <datalist id="desktop-model-options">
-            {setupMode === "ollama" && ollamaOptionValues.map((m) => <option key={m} value={m} label={models.includes(m) ? "Installed local model" : "Suggested pull"} />)}
-            {setupMode === "docker" && dockerModels.map((m) => <option key={m} value={m} />)}
-            {setupMode === "cloud" && ((cloudListedModels[cloudProvider] && cloudListedModels[cloudProvider].length ? cloudListedModels[cloudProvider] : cloudModels[cloudProvider]) || []).map((m) => <option key={m} value={m} />)}
-          </datalist>
+          <input className="field" value={model} onChange={(e) => setModel(e.target.value)} placeholder={setupMode === "cloud" ? "model name" : "gemma4:26b-mlx"} />
           {setupMode === "ollama" && (
             <button className="btn" disabled={busy || !installed || !running || hasModel || !model.trim()} onClick={pullModel}><Icon name="doc" size={14} /> Pull</button>
           )}
@@ -1369,6 +1378,32 @@ function DesktopOnboarding() {
           )}
           <button className="btn" disabled={busy || !canUseModel} onClick={testModel}><Icon name="play" size={14} /> Test</button>
           <button className="btn primary" disabled={busy || !canUseModel} onClick={finish}>Use model</button>
+          <div style={{ gridColumn: "1 / -1", minWidth: 0 }}>
+            <div className="muted" style={{ fontSize: 12.5, margin: "2px 0 8px" }}>
+              {setupMode === "cloud" && listedCloudCount
+                ? "Showing " + listedCloudCount + " fetched " + providerLabel(cloudProvider) + " models."
+                : setupMode === "cloud"
+                  ? "Showing " + providerLabel(cloudProvider) + " defaults until you list models."
+                  : setupMode === "docker"
+                    ? (visibleModelOptions.length ? "Showing Docker Model Runner results." : "List Docker models or type a model name.")
+                    : (models.length ? "Showing installed Ollama models and suggested pulls." : "Refresh Ollama models or type a model to pull.")}
+            </div>
+            {!!visibleModelOptions.length && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 132, overflowY: "auto", padding: 2 }}>
+                {visibleModelOptions.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    className={"btn sm " + (m === model ? "" : "ghost")}
+                    onClick={() => setModel(m)}
+                    title={m}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
         <label className="eyebrow" style={{ display: "block", marginTop: 14, marginBottom: 6 }}>Profile name</label>
         <input className="field" value={profileName} onChange={(e) => setProfileName(e.target.value)} placeholder={providerLabel(setupMode === "cloud" ? cloudProvider : setupMode === "docker" ? "openai-compatible" : "ollama") + " " + (model || "model")} />

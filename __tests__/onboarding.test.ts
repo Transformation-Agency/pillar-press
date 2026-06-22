@@ -220,13 +220,15 @@ describe("desktop OpenAI media provider setup wiring", () => {
       expect(source).not.toContain("'babbage-2'");
     }
 
-    expect(appSource).toContain('list="desktop-model-options"');
-    expect(appSource).toContain('cloudListedModels[cloudProvider] && cloudListedModels[cloudProvider].length ? cloudListedModels[cloudProvider] : cloudModels[cloudProvider]');
-    expect(appSource).toContain('setupMode === "ollama" && ollamaOptionValues.map');
+    expect(appSource).toContain("const modelOptionsForSetup = () =>");
+    expect(appSource).toContain("visibleModelOptions.map");
+    expect(appSource).toContain("Showing \" + providerLabel(cloudProvider) + \" defaults until you list models.");
 
-    expect(helperSource).toContain('const options = mode === "ollama" ? listedModels.concat(ollamaSuggestions) : (listedModels.length ? listedModels : (cloudModels[provider] || []));');
+    expect(helperSource).toContain('const options = uniqueModelOptions(mode === "ollama" ? listedModels.concat(ollamaSuggestions) : (listedModels.length ? listedModels : (cloudModels[provider] || [])));');
     expect(helperSource).toContain('setModel(localModels[0] || "gemma4:26b-mlx")');
     expect(helperSource).toContain('setModel("gpt-4o-mini")');
+    expect(helperSource).toContain("Available models");
+    expect(helperSource).not.toContain('list="kp-inline-model-options"');
   });
 
   it("main desktop setup saves OpenAI as an encrypted desktop media provider", () => {
@@ -952,8 +954,19 @@ describe("browser onboarding action registry", () => {
     expect(failure).toMatchObject({
       intent: "request_voice",
       status: "failed",
-      error: "Microphone access is not available here.",
+      error: "Microphone access is not available here. You can keep typing instead.",
     });
+  });
+
+  it("exposes context-file preference analysis and regeneration in setup helper", () => {
+    const source = readFileSync(new URL("../public/setup-helper.jsx", import.meta.url), "utf8");
+
+    expect(source).toContain("async function addContextFiles");
+    expect(source).toContain("async function analyzeContextFiles");
+    expect(source).toContain("window.extractFileText(file)");
+    expect(source).toContain("Pass \" + (index + 1) + \" of \" + contextFiles.length");
+    expect(source).toContain("Synthesize the final editable onboarding profile from the file passes.");
+    expect(source).toContain("Regenerate");
   });
 
   it("posts setup profile extraction for review without saving references", async () => {
