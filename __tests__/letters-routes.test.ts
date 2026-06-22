@@ -42,6 +42,64 @@ afterEach(async () => {
 });
 
 describe("letter workflow routes", () => {
+  it("creates, lists, updates, and deletes saved recipients in local-first mode", async () => {
+    const recipientsRoute = await import("../app/api/recipients/route");
+
+    const createResponse = await recipientsRoute.POST(new Request("http://test.local/api/recipients", {
+      method: "POST",
+      body: JSON.stringify({
+        displayName: "Ada Lovelace",
+        organization: "Analytical Engine Society",
+        role: "Reviewer",
+        relationship: "Longtime collaborator",
+        defaultSalutation: "Dear Ada,",
+        defaultSignoff: "Warmly,",
+        defaultTone: "Warm, precise, and direct.",
+        notes: "Prefers the ask in the first paragraph.",
+        preferences: { structure: "short opening, context, ask" },
+      }),
+    }));
+    const created = await createResponse.json();
+
+    expect(createResponse.status).toBe(201);
+    expect(created.recipient).toMatchObject({
+      displayName: "Ada Lovelace",
+      relationship: "Longtime collaborator",
+      defaultTone: "Warm, precise, and direct.",
+      preferences: { structure: "short opening, context, ask" },
+    });
+
+    const listResponse = await recipientsRoute.GET();
+    const listed = await listResponse.json();
+    expect(listed.recipients.map((recipient: { displayName: string }) => recipient.displayName)).toEqual(["Ada Lovelace"]);
+
+    const recipientRoute = await import("../app/api/recipients/[id]/route");
+    const patchResponse = await recipientRoute.PATCH(new Request("http://test.local/api/recipients/" + created.recipient.id, {
+      method: "PATCH",
+      body: JSON.stringify({
+        defaultTone: "Tender and concrete.",
+        notes: "Mention the shared draft before the ask.",
+      }),
+    }), { params: Promise.resolve({ id: created.recipient.id }) });
+    const patched = await patchResponse.json();
+
+    expect(patchResponse.status).toBe(200);
+    expect(patched.recipient).toMatchObject({
+      id: created.recipient.id,
+      defaultTone: "Tender and concrete.",
+      notes: "Mention the shared draft before the ask.",
+    });
+
+    const deleteResponse = await recipientRoute.DELETE(new Request("http://test.local/api/recipients/" + created.recipient.id), {
+      params: Promise.resolve({ id: created.recipient.id }),
+    });
+    expect(deleteResponse.status).toBe(200);
+
+    const afterDelete = await recipientsRoute.GET();
+    const remaining = await afterDelete.json();
+    expect(remaining.recipients).toEqual([]);
+  });
+
   it("creates a normal campaign piece from a local-first letter workflow", async () => {
     const {
       createLocalCampaign,
