@@ -250,4 +250,88 @@ describe("hosted LLM provider utility routes", () => {
     expect(res.status).toBe(200);
     expect(body.models).toEqual(["qwen2.5:latest"]);
   });
+
+  it("lists Gemini generateContent models and strips models/ prefixes", async () => {
+    mockLocalRouteUser();
+    const fetch = vi.fn(async () => new Response(JSON.stringify({
+      models: [
+        { name: "models/gemini-2.5-pro", supportedGenerationMethods: ["generateContent"] },
+        { name: "models/gemini-embedding-001", supportedGenerationMethods: ["embedContent"] },
+        { name: "models/gemini-2.5-flash" },
+      ],
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetch);
+
+    const { POST } = await import("../app/api/llm/models/route");
+    const res = await POST(new Request("http://test.local/api/llm/models", {
+      method: "POST",
+      body: JSON.stringify({
+        provider: "gemini",
+        apiKey: "gemini-key",
+      }),
+    }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.models).toEqual(["gemini-2.5-flash", "gemini-2.5-pro"]);
+    expect(fetch).toHaveBeenCalledWith("https://generativelanguage.googleapis.com/v1beta/models", expect.objectContaining({
+      headers: expect.objectContaining({ "x-goog-api-key": "gemini-key" }),
+    }));
+  });
+
+  it("lists Docker Model Runner via OpenAI-compatible local base URL", async () => {
+    mockLocalRouteUser();
+    const fetch = vi.fn(async () => new Response(JSON.stringify({
+      data: [{ id: "ai/gemma3" }],
+      models: [{ model: "ai/llama3.2" }, "ai/qwen2.5"],
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetch);
+
+    const { POST } = await import("../app/api/llm/models/route");
+    const res = await POST(new Request("http://test.local/api/llm/models", {
+      method: "POST",
+      body: JSON.stringify({
+        provider: "openai-compatible",
+        baseUrl: "http://localhost:12434/engines/v1",
+      }),
+    }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.models).toEqual(["ai/gemma3", "ai/llama3.2", "ai/qwen2.5"]);
+    expect(fetch).toHaveBeenCalledWith("http://localhost:12434/engines/v1/models", expect.objectContaining({
+      headers: { Accept: "application/json" },
+    }));
+  });
+
+  it("lists xAI and Anthropic models with provider-specific auth headers", async () => {
+    mockLocalRouteUser();
+    const fetch = vi.fn(async (url: string) => new Response(JSON.stringify({
+      data: url.includes("api.x.ai") ? [{ id: "grok-4.3" }] : undefined,
+      models: url.includes("anthropic") ? [{ id: "claude-sonnet-4-5" }] : undefined,
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetch);
+
+    const { POST } = await import("../app/api/llm/models/route");
+    const xai = await POST(new Request("http://test.local/api/llm/models", {
+      method: "POST",
+      body: JSON.stringify({ provider: "xai", apiKey: "xai-key" }),
+    }));
+    const anthropic = await POST(new Request("http://test.local/api/llm/models", {
+      method: "POST",
+      body: JSON.stringify({ provider: "anthropic", apiKey: "anthropic-key" }),
+    }));
+
+    expect(await xai.json()).toEqual({ models: ["grok-4.3"] });
+    expect(await anthropic.json()).toEqual({ models: ["claude-sonnet-4-5"] });
+    expect(fetch).toHaveBeenCalledWith("https://api.x.ai/v1/models", expect.objectContaining({
+      headers: expect.objectContaining({ Authorization: "Bearer xai-key" }),
+    }));
+    expect(fetch).toHaveBeenCalledWith("https://api.anthropic.com/v1/models", expect.objectContaining({
+      headers: expect.objectContaining({
+        "x-api-key": "anthropic-key",
+        "anthropic-version": "2023-06-01",
+      }),
+    }));
+  });
 });
