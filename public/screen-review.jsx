@@ -226,7 +226,7 @@ function useDictation(getBase, onText, onDone) {
     rec.onerror = () => { setMsg("Dictation error."); setListening(false); };
     rec.onend = () => { setListening(false); recRef.current = null; onDone && onDone(); };
     recRef.current = rec; setMsg(null); setListening(true);
-    try { rec.start(); } catch (e) { setListening(false); }
+    try { rec.start(); } catch (e) { recRef.current = null; setListening(false); setMsg("Dictation could not start."); }
   };
   return { listening, msg, toggle };
 }
