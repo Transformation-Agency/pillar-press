@@ -671,19 +671,20 @@
       opts = opts || {};
       const cid = campaignId || state.activeCampaignId;
       const id = uid();
+      const initialOriginal = typeof opts.original === "string" ? opts.original : "";
       const p = {
         id, campaignId: cid, title: title || "Untitled piece", status: "Draft",
         createdAt: now(), updatedAt: now(),
         category: opts.category || "article",
         categoryContext: opts.categoryContext || {},
-        original: "", packet: null, revision: null, outputs: {}, outputOrder: [],
+        original: initialOriginal, packet: null, revision: null, outputs: {}, outputOrder: [],
       };
       state.pieces.unshift(p);
       state.activePieceId = p.id;
       emit();
       bg(apiSend("POST", "/campaigns/" + cid + "/pieces", {
         title: p.title,
-        original: "",
+        original: initialOriginal,
         category: p.category,
         categoryContext: p.categoryContext,
       }).then((res) => {

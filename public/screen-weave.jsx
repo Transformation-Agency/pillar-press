@@ -173,8 +173,7 @@ function Weave({ weave, refCtx, onOpenPiece }) {
   };
 
   const sendToLibrary = () => {
-    const p = window.Store.createPiece(result.brief.workingTitle);
-    window.Store.updatePiece(p.id, { original: result.draft });
+    const p = window.Store.createPiece(result.brief.workingTitle, null, { original: result.draft });
     onOpenPiece(p.id);
   };
 

@@ -203,9 +203,9 @@ function Desk({ campaignId, onOpenPiece }) {
       .join("\n\n");
     const piece = window.Store.createPiece(active.title || "Desk thread", campaignId, {
       category: "other",
+      original: seed,
       categoryContext: { communicationGoal: active.title || "Desk thread" },
     });
-    window.Store.updatePiece(piece.id, { original: seed });
     onOpenPiece && onOpenPiece(piece.id);
   }
 
