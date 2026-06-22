@@ -15,4 +15,21 @@ describe("review workspace UI wiring", () => {
     expect(workspace).toContain("role=\"alert\"");
     expect(workspace).toContain("{reviewError}");
   });
+
+  it("persists author direction and gate commentary for revision guidance", () => {
+    const review = readFileSync(new URL("../public/screen-review.jsx", import.meta.url), "utf8");
+    const store = readFileSync(new URL("../public/store.js", import.meta.url), "utf8");
+    const revision = readFileSync(new URL("../lib/revision.ts", import.meta.url), "utf8");
+
+    expect(review).toContain("function DirectionBox({ piece })");
+    expect(review).toContain("window.Store.updatePiece(piece.id, { direction: valRef.current.trim() })");
+    expect(review).toContain("function CommentaryBox({ piece, gateId })");
+    expect(review).toContain("window.Store.updatePiece(piece.id, { gateNotes: Object.assign({}, piece.gateNotes || {}, { [gateId]: v }) })");
+    expect(review).toContain("MicButton listening={dict.listening}");
+    expect(store).toContain("\"direction\"");
+    expect(store).toContain("\"gateNotes\"");
+    expect(revision).toContain("AUTHOR'S CREATIVE DIRECTION");
+    expect(revision).toContain("AUTHOR COMMENTARY BY REVIEW SECTION");
+    expect(revision).toContain("buildGuidance(piece)");
+  });
 });
