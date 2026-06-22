@@ -188,8 +188,13 @@ describe("letter workflow routes", () => {
       createLocalLetterWorkflow,
       getLocalLetterWorkflow,
       getLocalPiece,
+      listLocalPieces,
+      updateLocalReferences,
     } = await import("@/lib/local/database");
     const campaign = createLocalCampaign({ name: "Letter Campaign" });
+    updateLocalReferences(campaign.id, {
+      patch: { strategy: { body: "Campaign voice: spare, warm, and concrete." } },
+    });
     const recipient = createLocalLetterRecipient({
       displayName: "Ada Lovelace",
       defaultTone: "Warm and precise.",
@@ -201,6 +206,9 @@ describe("letter workflow routes", () => {
       recipientSnapshot: { displayName: recipient.displayName, notes: recipient.notes },
       purpose: "Ask Ada to review the launch letter.",
       desiredOutcome: "Receive feedback this week.",
+      tone: "Grateful and direct.",
+      occasion: "Launch week",
+      constraints: "Open with thanks, then make one clear ask.",
       uploads: [{ name: "example.md", text: "An older letter sample." }],
       dictationTranscript: "Mention gratitude.",
     });
@@ -220,12 +228,34 @@ describe("letter workflow routes", () => {
       category: "letter",
       original: expect.stringContaining("Dear Ada"),
     });
-    expect(data.piece.categoryContext).toMatchObject({ letterWorkflowId: workflow!.id, recipientId: recipient.id });
+    expect(data.piece.categoryContext).toMatchObject({
+      letterWorkflowId: workflow!.id,
+      recipientId: recipient.id,
+      recipientName: "Ada Lovelace",
+      toneGuidance: "Grateful and direct.",
+      desiredOutcome: "Receive feedback this week.",
+      occasion: "Launch week",
+      constraints: "Open with thanks, then make one clear ask.",
+    });
     expect(getLocalPiece(data.piece.id, "local-owner")?.original).toContain("Thank you for reading");
     expect(getLocalLetterWorkflow(workflow!.id)?.pieceId).toBe(data.piece.id);
+    expect(getLocalLetterWorkflow(workflow!.id)?.status).toBe("drafted");
+    expect(listLocalPieces(campaign.id)).toHaveLength(1);
     expect(capturedPrompt).toContain("Ask Ada to review the launch letter.");
+    expect(capturedPrompt).toContain("Campaign voice: spare, warm, and concrete.");
     expect(capturedPrompt).toContain("example.md");
     expect(capturedPrompt).toContain("Recipient snapshot");
+
+    const refreshResponse = await POST(new Request("http://test.local/api/letter-workflows/" + workflow!.id + "/draft", {
+      method: "POST",
+      body: JSON.stringify({ refreshPiece: true }),
+    }), { params: Promise.resolve({ id: workflow!.id }) });
+    const refreshed = await refreshResponse.json();
+
+    expect(refreshResponse.status).toBe(200);
+    expect(refreshed.piece.id).toBe(data.piece.id);
+    expect(refreshed.workflow.pieceId).toBe(data.piece.id);
+    expect(listLocalPieces(campaign.id)).toHaveLength(1);
   });
 
   it("rejects secret-like recipient fields before storage", async () => {
