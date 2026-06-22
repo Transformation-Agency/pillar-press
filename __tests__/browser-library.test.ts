@@ -37,7 +37,7 @@ describe("browser Library helpers", () => {
     expect(store).toContain("async function hydrateLibraryPieces()");
     expect(store).toContain('apiGet("/campaigns/" + id + "/pieces")');
     expect(store).toContain("hydrateLibraryPieces,");
-    expect(screen).toContain('const [scope, setScope] = React.useState("active")');
+    expect(screen).toContain('const [scope, setScope] = React.useState("all")');
     expect(screen).toContain("window.Store.hydrateLibraryPieces().catch(() => null)");
     expect(screen).toContain('"All focuses"');
     expect(screen).toContain("const scopedPieces = scope === \"all\" ? (allPieces || []) : pieces");

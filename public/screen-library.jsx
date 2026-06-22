@@ -84,7 +84,7 @@ function ProgressPip({ on, label }) {
 
 function Library({ pieces, campaignName, campaigns, allPieces, activeCampaignId, onOpen, onNew, onDelete, onOpenWeave, onOpenStudio, onSwitchCampaign }) {
   const [filter, setFilter] = React.useState("All");
-  const [scope, setScope] = React.useState("active");
+  const [scope, setScope] = React.useState("all");
   React.useEffect(() => {
     if (window.Store && window.Store.hydrateLibraryPieces) {
       window.Store.hydrateLibraryPieces().catch(() => null);
