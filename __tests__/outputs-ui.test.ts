@@ -76,6 +76,70 @@ return OutputsTab;`;
   return { component, onUpdate, window };
 }
 
+function createOutputCardHarness(options: {
+  condenseError?: Error;
+  condenseResult?: { draftPost: string };
+} = {}) {
+  const source = readFileSync(new URL("../public/screen-outputs.jsx", import.meta.url), "utf8");
+  const start = source.indexOf("function OutputCard");
+  const end = source.indexOf("\n  return (", start);
+  if (start === -1 || end === -1) throw new Error("Could not locate OutputCard setup source.");
+  const executableSource = `${source.slice(start, end)}
+  return { condense, undo, state: () => ({ condensing: __states[0], cerr: __states[1], ratio: __states[2], hist: __states[3] }) };
+}
+return OutputCard;`;
+
+  const states: unknown[] = [];
+  let stateIndex = 0;
+  const React = {
+    useState(initial: unknown) {
+      const index = stateIndex++;
+      states[index] = initial;
+      return [states[index], (next: unknown) => { states[index] = typeof next === "function" ? (next as (value: unknown) => unknown)(states[index]) : next; }] as const;
+    },
+  };
+  const window = {
+    useIsMobile: () => false,
+    GEN: {
+      condenseOutput: vi.fn(async () => {
+        if (options.condenseError) throw options.condenseError;
+        return options.condenseResult || { draftPost: "Short post" };
+      }),
+    },
+  };
+  const onCondensed = vi.fn();
+  const OutputCard = new Function("React", "window", "__states", executableSource)(
+    React,
+    window,
+    states,
+  ) as (props: Record<string, unknown>) => {
+    condense: () => Promise<void>;
+    undo: () => void;
+    state: () => { condensing: unknown; cerr: unknown; ratio: unknown; hist: unknown };
+  };
+  const output = {
+    platform: "Substack",
+    selectedAudience: "Builders",
+    throughlineTag: "memo",
+    strategicPurpose: "Explain the work.",
+    draftPost: "Long post",
+    hooks: [],
+    ctas: [],
+    mediaRec: "Image",
+    riskCheck: "Clear",
+    relatedOffering: "Newsletter",
+    followUp: "Reply",
+  };
+  const component = OutputCard({
+    o: output,
+    derivation: "from Source",
+    pieceId: "piece-a",
+    platform: "substack",
+    onCondensed,
+  });
+  return { component, onCondensed, window };
+}
+
 describe("outputs tab UI wiring", () => {
   it("executes platform generation and persists output settings", async () => {
     const piece = { id: "piece-a", original: "Draft text", outputs: {}, outputOrder: [] };
@@ -142,6 +206,30 @@ describe("outputs tab UI wiring", () => {
         substack: { platform: "Substack", draftPost: "Short post", hooks: ["Keep"] },
         facebook: { platform: "Facebook", draftPost: "Other post" },
       },
+    });
+  });
+
+  it("executes output-card condense success and readable failure paths", async () => {
+    const harness = createOutputCardHarness();
+
+    await harness.component.condense();
+
+    expect(harness.window.GEN.condenseOutput).toHaveBeenCalledWith("piece-a", "substack", 0.4);
+    expect(harness.onCondensed).toHaveBeenCalledWith("substack", "Short post");
+    expect(harness.component.state()).toMatchObject({
+      condensing: false,
+      cerr: null,
+      hist: ["Long post"],
+    });
+
+    const failed = createOutputCardHarness({ condenseError: new Error("Condense model offline") });
+    await failed.component.condense();
+
+    expect(failed.onCondensed).not.toHaveBeenCalled();
+    expect(failed.component.state()).toMatchObject({
+      condensing: false,
+      cerr: "Condense model offline",
+      hist: [],
     });
   });
 });
