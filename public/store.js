@@ -307,6 +307,9 @@
       emit(); // render shell with campaign list + settings
 
       if (activeId) await hydrateCampaign(activeId);
+      // Preload restored/legacy pieces in other focuses so Library's default
+      // "All focuses" view does not appear empty after a database restore.
+      await hydrateLibraryPieces();
       state.billing = await billingPromise;
       const deskRes = await apiGet("/desk/session").catch(() => ({ session: { state: {} } }));
       const deskState = deskRes && deskRes.session && deskRes.session.state;
