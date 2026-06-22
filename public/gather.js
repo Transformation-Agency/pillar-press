@@ -296,5 +296,44 @@
     ].join("\n");
   }
 
-  window.GATHER = { SOURCE_KINDS, kindList, runGather, itemToText, listSchedules, syncSchedules, saveSchedule, deleteSchedule, startScheduler };
+  function summaryTitle(s) {
+    const k = SOURCE_KINDS[s.kind] || { label: s.kind };
+    return (s.label || (s.query ? `${k.label}: ${s.query}` : `${k.label} brief`)).slice(0, 60);
+  }
+
+  function sendGatherItemsToWeave(items) {
+    const created = (items || []).filter(Boolean).map((it) =>
+      window.Store.addWeaveSource((it.title || "Source").slice(0, 48), itemToText(it))
+    );
+    if (created.length) window.__weaveSourcesAdded = true;
+    return created;
+  }
+
+  function sendGatherSummaryToWeave(summary, options) {
+    if (!summary) return null;
+    const created = window.Store.addWeaveSource(summaryTitle(summary), summary.text || "");
+    window.__weaveSourcesAdded = true;
+    if (!options || options.remove !== false) window.Store.removeGatherSummary(summary.id);
+    return created;
+  }
+
+  function sendGatherSummariesToWeave(summaries, options) {
+    return (summaries || []).filter(Boolean).map((s) => sendGatherSummaryToWeave(s, options));
+  }
+
+  window.GATHER = {
+    SOURCE_KINDS,
+    kindList,
+    runGather,
+    itemToText,
+    summaryTitle,
+    sendGatherItemsToWeave,
+    sendGatherSummaryToWeave,
+    sendGatherSummariesToWeave,
+    listSchedules,
+    syncSchedules,
+    saveSchedule,
+    deleteSchedule,
+    startScheduler,
+  };
 })();
