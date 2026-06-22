@@ -300,6 +300,7 @@ function Workspace({ piece, refs, onBack, onGoStudio }) {
   const [running, setRunning] = React.useState(false);
   const [gateStatus, setGateStatus] = React.useState({});
   const [reviewError, setReviewError] = React.useState("");
+  const [reviewJumpGate, setReviewJumpGate] = React.useState(null);
   const isMobile = window.useIsMobile();
 
   const update = (patch) => window.Store.updatePiece(piece.id, patch);
@@ -362,7 +363,7 @@ function Workspace({ piece, refs, onBack, onGoStudio }) {
       const finalStatus = {}; window.GATES.forEach((g) => finalStatus[g.id] = (packet && packet[g.id]) ? "done" : "pending"); setGateStatus(finalStatus);
       window.Store.updatePiece(piece.id, { packet, status: status || "Reviewed" });
       setRunning(false);
-      if (packet && Object.keys(packet).length) setTab("review");
+      if (packet && Object.keys(packet).length) { setReviewJumpGate(null); setTab("review"); }
     } catch (e) {
       polling = false;
       console.error("Review failed:", e);
@@ -378,6 +379,10 @@ function Workspace({ piece, refs, onBack, onGoStudio }) {
 
   const refCtx = window.AI.refContext(refs);
   const findingCount = piece.packet ? window.GATES.reduce((n, g) => n + (piece.packet[g.id] ? piece.packet[g.id].findings.length : 0), 0) : null;
+  const openReview = (gateId = null) => {
+    setReviewJumpGate(gateId || null);
+    setTab("review");
+  };
 
   const tabs = [
     { id: "draft", label: "Draft" },
@@ -398,17 +403,17 @@ function Workspace({ piece, refs, onBack, onGoStudio }) {
           </div>
           <StatusPipeline piece={piece} onSet={(s) => window.Store.setStatus(piece.id, s)} />
         </div>
-        <Tabs tabs={tabs} active={tab} onChange={setTab} />
+        <Tabs tabs={tabs} active={tab} onChange={(next) => { if (next !== "review") setReviewJumpGate(null); setTab(next); }} />
       </div>
 
       {/* tab body */}
       {tab === "draft" && (
         <DraftTab piece={piece} running={running} gateStatus={gateStatus} reviewError={reviewError}
           onRun={runGates} onChangeOriginal={(t) => update({ original: t })}
-          onGoReview={() => setTab("review")} />
+          onGoReview={openReview} />
       )}
       {tab === "review" && (piece.packet
-        ? <ReviewTab piece={piece} />
+        ? <ReviewTab piece={piece} jumpGate={reviewJumpGate} />
         : <EmptyState icon="flag" title="No review packet yet" body="Paste a draft on the Draft tab and run the seven gates. The packet appears here, beside your original." />)}
       {tab === "revision" && <RevisionTab piece={piece} onUpdate={update} refCtx={refCtx} />}
       {tab === "outputs" && <OutputsTab piece={piece} onUpdate={update} refCtx={refCtx} onGoStudio={onGoStudio} />}

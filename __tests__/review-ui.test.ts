@@ -255,6 +255,22 @@ describe("review workspace UI wiring", () => {
     expect(revision).toContain("buildGuidance(piece)");
   });
 
+  it("wires the draft gate rail to the matching review packet section", () => {
+    const app = readFileSync(new URL("../public/app.jsx", import.meta.url), "utf8");
+    const review = readFileSync(new URL("../public/screen-review.jsx", import.meta.url), "utf8");
+    const workspace = readFileSync(new URL("../public/screen-workspace.jsx", import.meta.url), "utf8");
+
+    expect(app).toContain("const [reviewJumpGate, setReviewJumpGate]");
+    expect(app).toContain("const openReview = (gateId = null)");
+    expect(app).toContain("onGoReview={openReview}");
+    expect(app).toContain("<ReviewTab piece={piece} jumpGate={reviewJumpGate} />");
+    expect(workspace).toContain("onClick={() => res && onJump && onJump(g.id)}");
+    expect(review).toContain("function ReviewTab({ piece, jumpGate })");
+    expect(review).toContain("document.getElementById(\"gate-\" + jumpGate)");
+    expect(review).toContain("target.scrollIntoView({ behavior: \"smooth\", block: \"start\" })");
+    expect(review).toContain("const highlighted = jumpedGate === g.id");
+  });
+
   it("executes direction and commentary persistence payloads", () => {
     const direction = createReviewComponentHarness("direction", { id: "piece-a", direction: "Old direction" });
     (direction.component.set as (value: string) => void)("  New direction  ");

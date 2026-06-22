@@ -293,12 +293,29 @@ function DirectionBox({ piece }) {
   );
 }
 
-function ReviewTab({ piece }) {
+function ReviewTab({ piece, jumpGate }) {
   const isMobile = window.useIsMobile();
   const [sel, setSel] = React.useState({ key: null, anchor: null, bump: 0 });
   const [sevFilter, setSevFilter] = React.useState({ must: true, consider: true, note: true });
+  const [jumpedGate, setJumpedGate] = React.useState(null);
   const [mView, setMView] = React.useState("packet"); // mobile: packet | original
   const packet = piece.packet || {};
+
+  React.useEffect(() => {
+    if (!jumpGate) return undefined;
+    const run = () => {
+      const target = document.getElementById("gate-" + jumpGate);
+      if (!target) return;
+      target.scrollIntoView({ behavior: "smooth", block: "start" });
+      setJumpedGate(jumpGate);
+      window.setTimeout(() => setJumpedGate((gate) => gate === jumpGate ? null : gate), 1800);
+    };
+    const raf = window.requestAnimationFrame ? window.requestAnimationFrame(run) : window.setTimeout(run, 0);
+    return () => {
+      if (window.cancelAnimationFrame && typeof raf === "number") window.cancelAnimationFrame(raf);
+      else window.clearTimeout(raf);
+    };
+  }, [jumpGate, piece.id]);
 
   const onSelect = (gateId, idx, anchor) => {
     setSel((s) => ({ key: gateId + ":" + idx, anchor: anchor || null, bump: s.bump + 1 }));
@@ -351,8 +368,12 @@ function ReviewTab({ piece }) {
           {window.GATES.map((g) => {
             const r = packet[g.id]; if (!r) return null;
             const filtered = { ...r, findings: r.findings.filter((f) => sevFilter[f.severity]) };
+            const highlighted = jumpedGate === g.id;
             return (
-              <div key={g.id} id={"gate-" + g.id} style={{ marginBottom: 26 }}>
+              <div key={g.id} id={"gate-" + g.id} style={{
+                marginBottom: 26, borderRadius: 8, background: highlighted ? "var(--accent-soft)" : "transparent",
+                boxShadow: highlighted ? "0 0 0 2px var(--accent)" : "none", transition: "background 0.2s, box-shadow 0.2s",
+              }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", borderBottom: "1px solid var(--hair-2)", paddingBottom: 8, marginBottom: 12 }}>
                   <h3 style={{ fontSize: 21 }}><span className="mono" style={{ fontSize: 13, color: "var(--ink-3)", marginRight: 8 }}>{String(g.n).padStart(2, "0")}</span>{g.name}</h3>
                   <CopyButton text={() => gateSectionToText(g, r)} label="" />
