@@ -37,16 +37,6 @@ async function bookApi(method, path, body) {
   }
   return data;
 }
-/* tolerate raw objects or { piece } / { data } / { result } wrappers */
-function bookUnwrap(res, key) {
-  if (!res) return null;
-  if (res[key] != null) return res[key];
-  if (res.piece && res.piece[key] != null) return res.piece[key];
-  if (res.data && res.data[key] != null) return res.data[key];
-  if (res.result && res.result[key] != null) return res.result[key];
-  return null;
-}
-
 function bookHostedBilling() {
   const auth = window.KP_AUTH && window.KP_AUTH.snapshot ? window.KP_AUTH.snapshot() : null;
   if (!auth || !auth.hosted) return null;
@@ -569,9 +559,7 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
       const pollP = poll();
       const res = await bookApi("POST", "/api/pieces/" + selectedId + "/review");
       polling = false; await pollP;
-      const packet = bookUnwrap(res, "packet");
-      const status = (res && res.status) || (res && res.piece && res.piece.status) || "Reviewed";
-      window.Store.updatePiece(selectedId, { packet, status });
+      window.Store.updatePiece(selectedId, window.BOOK.reviewPatchFromResult(res));
       flash("Review packet ready");
     } catch (e) { polling = false; setErr(e.message || "Review failed."); }
     setBusy(null); setProg(null);
@@ -607,9 +595,7 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
         (done, total) => setProg({ label: `Revising passage ${done}/${total}…` }),
         { mode: fullRevise ? "full" : "light" });
       polling = false; await pollP;
-      const patch = { revision: { text: res.revision, changelog: res.changelog, trace: res.trace, status: res.status } };
-      if (p.status === "Reviewed") patch.status = "Revised";
-      window.Store.updatePiece(p.id, patch);
+      window.Store.updatePiece(p.id, window.BOOK.revisionPatchFromResult(p, res));
       flash("Proposed revision ready");
     } catch (e) { polling = false; setErr(e.message || "Revision failed."); }
     setBusy(null); setProg(null);
@@ -621,9 +607,9 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
     const active = window.GEN.PLATFORMS.map((pl) => pl.id);
     try {
       await persistChapter();
-      const { outputs, order } = await window.GEN.generateOutputs(window.Store.getPiece(selectedId), active, BOOK_PLAT_AUD, refCtx,
+      const result = await window.GEN.generateOutputs(window.Store.getPiece(selectedId), active, BOOK_PLAT_AUD, refCtx,
         (pid, status) => setProg({ label: `Generating ${pid}…` }));
-      window.Store.updatePiece(selectedId, { outputs, outputOrder: order });
+      window.Store.updatePiece(selectedId, window.BOOK.outputsPatchFromResult(result));
       flash("Platform outputs ready");
     } catch (e) { setErr(e.message || "Output generation failed."); }
     setBusy(null); setProg(null);
@@ -632,7 +618,9 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
   const acceptRevision = () => {
     const p = window.Store.getPiece(selectedId);
     if (!p || !p.revision) return;
-    window.Store.updatePiece(p.id, { original: p.revision.text, status: "Revised" });
+    const patch = window.BOOK.acceptRevisionPatch(p);
+    if (!patch) return;
+    window.Store.updatePiece(p.id, patch);
     setDraft(p.revision.text);
     flash("Revision accepted into the draft");
   };

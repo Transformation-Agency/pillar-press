@@ -77,6 +77,41 @@
     return current.trim() ? current.trimEnd() + "\n\n" + incoming : incoming;
   }
 
+  function unwrapResult(res, key) {
+    return (res && res[key]) || (res && res.piece && res.piece[key]) || null;
+  }
+
+  function reviewPatchFromResult(res) {
+    const packet = unwrapResult(res, "packet");
+    const status = (res && res.status) || (res && res.piece && res.piece.status) || "Reviewed";
+    return { packet, status };
+  }
+
+  function revisionPatchFromResult(piece, result) {
+    const patch = {
+      revision: {
+        text: (result && result.revision) || "",
+        changelog: (result && result.changelog) || [],
+        trace: (result && result.trace) || null,
+        status: (result && result.status) || "complete",
+      },
+    };
+    if (piece && piece.status === "Reviewed") patch.status = "Revised";
+    return patch;
+  }
+
+  function outputsPatchFromResult(result) {
+    return {
+      outputs: (result && result.outputs) || {},
+      outputOrder: (result && result.order) || [],
+    };
+  }
+
+  function acceptRevisionPatch(piece) {
+    if (!piece || !piece.revision || !piece.revision.text) return null;
+    return { original: piece.revision.text, status: "Revised" };
+  }
+
   window.BOOK = {
     PREF_KEY,
     resolveBookSelection,
@@ -89,5 +124,9 @@
     isChapterDirty,
     saveChapterDraft,
     mergeUploadedDraft,
+    reviewPatchFromResult,
+    revisionPatchFromResult,
+    outputsPatchFromResult,
+    acceptRevisionPatch,
   };
 })();

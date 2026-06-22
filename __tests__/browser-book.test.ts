@@ -115,4 +115,50 @@ describe("browser Book campaign helpers", () => {
     expect(book.mergeUploadedDraft("", "Uploaded prose")).toBe("Uploaded prose");
     expect(book.mergeUploadedDraft("Current prose\n\n", "Uploaded prose")).toBe("Current prose\n\nUploaded prose");
   });
+
+  it("builds review, revision, output, and accept patches for the chapter workflow", () => {
+    const book = loadBrowserBook({});
+
+    expect(book.reviewPatchFromResult({
+      piece: {
+        packet: { clarity: { summary: "Good chapter." } },
+        status: "Reviewed",
+      },
+    })).toEqual({
+      packet: { clarity: { summary: "Good chapter." } },
+      status: "Reviewed",
+    });
+
+    expect(book.revisionPatchFromResult(
+      { id: "chapter_1", status: "Reviewed" },
+      {
+        revision: "Revised chapter text",
+        changelog: [{ finding: "C1", change: "tightened" }],
+        trace: { category: "book", categoryLabel: "Book chapter", plan: "chunked_structural_plan_then_polish" },
+        status: "complete",
+      },
+    )).toEqual({
+      revision: {
+        text: "Revised chapter text",
+        changelog: [{ finding: "C1", change: "tightened" }],
+        trace: { category: "book", categoryLabel: "Book chapter", plan: "chunked_structural_plan_then_polish" },
+        status: "complete",
+      },
+      status: "Revised",
+    });
+
+    expect(book.outputsPatchFromResult({
+      outputs: { substack: { draftPost: "Book chapter output" } },
+      order: ["substack"],
+    })).toEqual({
+      outputs: { substack: { draftPost: "Book chapter output" } },
+      outputOrder: ["substack"],
+    });
+
+    expect(book.acceptRevisionPatch({ revision: { text: "Accepted chapter" } })).toEqual({
+      original: "Accepted chapter",
+      status: "Revised",
+    });
+    expect(book.acceptRevisionPatch({ revision: null })).toBeNull();
+  });
 });
