@@ -4,8 +4,24 @@ import { join } from "node:path";
 import { spawn } from "node:child_process";
 
 const root = process.cwd();
-const appPath = join(root, "src-tauri", "target", "release", "bundle", "macos", "King's Press Editorial Desk.app");
-const dmgPath = join(root, "src-tauri", "target", "release", "bundle", "dmg", "King's Press Editorial Desk_0.1.0_aarch64.dmg");
+
+function optionalArg(name: string) {
+  const index = process.argv.indexOf(name);
+  return index >= 0 ? process.argv[index + 1]?.trim() || null : null;
+}
+
+function optionalEnv(name: string) {
+  const value = process.env[name]?.trim();
+  return value ? value : null;
+}
+
+const verifyTarget = optionalArg("--target") || optionalEnv("KINGS_PRESS_VERIFY_TARGET");
+const targetRoot = verifyTarget
+  ? join(root, "src-tauri", "target", verifyTarget, "release")
+  : join(root, "src-tauri", "target", "release");
+const artifactArch = verifyTarget === "x86_64-apple-darwin" ? "x64" : "aarch64";
+const appPath = join(targetRoot, "bundle", "macos", "King's Press Editorial Desk.app");
+const dmgPath = join(targetRoot, "bundle", "dmg", `King's Press Editorial Desk_0.1.0_${artifactArch}.dmg`);
 const appResources = join(appPath, "Contents", "Resources");
 const requireDeveloperId =
   process.argv.includes("--require-developer-id") || process.env.KINGS_PRESS_REQUIRE_DEVELOPER_ID === "true";

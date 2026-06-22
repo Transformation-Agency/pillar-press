@@ -4,13 +4,24 @@ import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 
 const root = process.cwd();
-const appPath = join(root, "src-tauri", "target", "release", "bundle", "macos", "King's Press Editorial Desk.app");
-const dmgPath = join(root, "src-tauri", "target", "release", "bundle", "dmg", "King's Press Editorial Desk_0.1.0_aarch64.dmg");
+
+function optionalArg(name: string) {
+  const index = process.argv.indexOf(name);
+  return index >= 0 ? process.argv[index + 1]?.trim() || null : null;
+}
 
 function required(name: string) {
   const value = process.env[name]?.trim();
   return value ? value : null;
 }
+
+const buildTarget = optionalArg("--target") || required("KINGS_PRESS_BUILD_TARGET");
+const targetRoot = buildTarget
+  ? join(root, "src-tauri", "target", buildTarget, "release")
+  : join(root, "src-tauri", "target", "release");
+const artifactArch = buildTarget === "x86_64-apple-darwin" ? "x64" : "aarch64";
+const appPath = join(targetRoot, "bundle", "macos", "King's Press Editorial Desk.app");
+const dmgPath = join(targetRoot, "bundle", "dmg", `King's Press Editorial Desk_0.1.0_${artifactArch}.dmg`);
 
 function hasApiKeyNotaryCredentials() {
   return Boolean(required("APPLE_API_KEY") && required("APPLE_API_ISSUER") && required("APPLE_API_KEY_PATH"));
@@ -156,7 +167,9 @@ try {
   );
 
   console.log("Building Developer ID signed King’s Press desktop release...");
-  await run(tauriBin(), ["build", "--ci", "--config", configPath]);
+  const buildArgs = ["build", "--ci", "--config", configPath];
+  if (buildTarget) buildArgs.push("--target", buildTarget);
+  await run(tauriBin(), buildArgs);
   if (hasKeychainProfileCredentials() && !hasApiKeyNotaryCredentials() && !hasAppleIdNotaryCredentials()) {
     await notarizeApp(tempDir);
   }
