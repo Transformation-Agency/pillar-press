@@ -223,7 +223,7 @@ function useDictation(getBase, onText, onDone) {
       if (finalAdd) base = (base + finalAdd + " ").replace(/\s+/g, " ");
       onText((base + interim).replace(/\s+/g, " ").trim());
     };
-    rec.onerror = () => { setMsg("Dictation error."); setListening(false); };
+    rec.onerror = () => { setMsg("Dictation could not continue. Check microphone permission, then try again or type your notes."); setListening(false); };
     rec.onend = () => { setListening(false); recRef.current = null; onDone && onDone(); };
     recRef.current = rec; setMsg(null); setListening(true);
     try { rec.start(); } catch (e) { recRef.current = null; setListening(false); setMsg("Dictation could not start."); }

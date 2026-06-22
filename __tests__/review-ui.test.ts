@@ -307,6 +307,12 @@ describe("review workspace UI wiring", () => {
 
     expect(harness.onText).toHaveBeenLastCalledWith("Existing note first final second final still speaking");
 
+    harness.recognition.current?.onerror?.();
+    expect(harness.state()).toMatchObject({
+      listening: false,
+      msg: "Dictation could not continue. Check microphone permission, then try again or type your notes.",
+    });
+
     harness.recognition.current?.onend?.();
     expect(harness.state().listening).toBe(false);
     expect(harness.onDone).toHaveBeenCalledTimes(1);
