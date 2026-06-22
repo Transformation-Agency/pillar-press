@@ -178,6 +178,25 @@ describe("hosted media provider setup browser wiring", () => {
   });
 });
 
+describe("desktop OpenAI media provider setup wiring", () => {
+  it("main desktop setup saves OpenAI as an encrypted desktop media provider", () => {
+    const source = readFileSync(new URL("../public/app.jsx", import.meta.url), "utf8");
+
+    expect(source).toContain("if (nextProfile.provider === \"openai\" && nextProfile.apiKey)");
+    expect(source).toContain("await desktop.saveMediaProviderKey(\"openai\", nextProfile.apiKey");
+    expect(source).toContain("baseUrl: \"https://api.openai.com/v1\"");
+  });
+
+  it("inline setup helper saves OpenAI through desktop LLM and media-provider settings", () => {
+    const source = readFileSync(new URL("../public/setup-helper.jsx", import.meta.url), "utf8");
+
+    expect(source).toContain("await desktop.saveLLMSettings(settings)");
+    expect(source).toContain("await desktop.saveMediaProviderKey(\"openai\", profile.apiKey");
+    expect(source).toContain("await desktop.saveMediaProviderKey(desktopProvider, apiKey.trim()");
+    expect(source).toContain("OpenAI key works. I saved it encrypted for voice, setup, and drafting.");
+  });
+});
+
 describe("setup profile extraction schema", () => {
   it("parses King’s Press setup essentials for review", () => {
     const parsed = setupProfileSchema.parse({
