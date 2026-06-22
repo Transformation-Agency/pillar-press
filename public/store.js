@@ -185,6 +185,7 @@
       const pieces = (pieceRes && pieceRes.pieces) || [];
       // replace this campaign's pieces with server truth, keep other campaigns' cache
       state.pieces = (state.pieces || []).filter((p) => p.campaignId !== id).concat(pieces.map(normPiece));
+      if (cc) cc.pieceCount = pieces.length;
 
       const sources = (srcRes && srcRes.sources) || [];
       state.gatherSources = (state.gatherSources || []).filter((s) => s.campaignId !== id).concat(sources);
@@ -264,7 +265,7 @@
         : Promise.resolve(null);
 
       const camps = (campRes && campRes.campaigns) || [];
-      state.campaigns = camps.map((c) => ({ id: c.id, name: c.name, slug: c.slug, references: null }));
+      state.campaigns = camps.map((c) => ({ id: c.id, name: c.name, slug: c.slug, pieceCount: Number(c.pieceCount || 0), references: null }));
       state.recipients = (recipientRes && recipientRes.recipients) || [];
 
       normSettings((setRes && setRes.settings) || setRes || {});
@@ -389,7 +390,7 @@
     addCampaign(name, opts) {
       const activate = !opts || opts.activate !== false;
       const id = uid();
-      state.campaigns.push({ id, name: name || "New campaign", references: {} });
+      state.campaigns.push({ id, name: name || "New campaign", pieceCount: 0, references: {} });
       loadedCampaigns.add(id); // brand-new, nothing to fetch
       if (activate) { state.activeCampaignId = id; state.activePieceId = null; }
       emit();
@@ -398,7 +399,11 @@
         if (!serverCampaign || !serverCampaign.id) return ensureCampaign(id);
         replaceCampaignId(id, serverCampaign.id);
         const c = ensureCampaign(serverCampaign.id);
-        if (c) Object.assign(c, { name: serverCampaign.name || c.name, slug: serverCampaign.slug || c.slug });
+        if (c) Object.assign(c, {
+          name: serverCampaign.name || c.name,
+          slug: serverCampaign.slug || c.slug,
+          pieceCount: Number(serverCampaign.pieceCount || c.pieceCount || 0),
+        });
         emit();
         persistPrefs();
         return c || ensureCampaign(serverCampaign.id);
@@ -680,6 +685,8 @@
         original: initialOriginal, packet: null, revision: null, outputs: {}, outputOrder: [],
       };
       state.pieces.unshift(p);
+      const campaign = ensureCampaign(cid);
+      if (campaign) campaign.pieceCount = Math.max(Number(campaign.pieceCount || 0), state.pieces.filter((piece) => piece.campaignId === cid).length);
       state.activePieceId = p.id;
       emit();
       bg(apiSend("POST", "/campaigns/" + cid + "/pieces", {
@@ -709,7 +716,12 @@
       if (Object.keys(body).length) bg(apiSend("PATCH", "/pieces/" + id, body), "PATCH /pieces/:id");
     },
     deletePiece(id) {
+      const existing = api.getPiece(id);
       state.pieces = state.pieces.filter((p) => p.id !== id);
+      if (existing && existing.campaignId) {
+        const campaign = ensureCampaign(existing.campaignId);
+        if (campaign) campaign.pieceCount = Math.max(0, Number(campaign.pieceCount || 0) - 1);
+      }
       if (state.activePieceId === id) state.activePieceId = null;
       emit();
       bg(apiSend("DELETE", "/pieces/" + id), "DELETE /pieces/:id");

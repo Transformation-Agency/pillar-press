@@ -502,7 +502,7 @@ function RoleSwitch({ role, onChange }) {
   );
 }
 
-function CampaignSwitcher({ campaigns, activeId, onSelect, onAdd }) {
+function CampaignSwitcher({ campaigns, activeId, pieceCounts, onSelect, onAdd }) {
   const [open, setOpen] = React.useState(false);
   const ref = React.useRef(null);
   React.useEffect(() => {
@@ -511,6 +511,8 @@ function CampaignSwitcher({ campaigns, activeId, onSelect, onAdd }) {
     return () => document.removeEventListener("mousedown", h);
   }, []);
   const active = campaigns.find((c) => c.id === activeId) || campaigns[0];
+  const counts = pieceCounts || {};
+  const activeCount = active ? (counts[active.id] || 0) : 0;
   return (
     <div ref={ref} style={{ position: "relative" }}>
       <button onClick={() => setOpen((o) => !o)} title="Switch campaign"
@@ -519,11 +521,17 @@ function CampaignSwitcher({ campaigns, activeId, onSelect, onAdd }) {
           borderRadius: 999, padding: "6px 12px", height: 34 }}>
         <span style={{ width: 7, height: 7, borderRadius: 99, background: "var(--accent)" }} />
         <span style={{ fontFamily: "var(--font-display)", fontSize: 15, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{active ? active.name : "No campaign"}</span>
+        {active && (
+          <span className="mono" style={{
+            fontSize: 10.5, color: "var(--ink-3)", border: "1px solid var(--hair)",
+            borderRadius: 999, padding: "2px 6px", lineHeight: 1,
+          }}>{activeCount}</span>
+        )}
         <Icon name="chevD" size={14} style={{ color: "var(--ink-3)" }} />
       </button>
       {open && (
-        <div className="card" style={{ position: "absolute", top: 42, right: 0, width: 248, padding: 6, zIndex: 60, boxShadow: "var(--shadow-lg)", maxHeight: "70vh", overflowY: "auto" }}>
-          <div className="eyebrow" style={{ padding: "6px 10px 4px" }}>Campaign · guidelines</div>
+        <div className="card" style={{ position: "absolute", top: 42, right: 0, width: 292, padding: 6, zIndex: 60, boxShadow: "var(--shadow-lg)", maxHeight: "70vh", overflowY: "auto" }}>
+          <div className="eyebrow" style={{ padding: "6px 10px 4px" }}>Campaign · pieces</div>
           {!campaigns.length && (
             <div className="muted" style={{ padding: "8px 10px", fontSize: 13.5 }}>No campaigns yet.</div>
           )}
@@ -537,11 +545,16 @@ function CampaignSwitcher({ campaigns, activeId, onSelect, onAdd }) {
                   fontFamily: "var(--font-body)", fontSize: 15, textAlign: "left" }}
                 onMouseEnter={(e) => { if (!on) e.currentTarget.style.background = "var(--paper-sunk)"; }}
                 onMouseLeave={(e) => { if (!on) e.currentTarget.style.background = "transparent"; }}>
-                <span style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                <span style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
                   <span style={{ width: 6, height: 6, borderRadius: 99, background: on ? "var(--accent)" : "var(--hair-2)" }} />
-                  {c.name}
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</span>
                 </span>
-                {on && <Icon name="check" size={15} />}
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 7, flex: "0 0 auto" }}>
+                  <span className="mono" style={{ fontSize: 10.5, color: on ? "var(--accent-ink)" : "var(--ink-3)" }}>
+                    {counts[c.id] || 0}
+                  </span>
+                  {on && <Icon name="check" size={15} />}
+                </span>
               </button>
             );
           })}
@@ -1714,6 +1727,21 @@ function App() {
   const refs = window.Store.activeReferences ? window.Store.activeReferences() : ((activeCampaign && activeCampaign.references) || {});
   const refCtx = window.AI.refContext(refs);
   const campaignPieces = activeCampaign ? state.pieces.filter((p) => p.campaignId === activeCampaign.id) : [];
+  const pieceCountsByCampaign = React.useMemo(() => {
+    const counts = {};
+    (campaigns || []).forEach((c) => {
+      if (c && c.id) counts[c.id] = Number(c.pieceCount || 0);
+    });
+    const loadedCounts = {};
+    (state.pieces || []).forEach((p) => {
+      if (!p || !p.campaignId) return;
+      loadedCounts[p.campaignId] = (loadedCounts[p.campaignId] || 0) + 1;
+    });
+    Object.keys(loadedCounts).forEach((id) => {
+      counts[id] = loadedCounts[id];
+    });
+    return counts;
+  }, [campaigns, state.pieces]);
 
   const active = state.pieces.find((p) => p.id === state.activePieceId);
   const inWorkspace = view === "workspace" && active;
@@ -1892,7 +1920,7 @@ function App() {
           </button>
         </nav>
         <div className="spacer" />
-        <CampaignSwitcher campaigns={campaigns} activeId={state.activeCampaignId}
+        <CampaignSwitcher campaigns={campaigns} activeId={state.activeCampaignId} pieceCounts={pieceCountsByCampaign}
           onSelect={(id) => window.Store.setActiveCampaign(id)} onAdd={() => setCampaignCreateOpen(true)} />
         {!isMobile && <RoleSwitch role={role} onChange={(r) => window.Store.setRole(r)} />}
         <button className="btn sm" onClick={() => setSetupOpen(true)} title="Setup provider, campaign, and preferences">
@@ -1955,11 +1983,14 @@ function App() {
           onOpenPiece={openPiece} onActivateCampaign={(id) => window.Store.setActiveCampaign(id)} />
       )}
       {activeCampaign && view === "library" && (
-        <Library pieces={campaignPieces} campaignName={activeCampaign && activeCampaign.name} onOpen={openPiece}
+        <Library pieces={campaignPieces} campaignName={activeCampaign && activeCampaign.name}
+          campaigns={campaigns} allPieces={state.pieces} activeCampaignId={activeCampaign.id}
+          onOpen={openPiece}
           onNew={() => { setActiveDeskWorkflow(null); window.Store.createPiece("Untitled piece"); setView("workspace"); }}
           onDelete={(id) => window.Store.deletePiece(id)}
           onOpenWeave={() => goLibrarySection("weave")}
-          onOpenStudio={() => goLibrarySection("studio")} />
+          onOpenStudio={() => goLibrarySection("studio")}
+          onSwitchCampaign={(id) => { window.Store.setActiveCampaign(id); setView("library"); }} />
       )}
       {activeCampaign && inWorkspace && <Workspace piece={active} refs={refs} onBack={goLibrary} onGoStudio={() => goLibrarySection("studio")} />}
       {activeCampaign && view === "workspace" && !active && (

@@ -83,6 +83,7 @@ export interface LocalCampaign {
   workspaceId: string;
   slug: string;
   name: string;
+  pieceCount?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -283,6 +284,7 @@ function rowCampaign(row: any): LocalCampaign {
     workspaceId: row.workspace_id,
     slug: row.slug,
     name: row.name,
+    pieceCount: row.piece_count == null ? undefined : Number(row.piece_count),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -528,7 +530,14 @@ export function ensureLocalWorkspace(userId = LOCAL_USER_ID): string {
 export function listLocalCampaigns(workspaceId = LOCAL_WORKSPACE_ID): LocalCampaign[] {
   ensureLocalWorkspace();
   return localDb()
-    .prepare("SELECT * FROM campaigns WHERE workspace_id = ? ORDER BY created_at ASC")
+    .prepare(`
+      SELECT c.*, COUNT(p.id) AS piece_count
+      FROM campaigns c
+      LEFT JOIN pieces p ON p.campaign_id = c.id
+      WHERE c.workspace_id = ?
+      GROUP BY c.id
+      ORDER BY c.created_at ASC
+    `)
     .all(workspaceId)
     .map(rowCampaign);
 }

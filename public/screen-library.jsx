@@ -81,13 +81,29 @@ function ProgressPip({ on, label }) {
   );
 }
 
-function Library({ pieces, campaignName, onOpen, onNew, onDelete, onOpenWeave, onOpenStudio }) {
+function Library({ pieces, campaignName, campaigns, allPieces, activeCampaignId, onOpen, onNew, onDelete, onOpenWeave, onOpenStudio, onSwitchCampaign }) {
   const [filter, setFilter] = React.useState("All");
   const filters = ["All", ...window.Store.STATUSES];
   const counts = {};
   window.Store.STATUSES.forEach((s) => { counts[s] = pieces.filter((p) => p.status === s).length; });
   const shown = (filter === "All" ? pieces : pieces.filter((p) => p.status === filter))
     .slice().sort((a, b) => b.updatedAt - a.updatedAt);
+  const pieceCountsByCampaign = {};
+  (campaigns || []).forEach((c) => {
+    if (c && c.id) pieceCountsByCampaign[c.id] = Number(c.pieceCount || 0);
+  });
+  const loadedCounts = {};
+  (allPieces || []).forEach((p) => {
+    if (!p || !p.campaignId) return;
+    loadedCounts[p.campaignId] = (loadedCounts[p.campaignId] || 0) + 1;
+  });
+  Object.keys(loadedCounts).forEach((id) => {
+    pieceCountsByCampaign[id] = loadedCounts[id];
+  });
+  const campaignsWithPieces = (campaigns || [])
+    .filter((c) => c && c.id !== activeCampaignId && (pieceCountsByCampaign[c.id] || 0) > 0)
+    .sort((a, b) => (pieceCountsByCampaign[b.id] || 0) - (pieceCountsByCampaign[a.id] || 0) || String(a.name || "").localeCompare(String(b.name || "")))
+    .slice(0, 4);
 
   return (
     <div className="scroll-y" style={{ flex: 1 }}>
@@ -143,7 +159,32 @@ function Library({ pieces, campaignName, onOpen, onNew, onDelete, onOpenWeave, o
         <div className="card" style={{ marginTop: 18, overflow: "hidden" }}>
           {shown.length === 0 ? (
             <div style={{ padding: "60px 24px", textAlign: "center" }}>
-              <p className="muted" style={{ fontStyle: "italic" }}>Nothing here yet.</p>
+              <p className="muted" style={{ fontStyle: "italic" }}>
+                {pieces.length ? "No pieces match this filter." : "Nothing in this campaign yet."}
+              </p>
+              {pieces.length === 0 && campaignsWithPieces.length > 0 && (
+                <div style={{ maxWidth: 520, margin: "18px auto 0", textAlign: "left" }}>
+                  <div className="eyebrow" style={{ marginBottom: 8 }}>Restored documents in other campaigns</div>
+                  <div style={{ display: "grid", gap: 8 }}>
+                    {campaignsWithPieces.map((c) => (
+                      <button
+                        key={c.id}
+                        className="btn ghost"
+                        onClick={() => onSwitchCampaign && onSwitchCampaign(c.id)}
+                        style={{ justifyContent: "space-between", border: "1px solid var(--hair)", background: "var(--paper-2)" }}
+                      >
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                          <Icon name="book" size={14} />
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</span>
+                        </span>
+                        <span className="mono" style={{ fontSize: 11, color: "var(--ink-3)" }}>
+                          {pieceCountsByCampaign[c.id]} {pieceCountsByCampaign[c.id] === 1 ? "piece" : "pieces"}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               <button className="btn" onClick={onNew} style={{ marginTop: 8 }}>
                 <Icon name="plus" size={15} /> Start a piece
               </button>
