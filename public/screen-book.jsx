@@ -502,19 +502,22 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
   // clobber in-progress edits when an async result (packet/revision/outputs) returns
   React.useEffect(() => {
     const p = selectedId ? window.Store.getPiece(selectedId) : null;
-    setTitle(p ? p.title : ""); setDraft(p ? (p.original || "") : "");
+    const editor = window.BOOK.chapterEditorState(p);
+    setTitle(editor.title); setDraft(editor.draft);
     setErr(null); setNote(null);
   }, [selectedId]);
 
-  const dirty = piece && (title !== piece.title || draft !== (piece.original || ""));
-  const saveNow = () => { if (piece && dirty) window.Store.updatePiece(piece.id, { title: title.trim() || piece.title, original: draft }); };
+  const dirty = window.BOOK.isChapterDirty(piece, title, draft);
+  const saveNow = () => {
+    if (piece && dirty) window.BOOK.saveChapterDraft(piece.id, window.BOOK.chapterPatch(piece, title, draft));
+  };
 
   // Awaited save so server-side AI passes (review/revision/outputs) and the
   // export route read the latest draft. Updates the cache optimistically too.
   const persistChapter = async () => {
     const p = window.Store.getPiece(selectedId); if (!p) return;
-    const fields = { title: title.trim() || p.title, original: draft };
-    window.Store.updatePiece(p.id, fields);
+    const fields = window.BOOK.chapterPatch(p, title, draft);
+    window.BOOK.saveChapterDraft(p.id, fields);
     await bookApi("PATCH", "/api/pieces/" + p.id, fields);
   };
 
@@ -535,9 +538,9 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
     setUploadingDraft(true); setErr(null);
     try {
       const text = await window.extractFileText(f);
-      const merged = draft.trim() ? draft.trimEnd() + "\n\n" + text : text;
+      const merged = window.BOOK.mergeUploadedDraft(draft, text);
       setDraft(merged);
-      window.Store.updatePiece(piece.id, { original: merged });
+      window.BOOK.saveChapterDraft(piece.id, { original: merged });
     } catch (err) { setErr((err && err.message) || ("Couldn't read " + f.name + ".")); }
     setUploadingDraft(false);
   };

@@ -86,4 +86,33 @@ describe("browser Book campaign helpers", () => {
       },
     }]);
   });
+
+  it("loads editor state, detects dirty chapter edits, and saves a title/body patch", () => {
+    const updates: Array<{ id: string; patch: unknown }> = [];
+    const book = loadBrowserBook({
+      updatePiece: vi.fn((id: string, patch: unknown) => updates.push({ id, patch })),
+    });
+    const piece = {
+      id: "chapter_1",
+      title: "Chapter 1",
+      original: "Opening draft",
+    };
+
+    expect(book.chapterEditorState(piece)).toEqual({ title: "Chapter 1", draft: "Opening draft" });
+    expect(book.chapterEditorState(null)).toEqual({ title: "", draft: "" });
+    expect(book.isChapterDirty(piece, "Chapter 1", "Opening draft")).toBe(false);
+    expect(book.isChapterDirty(piece, "Chapter One", "Opening draft")).toBe(true);
+
+    const patch = book.chapterPatch(piece, "  ", "Reworked draft");
+    expect(patch).toEqual({ title: "Chapter 1", original: "Reworked draft" });
+    expect(book.saveChapterDraft("chapter_1", patch)).toEqual(patch);
+    expect(updates).toEqual([{ id: "chapter_1", patch }]);
+  });
+
+  it("merges uploaded chapter text below the current draft without losing existing prose", () => {
+    const book = loadBrowserBook({});
+
+    expect(book.mergeUploadedDraft("", "Uploaded prose")).toBe("Uploaded prose");
+    expect(book.mergeUploadedDraft("Current prose\n\n", "Uploaded prose")).toBe("Current prose\n\nUploaded prose");
+  });
 });

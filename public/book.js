@@ -45,6 +45,38 @@
     });
   }
 
+  function chapterEditorState(piece) {
+    return {
+      title: piece ? (piece.title || "") : "",
+      draft: piece ? (piece.original || "") : "",
+    };
+  }
+
+  function chapterPatch(piece, title, draft) {
+    if (!piece) return null;
+    return {
+      title: String(title || "").trim() || piece.title,
+      original: typeof draft === "string" ? draft : "",
+    };
+  }
+
+  function isChapterDirty(piece, title, draft) {
+    if (!piece) return false;
+    return title !== piece.title || draft !== (piece.original || "");
+  }
+
+  function saveChapterDraft(pieceId, patch) {
+    if (!pieceId || !patch) return null;
+    window.Store.updatePiece(pieceId, patch);
+    return patch;
+  }
+
+  function mergeUploadedDraft(currentDraft, uploadedText) {
+    const incoming = String(uploadedText || "");
+    const current = String(currentDraft || "");
+    return current.trim() ? current.trimEnd() + "\n\n" + incoming : incoming;
+  }
+
   window.BOOK = {
     PREF_KEY,
     resolveBookSelection,
@@ -52,5 +84,10 @@
     createBookCampaign,
     promptForBookCampaign,
     createBookChapter,
+    chapterEditorState,
+    chapterPatch,
+    isChapterDirty,
+    saveChapterDraft,
+    mergeUploadedDraft,
   };
 })();
