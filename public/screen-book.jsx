@@ -469,7 +469,7 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
   // Drop a stale book selection if the campaign no longer exists; load the
   // book's pieces/references on demand (without making it the active campaign).
   React.useEffect(() => {
-    if (bookId && !(campaigns || []).find((c) => c.id === bookId)) { setBookId(null); return; }
+    if (bookId && !window.BOOK.resolveBookSelection(campaigns, bookId)) { setBookId(null); return; }
     if (bookId) window.Store.loadCampaign(bookId);
   }, [bookId, (campaigns || []).map((c) => c.id).join(",")]);
 
@@ -481,13 +481,15 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
 
   const piece = selectedId ? window.Store.getPiece(selectedId) : null;
 
-  const pickBook = (id) => { setBookId(id); window.Store.setPref("bookCampaignId", id); setSelectedId(null); setErr(null); setNote(null); };
+  const pickBook = (id) => {
+    const picked = window.BOOK.pickBookCampaign(id);
+    if (!picked) return;
+    setBookId(picked); setSelectedId(null); setErr(null); setNote(null);
+  };
   const newBook = () => {
-    const n = window.prompt("Name your book");
-    if (!n || !n.trim()) return;
-    const id = window.Store.addCampaign(n.trim(), { activate: false }); // don't hijack the active campaign
-    window.Store.loadCampaign(id);
-    pickBook(id);
+    const id = window.BOOK.promptForBookCampaign();
+    if (!id) return;
+    setBookId(id); setSelectedId(null); setErr(null); setNote(null);
   };
 
   // keep a valid selection as chapters change
@@ -521,10 +523,7 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
   const selectChapter = (id) => { saveNow(); setSelectedId(id); setMobilePane("editor"); };
   const addChapter = (t) => {
     if (!bookId) return;
-    const p = window.Store.createPiece(t, bookId, {
-      category: "book",
-      categoryContext: { bookId, bookTitle: bookCampaign && bookCampaign.name, chapterRole: "Draft chapter" },
-    });
+    const p = window.BOOK.createBookChapter(bookId, bookCampaign, t, chapters.length);
     setSelectedId(p.id); setPanel("sources"); setMobilePane("editor");
   };
 
