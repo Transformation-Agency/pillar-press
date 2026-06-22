@@ -4,18 +4,27 @@ import { readFileSync } from "node:fs";
 function createOutputsTabHarness(piece: Record<string, any>, options: {
   generateError?: Error;
   generateResult?: { outputs: Record<string, unknown>; order: string[] };
+  driveConfigured?: boolean;
+  driveEnabled?: boolean;
 } = {}) {
   const source = readFileSync(new URL("../public/screen-outputs.jsx", import.meta.url), "utf8");
   const start = source.indexOf("function OutputsTab");
   const end = source.indexOf("\n  if (!piece.original");
   const defaults = source.match(/const PLAT_AUD_DEFAULT = .*?;\n/s)?.[0];
   if (!defaults || start === -1 || end === -1) throw new Error("Could not locate OutputsTab setup source.");
+  const driveSaveStart = source.indexOf("async function driveSave");
+  const driveDialogStart = source.indexOf("\nfunction DriveDialog");
+  const driveSaveSource = driveSaveStart === -1 || driveDialogStart === -1 ? "" : source.slice(driveSaveStart, driveDialogStart);
+  const outputFilenameSource = source.match(/function outputFilename\(o\).*?\n/s)?.[0] || "";
   const executableSource = `${defaults}
+${outputFilenameSource}
+${driveSaveSource}
 ${source.slice(start, end)}
   return {
     active,
     auds,
     generate,
+    onDriveOne,
     onCondensed,
     orderedActive,
     state: () => ({ busy: __states[2], prog: __states[3], err: __states[4], driveOpen: __states[5], msg: __states[6] }),
@@ -38,8 +47,17 @@ return OutputsTab;`;
     { id: "facebook", name: "Facebook", register: "relational" },
     { id: "instagram", name: "Instagram", register: "visual" },
   ];
+  const uploadMany = vi.fn(async (_files: unknown[], onProgress: (i: number, n: number, name: string) => void) => {
+    onProgress(0, 1, "Substack.md");
+    return [{ webViewLink: "https://drive.example/file" }];
+  });
   const window = {
     useIsMobile: () => false,
+    DRIVE: {
+      isConfigured: vi.fn(() => options.driveConfigured !== false),
+      isDriveEnabled: vi.fn(() => options.driveEnabled !== false),
+      uploadMany,
+    },
     GEN: {
       PLATFORMS: platforms,
       AUDIENCE_PRESETS: [{ id: "builders", name: "Builders" }, { id: "relational", name: "Relational" }],
@@ -57,6 +75,11 @@ return OutputsTab;`;
         };
       }),
     },
+    KP_BILLING: { notifyDriveDisabled: vi.fn() },
+    EXPORT: {
+      outputMarkdown: vi.fn((output: any) => `# ${output.platform}\n\n${output.draftPost}`),
+      safeName: vi.fn((name: string) => String(name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")),
+    },
   };
   const onUpdate = vi.fn();
   const OutputsTab = new Function("React", "window", "__states", executableSource)(
@@ -67,6 +90,7 @@ return OutputsTab;`;
     active: string[];
     auds: Record<string, string>;
     generate: () => Promise<void>;
+    onDriveOne: (output: Record<string, unknown>) => void;
     onCondensed: (platform: string, draftPost: string) => void;
     orderedActive: string[];
     state: () => { busy: unknown; prog: unknown; err: unknown; driveOpen: unknown; msg: unknown };
@@ -206,6 +230,40 @@ describe("outputs tab UI wiring", () => {
         substack: { platform: "Substack", draftPost: "Short post", hooks: ["Keep"] },
         facebook: { platform: "Facebook", draftPost: "Other post" },
       },
+    });
+  });
+
+  it("executes single-output Drive save states without leaking credentials", async () => {
+    const output = { platform: "Substack", draftPost: "Post" };
+    const disabled = createOutputsTabHarness(
+      { id: "piece-a", original: "Draft text", outputs: {}, outputOrder: [] },
+      { driveEnabled: false },
+    );
+
+    disabled.component.onDriveOne(output);
+    expect(disabled.window.KP_BILLING.notifyDriveDisabled).toHaveBeenCalledTimes(1);
+    expect(disabled.window.DRIVE.uploadMany).not.toHaveBeenCalled();
+
+    const unconfigured = createOutputsTabHarness(
+      { id: "piece-a", original: "Draft text", outputs: {}, outputOrder: [] },
+      { driveConfigured: false },
+    );
+    unconfigured.component.onDriveOne(output);
+    expect(unconfigured.component.state().driveOpen).toBe(true);
+    expect(unconfigured.window.DRIVE.uploadMany).not.toHaveBeenCalled();
+
+    const configured = createOutputsTabHarness({ id: "piece-a", original: "Draft text", outputs: {}, outputOrder: [] });
+    configured.component.onDriveOne(output);
+    await Promise.resolve();
+
+    expect(configured.window.DRIVE.uploadMany).toHaveBeenCalledWith(
+      [{ name: "substack.md", content: "# Substack\n\nPost", mime: "text/markdown" }],
+      expect.any(Function),
+    );
+    expect(configured.component.state().msg).toMatchObject({
+      t: "ok",
+      m: "Saved to Drive.",
+      link: "https://drive.example/file",
     });
   });
 
