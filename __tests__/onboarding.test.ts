@@ -207,6 +207,28 @@ describe("hosted media provider setup browser wiring", () => {
 });
 
 describe("desktop OpenAI media provider setup wiring", () => {
+  it("keeps desktop and inline setup model options current for OpenAI and Ollama", () => {
+    const appSource = readFileSync(new URL("../public/app.jsx", import.meta.url), "utf8");
+    const helperSource = readFileSync(new URL("../public/setup-helper.jsx", import.meta.url), "utf8");
+
+    for (const source of [appSource, helperSource]) {
+      expect(source).toContain('openai: ["gpt-4o-mini", "gpt-4.1-mini", "gpt-4o"]');
+      expect(source).toContain('const fallbackOllamaModels = ["gemma4:26b-mlx", "llama3.2", "qwen2.5:latest", "mistral"]');
+      expect(source).toContain('openai: "OpenAI / ChatGPT"');
+      expect(source).toContain('/^gemma4/i.test');
+      expect(source).not.toContain('"babbage-2"');
+      expect(source).not.toContain("'babbage-2'");
+    }
+
+    expect(appSource).toContain('list="desktop-model-options"');
+    expect(appSource).toContain('cloudListedModels[cloudProvider] && cloudListedModels[cloudProvider].length ? cloudListedModels[cloudProvider] : cloudModels[cloudProvider]');
+    expect(appSource).toContain('setupMode === "ollama" && ollamaOptionValues.map');
+
+    expect(helperSource).toContain('const options = mode === "ollama" ? listedModels.concat(ollamaSuggestions) : (listedModels.length ? listedModels : (cloudModels[provider] || []));');
+    expect(helperSource).toContain('setModel(localModels[0] || "gemma4:26b-mlx")');
+    expect(helperSource).toContain('setModel("gpt-4o-mini")');
+  });
+
   it("main desktop setup saves OpenAI as an encrypted desktop media provider", () => {
     const source = readFileSync(new URL("../public/app.jsx", import.meta.url), "utf8");
 
