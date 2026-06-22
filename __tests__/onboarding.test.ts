@@ -990,6 +990,33 @@ describe("browser onboarding action registry", () => {
     expect(activeId).toBe("existing-campaign");
   });
 
+  it("creates a new local first focus and returns the saved campaign id", async () => {
+    const window = loadBrowserActions();
+    const added: string[] = [];
+    window.Store = {
+      addCampaign: (name: string) => {
+        added.push(name);
+        return "temp-focus";
+      },
+      whenCampaignSaved: async (tempId: string) => ({ id: `saved-${tempId}` }),
+    };
+
+    const result = await window.KP_ONBOARDING_ACTIONS.saveFocus("  Book launch  ", {
+      campaigns: [{ id: "existing-campaign", name: "Untitled focus" }],
+    });
+
+    expect(result).toMatchObject({
+      intent: "save_focus",
+      status: "succeeded",
+      data: {
+        campaignId: "saved-temp-focus",
+        tempId: "temp-focus",
+        reused: false,
+      },
+    });
+    expect(added).toEqual(["Book launch"]);
+  });
+
   it("persists onboarding completion and rich first-value metadata", async () => {
     const window = loadBrowserActions();
     const prefs: Record<string, unknown> = {};
