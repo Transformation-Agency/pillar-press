@@ -155,6 +155,34 @@ describe("browser onboarding audio helpers", () => {
     instance.onresult({ results: [[{ transcript: " LinkedIn and Substack " }]] });
     expect(final).toBe("LinkedIn and Substack");
   });
+
+  it("speaks setup prompts through desktop speech with browser fallback", async () => {
+    const spoken: string[] = [];
+    const cancelled: string[] = [];
+    const audio = loadBrowserAudio({
+      KINGS_DESKTOP: {
+        isDesktop: () => true,
+        speakText: async () => {
+          throw new Error("desktop voice unavailable");
+        },
+      },
+      SpeechSynthesisUtterance: function SpeechSynthesisUtterance(this: any, text: string) {
+        this.text = text;
+      },
+      speechSynthesis: {
+        cancel: () => cancelled.push("cancelled"),
+        speak: (utterance: any) => {
+          spoken.push(utterance.text);
+          utterance.onend();
+        },
+      },
+    });
+
+    await audio.speakText("Welcome to setup.", { interrupt: true });
+
+    expect(cancelled).toEqual(["cancelled"]);
+    expect(spoken).toEqual(["Welcome to setup."]);
+  });
 });
 
 describe("hosted media provider setup browser wiring", () => {

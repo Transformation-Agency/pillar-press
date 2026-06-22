@@ -51,7 +51,7 @@
       }
       try {
         if (options && options.interrupt) window.speechSynthesis.cancel();
-        const utterance = new SpeechSynthesisUtterance(text);
+        const utterance = new window.SpeechSynthesisUtterance(text);
         utterance.onend = () => resolve();
         utterance.onerror = () => resolve();
         window.speechSynthesis.speak(utterance);
