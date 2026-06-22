@@ -162,6 +162,7 @@ function Gather({ campaignId, refCtx, onGoWeave }) {
 
   const sendSummaryToWeave = (s) => {
     window.GATHER.sendGatherSummaryToWeave(s);
+    onGoWeave && onGoWeave();
   };
   const sendAllSummariesToWeave = () => {
     window.GATHER.sendGatherSummariesToWeave(summaries);

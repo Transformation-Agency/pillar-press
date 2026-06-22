@@ -107,4 +107,19 @@ describe("browser Gather to Weave handoff", () => {
     expect((window.GATHER as any).sendGatherItemsToWeave([])).toEqual([]);
     expect(window.__weaveSourcesAdded).toBeUndefined();
   });
+
+  it("wires every Gather send action to open Weave after staging sources", () => {
+    const screen = readFileSync(new URL("../public/screen-gather.jsx", import.meta.url), "utf8");
+
+    expect(screen).toContain("const sendSummaryToWeave = (s) => {");
+    expect(screen).toContain("window.GATHER.sendGatherSummaryToWeave(s);");
+    expect(screen).toContain("const sendAllSummariesToWeave = () => {");
+    expect(screen).toContain("window.GATHER.sendGatherSummariesToWeave(summaries);");
+    expect(screen).toContain("const sendToWeave = () => {");
+    expect(screen).toContain("window.GATHER.sendGatherItemsToWeave(selected);");
+    expect(screen.match(/onGoWeave && onGoWeave\(\);/g)).toHaveLength(3);
+    expect(screen).toContain('<button className="btn sm" onClick={() => onSendToWeave(summary)}><Icon name="arrowR" size={13} /> Send to Weave</button>');
+    expect(screen).toContain('<button className="btn sm" onClick={sendAllSummariesToWeave}><Icon name="arrowR" size={13} /> Send all to Weave</button>');
+    expect(screen).toContain('<button className="btn sm" disabled={!selected.length} onClick={sendToWeave}><Icon name="arrowR" size={13} /> Send {selected.length || ""} to Weave</button>');
+  });
 });
