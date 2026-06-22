@@ -206,7 +206,10 @@ function Weave({ weave, refCtx, onOpenPiece }) {
                 <div style={{ display: "flex", gap: 8 }}>
                   <input ref={fileRef} type="file" accept={window.UPLOAD_ACCEPT} multiple style={{ display: "none" }} onChange={upload} />
                   <button className="btn ghost sm" onClick={() => fileRef.current.click()} disabled={uploading} title="PDF, images, .docx, or text files">{uploading ? <><Spinner size={13} /> Reading…</> : <><Icon name="doc" size={14} /> Upload files</>}</button>
-                  <button className="btn ghost sm" onClick={() => { window.Store.addWeaveSource("New source", ""); setExpanded((x) => ({ ...x })); }}><Icon name="plus" size={14} /> Add</button>
+                  <button className="btn ghost sm" onClick={() => {
+                    const src = window.Store.addWeaveSource("New source", "");
+                    setExpanded((x) => ({ ...x, [src.id]: true }));
+                  }}><Icon name="plus" size={14} /> Add</button>
                 </div>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
