@@ -2,7 +2,7 @@
 
 function wordCount(t) { return (t || "").trim() ? (t.trim().split(/\s+/).length) : 0; }
 
-function PieceRow({ piece, onOpen, onDelete }) {
+function PieceRow({ piece, campaignLabel, onOpen, onDelete }) {
   const [hover, setHover] = React.useState(false);
   const [titling, setTitling] = React.useState(false);
   const autoTitle = async (e) => {
@@ -34,6 +34,7 @@ function PieceRow({ piece, onOpen, onDelete }) {
       <div style={{ minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 5 }}>
           <h3 style={{ fontSize: 22, letterSpacing: "-0.01em" }}>{piece.title}</h3>
+          {campaignLabel && <span className="eyebrow" style={{ color: "var(--ink-3)" }}>{campaignLabel}</span>}
         </div>
         <p className="muted" style={{
           margin: 0, fontSize: 15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
@@ -83,12 +84,27 @@ function ProgressPip({ on, label }) {
 
 function Library({ pieces, campaignName, campaigns, allPieces, activeCampaignId, onOpen, onNew, onDelete, onOpenWeave, onOpenStudio, onSwitchCampaign }) {
   const [filter, setFilter] = React.useState("All");
+  const [scope, setScope] = React.useState("active");
+  React.useEffect(() => {
+    if (window.Store && window.Store.hydrateLibraryPieces) {
+      window.Store.hydrateLibraryPieces().catch(() => null);
+    }
+  }, []);
   const filters = ["All", ...window.Store.STATUSES];
+  const campaignNames = {};
+  (campaigns || []).forEach((c) => { if (c && c.id) campaignNames[c.id] = c.name; });
+  const scopedPieces = scope === "all" ? (allPieces || []) : pieces;
   const counts = {};
-  window.Store.STATUSES.forEach((s) => { counts[s] = pieces.filter((p) => p.status === s).length; });
-  const shown = (filter === "All" ? pieces : pieces.filter((p) => p.status === filter))
+  window.Store.STATUSES.forEach((s) => { counts[s] = scopedPieces.filter((p) => p.status === s).length; });
+  const shown = (filter === "All" ? scopedPieces : scopedPieces.filter((p) => p.status === filter))
     .slice().sort((a, b) => b.updatedAt - a.updatedAt);
   const campaignsWithPieces = window.LIBRARY.campaignsWithRestoredPieces(campaigns, allPieces, activeCampaignId, 4);
+  const openPiece = (piece) => {
+    if (piece && piece.campaignId && piece.campaignId !== activeCampaignId && onSwitchCampaign) {
+      onSwitchCampaign(piece.campaignId);
+    }
+    onOpen(piece.id);
+  };
 
   return (
     <div className="scroll-y" style={{ flex: 1 }}>
@@ -106,6 +122,27 @@ function Library({ pieces, campaignName, campaigns, allPieces, activeCampaignId,
           Every piece you've brought to the desk. You set the status by hand as it moves
           from draft to formatted.
         </p>
+
+        <div style={{ display: "inline-flex", gap: 4, padding: 4, border: "1px solid var(--hair)", borderRadius: 999, background: "var(--paper-2)", marginTop: 18 }}>
+          {[
+            ["active", "This focus"],
+            ["all", "All focuses"],
+          ].map(([id, label]) => (
+            <button
+              key={id}
+              className="mono"
+              onClick={() => setScope(id)}
+              style={{
+                border: "none", borderRadius: 999, padding: "7px 12px", cursor: "pointer",
+                background: scope === id ? "var(--ink)" : "transparent",
+                color: scope === id ? "var(--paper)" : "var(--ink-2)",
+                fontSize: 11.5,
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
 
         {campaignsWithPieces.length > 0 && (
           <div style={{ margin: "22px 0 4px" }}>
@@ -149,7 +186,7 @@ function Library({ pieces, campaignName, campaigns, allPieces, activeCampaignId,
         <div style={{ display: "flex", gap: 6, margin: "28px 0 8px", flexWrap: "wrap" }}>
           {filters.map((f) => {
             const on = f === filter;
-            const c = f === "All" ? pieces.length : counts[f];
+            const c = f === "All" ? scopedPieces.length : counts[f];
             return (
               <button key={f} onClick={() => setFilter(f)}
                 className="mono"
@@ -169,14 +206,20 @@ function Library({ pieces, campaignName, campaigns, allPieces, activeCampaignId,
           {shown.length === 0 ? (
             <div style={{ padding: "60px 24px", textAlign: "center" }}>
               <p className="muted" style={{ fontStyle: "italic" }}>
-                {pieces.length ? "No pieces match this filter." : "Nothing in this campaign yet."}
+                {scopedPieces.length ? "No pieces match this filter." : (scope === "all" ? "No pieces yet." : "Nothing in this campaign yet.")}
               </p>
               <button className="btn" onClick={onNew} style={{ marginTop: 8 }}>
                 <Icon name="plus" size={15} /> Start a piece
               </button>
             </div>
           ) : shown.map((p) => (
-            <PieceRow key={p.id} piece={p} onOpen={onOpen} onDelete={onDelete} />
+            <PieceRow
+              key={p.id}
+              piece={p}
+              campaignLabel={scope === "all" && p.campaignId !== activeCampaignId ? campaignNames[p.campaignId] : null}
+              onOpen={() => openPiece(p)}
+              onDelete={onDelete}
+            />
           ))}
         </div>
       </div>

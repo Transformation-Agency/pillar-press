@@ -29,4 +29,19 @@ describe("browser Library helpers", () => {
       { campaign: campaigns[2], count: 1 },
     ]);
   });
+
+  it("wires the Library screen to hydrate and open restored pieces across focuses", () => {
+    const screen = readFileSync(new URL("../public/screen-library.jsx", import.meta.url), "utf8");
+    const store = readFileSync(new URL("../public/store.js", import.meta.url), "utf8");
+
+    expect(store).toContain("async function hydrateLibraryPieces()");
+    expect(store).toContain('apiGet("/campaigns/" + id + "/pieces")');
+    expect(store).toContain("hydrateLibraryPieces,");
+    expect(screen).toContain('const [scope, setScope] = React.useState("active")');
+    expect(screen).toContain("window.Store.hydrateLibraryPieces().catch(() => null)");
+    expect(screen).toContain('"All focuses"');
+    expect(screen).toContain("const scopedPieces = scope === \"all\" ? (allPieces || []) : pieces");
+    expect(screen).toContain("onSwitchCampaign(piece.campaignId)");
+    expect(screen).toContain("campaignLabel={scope === \"all\" && p.campaignId !== activeCampaignId ? campaignNames[p.campaignId] : null}");
+  });
 });

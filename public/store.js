@@ -218,6 +218,34 @@
     emit();
   }
 
+  async function hydrateLibraryPieces() {
+    const campaigns = state.campaigns || [];
+    const localCounts = {};
+    (state.pieces || []).forEach((p) => {
+      if (p && p.campaignId) localCounts[p.campaignId] = (localCounts[p.campaignId] || 0) + 1;
+    });
+    const ids = campaigns
+      .filter((c) => c && c.id && Number(c.pieceCount || 0) > 0 && !localCounts[c.id])
+      .map((c) => c.id);
+    if (!ids.length) return state.pieces;
+    const results = await Promise.all(ids.map((id) =>
+      apiGet("/campaigns/" + id + "/pieces")
+        .then((res) => ({ id, pieces: (res && res.pieces) || [] }))
+        .catch((e) => {
+          console.warn("[Store] hydrateLibraryPieces failed for " + id + ":", e && e.message);
+          return { id, pieces: null };
+        }),
+    ));
+    results.forEach(({ id, pieces }) => {
+      if (!Array.isArray(pieces)) return;
+      const cc = ensureCampaign(id);
+      state.pieces = (state.pieces || []).filter((p) => p.campaignId !== id).concat(pieces.map(normPiece));
+      if (cc) cc.pieceCount = pieces.length;
+    });
+    emit();
+    return state.pieces;
+  }
+
   function mediaArrayFrom(res) {
     if (!res) return null;
     if (Array.isArray(res)) return res;
@@ -667,6 +695,7 @@
     },
 
     /* ---- Pieces ---- */
+    hydrateLibraryPieces,
     getPiece(id) { return (state.pieces || []).find((p) => p.id === id) || null; },
     setActive(id) { state.activePieceId = id; emit(); },
 
