@@ -315,4 +315,116 @@ describe("hosted media BYOK generation", () => {
     }));
     expect(JSON.stringify(base.values.mock.calls)).not.toContain("sk-user-hedra");
   });
+
+  it("generates Hedra avatar video with a saved ElevenLabs voiceover profile", async () => {
+    const base = mockHostedGenerateBase();
+    const listModels = vi.fn(async () => [{
+      id: "hedra-avatar-v1",
+      name: "Hedra Avatar",
+      type: "video",
+      credits: 4,
+    }]);
+    const textToSpeechLong = vi.fn(async () => Buffer.from("avatar voiceover"));
+    const createAsset = vi.fn(async () => ({ id: "voice_asset_1" }));
+    const uploadAsset = vi.fn(async () => ({ id: "voice_asset_1" }));
+    const generateAsset = vi.fn(async () => ({
+      id: "gen_avatar",
+      asset_id: "avatar_asset_1",
+      status: "queued",
+      progress: 0,
+    }));
+
+    vi.doMock("@/lib/mediaProviderSettings", () => ({
+      getHostedMediaProviderProfile: vi.fn(async () => null),
+      getHostedMediaProviderProfileForProvider: vi.fn(),
+      getHostedMediaProviderSettings: vi.fn(),
+    }));
+    vi.doMock("@/lib/providerSettings", () => ({
+      getHostedProviderProfile: vi.fn(),
+      getHostedProviderProfileForProvider: vi.fn(),
+      getHostedProviderSettings: vi.fn(),
+    }));
+    vi.doMock("@/lib/mediaProviders", () => ({
+      getImageProviderForUser: vi.fn(async () => null),
+      getAudioProviderForUser: vi.fn(async () => null),
+      getElevenLabsProviderForUser: vi.fn(async () => ({
+        provider: "elevenlabs",
+        apiKey: "eleven-avatar-secret",
+        providerSource: "byok",
+        profileId: "eleven-avatar",
+      })),
+      getHedraProviderForUser: vi.fn(async () => ({
+        provider: "hedra",
+        apiKey: "hedra-avatar-secret",
+        providerSource: "byok",
+        profileId: "hedra-avatar",
+      })),
+    }));
+    vi.doMock("@/lib/mediaImage", () => ({ generateOpenAICompatibleImage: vi.fn() }));
+    vi.doMock("@/lib/mediaAudio", () => ({
+      generateOpenAICompatibleSpeech: vi.fn(),
+      synthesizeOpenAICompatibleSpeech: vi.fn(),
+    }));
+    vi.doMock("@/lib/hedra", () => ({ listModels, generateAsset, createAsset, uploadAsset }));
+    vi.doMock("@/lib/elevenlabs", () => ({ textToSpeechLong }));
+
+    const { POST } = await import("../app/api/hedra/generate/route");
+    const res = await POST(new Request("http://test.local/api/hedra/generate", {
+      method: "POST",
+      body: JSON.stringify({
+        type: "avatar_video",
+        provider: "hedra",
+        mediaProfileId: "hedra-avatar",
+        audioMediaProfileId: "eleven-avatar",
+        modelId: "hedra-avatar-v1",
+        prompt: "A warm editorial host in a simple studio.",
+        script: "Welcome to this King's Press update.",
+        voiceId: "voice_1",
+      }),
+    }));
+
+    expect(res.status).toBe(201);
+    expect(textToSpeechLong).toHaveBeenCalledWith({
+      text: "Welcome to this King's Press update.",
+      voiceId: "voice_1",
+      apiKey: "eleven-avatar-secret",
+    });
+    expect(createAsset).toHaveBeenCalledWith({ name: expect.stringMatching(/^voiceover-/), type: "audio" }, { apiKey: "hedra-avatar-secret" });
+    expect(uploadAsset).toHaveBeenCalledWith("voice_asset_1", expect.any(Blob), expect.stringMatching(/^voiceover-/), { apiKey: "hedra-avatar-secret" });
+    expect(generateAsset).toHaveBeenCalledWith(expect.objectContaining({
+      type: "video",
+      modelId: "hedra-avatar-v1",
+      textPrompt: "A warm editorial host in a simple studio.",
+      audioAssetId: "voice_asset_1",
+    }), { apiKey: "hedra-avatar-secret" });
+    expect(base.reserveUsage).toHaveBeenCalledWith(expect.objectContaining({
+      task: "media_generation",
+      feature: "media.avatar_video",
+      providerSource: "byok",
+      provider: "hedra",
+      model: "hedra-avatar-v1",
+      metadata: expect.objectContaining({
+        profileId: "hedra-avatar",
+        hedraProfileId: "hedra-avatar",
+        elevenlabsProfileId: "eleven-avatar",
+      }),
+    }));
+    expect(base.values).toHaveBeenCalledWith(expect.objectContaining({
+      type: "avatar_video",
+      elevenAudioAssetId: "voice_asset_1",
+      meta: expect.objectContaining({
+        provider: "hedra",
+        providerSource: "byok",
+        profileId: "hedra-avatar",
+        hedraProfileId: "hedra-avatar",
+        elevenlabsProfileId: "eleven-avatar",
+      }),
+    }));
+    expect(JSON.stringify(base.values.mock.calls)).not.toContain("hedra-avatar-secret");
+    expect(JSON.stringify(base.values.mock.calls)).not.toContain("eleven-avatar-secret");
+    expect(base.completeUsageReservation).toHaveBeenCalledWith(expect.anything(), {
+      actualCredits: 4,
+      providerRequestId: "gen_avatar",
+    });
+  });
 });
