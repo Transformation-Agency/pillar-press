@@ -265,6 +265,56 @@ describe("hosted LLM provider utility routes", () => {
     expect(createAIFromConfig).not.toHaveBeenCalled();
   });
 
+  it("keeps provider test failures readable without leaking submitted credentials", async () => {
+    const text = vi.fn(async () => {
+      const { LLMError } = await import("@/lib/llm");
+      throw new LLMError(
+        401,
+        "llm",
+        "OpenAI rejected the API key. Reconnect the provider or paste a fresh key.",
+        "openai",
+        "Bearer sk-openai-provider-test-secret is invalid",
+      );
+    });
+    const createAIFromConfig = vi.fn(() => ({ text }));
+
+    vi.doMock("@/lib/auth", () => ({
+      requireUser: vi.fn(async () => ({ id: "local_user", role: "owner" })),
+    }));
+    vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => true }));
+    vi.doMock("@/lib/billing/entitlements", () => ({ requireByokProviderAccess: vi.fn() }));
+    vi.doMock("@/lib/providerSettings", () => ({ getHostedProviderProfile: vi.fn() }));
+    vi.doMock("@/lib/llm", async () => {
+      const actual = await vi.importActual<any>("@/lib/llm");
+      return { ...actual, createAIFromConfig };
+    });
+
+    const { POST } = await import("../app/api/llm/test/route");
+    const res = await POST(new Request("http://test.local/api/llm/test", {
+      method: "POST",
+      body: JSON.stringify({
+        provider: "openai",
+        model: "gpt-4o-mini",
+        apiKey: "sk-openai-provider-test-secret",
+      }),
+    }));
+    const body = await res.json();
+
+    expect(res.status).toBe(401);
+    expect(body).toEqual({
+      error: "OpenAI rejected the API key. Reconnect the provider or paste a fresh key.",
+      code: "llm",
+    });
+    expect(createAIFromConfig).toHaveBeenCalledWith(expect.objectContaining({
+      provider: "openai",
+      apiKey: "sk-openai-provider-test-secret",
+      maxTokens: 256,
+    }));
+    expect(text).toHaveBeenCalledWith("Reply with exactly OK. No punctuation, no extra words.");
+    expect(JSON.stringify(body)).not.toContain("sk-openai-provider-test-secret");
+    expect(JSON.stringify(body)).not.toContain("Bearer");
+  });
+
   it("requires BYOK provider access before listing hosted LLM models", async () => {
     const getHostedProviderProfile = vi.fn();
     const fetch = vi.fn();
