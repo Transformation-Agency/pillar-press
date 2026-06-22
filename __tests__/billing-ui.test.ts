@@ -84,4 +84,22 @@ describe("browser billing upgrade helpers", () => {
     expect(book).toContain("notifyBookDriveBlocked");
     expect(book).toContain("driveActionVisible");
   });
+
+  it("app shell wires the Billing and usage panel to status, usage, checkout, and portal flows", () => {
+    const app = readFileSync(new URL("../public/app.jsx", import.meta.url), "utf8");
+
+    expect(app).toContain('aria-label="Billing and usage"');
+    expect(app).toContain("window.Store.refreshBilling()");
+    expect(app).toContain("window.Store.startCheckout(plan.id)");
+    expect(app).toContain("window.Store.openBillingPortal()");
+    expect(app).toContain("kingspress:billing-action-required");
+    expect(app).toContain("This billing period");
+    expect(app).toContain('["llm", "gather", "media", "storage"]');
+    expect(app).toContain("AI credits");
+    expect(app).toContain("Gather runs");
+    expect(app).toContain("Media generations");
+    expect(app).toContain("Storage");
+    expect(app).toContain("Manage billing");
+    expect(app).toContain("Use Stripe Customer Portal to change or cancel your current plan.");
+  });
 });
