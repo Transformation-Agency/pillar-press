@@ -124,4 +124,33 @@ describe("browser generator API wrapper", () => {
       ["substack", "error", "Reconnect the outputs model before generating platform posts."],
     ]);
   });
+
+  it("condenses one output through the encoded server route", async () => {
+    const calls: Array<{ url: string; init: any }> = [];
+    const gen = loadBrowserGenerators(async (url: string, init: any) => {
+      calls.push({ url, init });
+      return jsonResponse({ platform: "x/thread", draftPost: "Tighter post." });
+    });
+
+    await expect(gen.condenseOutput("piece_1", "x/thread", 0.35)).resolves.toEqual({
+      platform: "x/thread",
+      draftPost: "Tighter post.",
+    });
+    expect(calls[0].url).toBe("/api/pieces/piece_1/outputs/x%2Fthread/condense");
+    expect(JSON.parse(calls[0].init.body)).toEqual({ ratio: 0.35 });
+  });
+
+  it("defaults condense ratio and surfaces readable condense errors", async () => {
+    const calls: Array<{ url: string; init: any }> = [];
+    const gen = loadBrowserGenerators(async (url: string, init: any) => {
+      calls.push({ url, init });
+      return jsonResponse({ error: "Reconnect the outputs model before condensing this post." }, false, 502);
+    });
+
+    await expect(gen.condenseOutput("piece_1", "substack")).rejects.toThrow(
+      "Reconnect the outputs model before condensing this post.",
+    );
+    expect(calls[0].url).toBe("/api/pieces/piece_1/outputs/substack/condense");
+    expect(JSON.parse(calls[0].init.body)).toEqual({ ratio: 0.4 });
+  });
 });
