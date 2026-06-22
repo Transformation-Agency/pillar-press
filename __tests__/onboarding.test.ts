@@ -942,9 +942,20 @@ describe("browser onboarding action registry", () => {
         profile: {
           brand: "kings_press",
           communicationPlatforms: [{ platform: "LinkedIn", priority: "primary" }],
+          selfStatement: "I help operators turn field notes into useful systems.",
+          primaryAudience: "Independent operators",
+          throughline: "Useful ideas should become publishable work.",
+          publicationDefaults: {
+            defaultOutputTypes: ["linkedin_post", "article"],
+            preserveRawLanguage: "preserve_heavily",
+            humanReviewRequired: true,
+          },
           permissions: { mayPublishOrSend: false },
         },
       },
+      selfVision: "I help operators turn field notes into useful systems.",
+      audiences: [{ id: "operators", name: "Independent operators", note: "Wants direct practical work." }],
+      throughlines: [{ id: "useful-work", name: "Useful work", note: "Useful ideas should become publishable work." }],
       strategy: { body: "Shape drafts for LinkedIn." },
       voiceRules: { rules: ["Keep the original cadence."] },
       redLines: { rules: ["Do not publish automatically."] },
@@ -958,6 +969,14 @@ describe("browser onboarding action registry", () => {
       data: { saved: true },
     });
     expect(savedPatch).toEqual(patch);
+    expect(savedPatch.setupProfile.profile.permissions).toEqual({ mayPublishOrSend: false });
+    expect(savedPatch.setupProfile.profile.publicationDefaults).toMatchObject({
+      humanReviewRequired: true,
+      preserveRawLanguage: "preserve_heavily",
+    });
+    expect(savedPatch.selfVision).toContain("operators");
+    expect(savedPatch.audiences[0]).toMatchObject({ id: "operators", name: "Independent operators" });
+    expect(savedPatch.throughlines[0]).toMatchObject({ id: "useful-work", name: "Useful work" });
   });
 
   it("reuses an existing focus name instead of creating a duplicate campaign", async () => {
