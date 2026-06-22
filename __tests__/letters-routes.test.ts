@@ -100,6 +100,87 @@ describe("letter workflow routes", () => {
     expect(remaining.recipients).toEqual([]);
   });
 
+  it("creates, lists, updates, and deletes local-first letter workflows through the API", async () => {
+    const {
+      createLocalCampaign,
+      createLocalLetterRecipient,
+      getLocalLetterWorkflow,
+    } = await import("@/lib/local/database");
+    const campaign = createLocalCampaign({ name: "Family letters" });
+    const recipient = createLocalLetterRecipient({
+      displayName: "Ada Lovelace",
+      relationship: "Longtime collaborator",
+      defaultTone: "Warm, precise, and direct.",
+      notes: "Prefers a clear ask near the top.",
+      preferences: { structure: "short opening, context, ask" },
+    });
+    const workflowsRoute = await import("../app/api/letter-workflows/route");
+
+    const createResponse = await workflowsRoute.POST(new Request("http://test.local/api/letter-workflows", {
+      method: "POST",
+      body: JSON.stringify({
+        campaignId: campaign.id,
+        recipientId: recipient.id,
+        purpose: "Ask Ada to review the launch letter.",
+        desiredOutcome: "Receive feedback this week.",
+        occasion: "Launch week",
+        tone: "Grateful and direct.",
+        constraints: "Keep it under one page and include one clear ask.",
+        sourceContext: "The draft is ready for a final editorial read.",
+        uploads: [{ name: "prior-letter.md", text: "Dear Ada, thank you for your notes." }],
+        dictationTranscript: "Mention gratitude for her earlier comments.",
+      }),
+    }));
+    const created = await createResponse.json();
+
+    expect(createResponse.status).toBe(201);
+    expect(created.workflow).toMatchObject({
+      campaignId: campaign.id,
+      recipientId: recipient.id,
+      purpose: "Ask Ada to review the launch letter.",
+      desiredOutcome: "Receive feedback this week.",
+      recipientSnapshot: {
+        displayName: "Ada Lovelace",
+        defaultTone: "Warm, precise, and direct.",
+        preferences: { structure: "short opening, context, ask" },
+      },
+      uploads: [{ name: "prior-letter.md", text: "Dear Ada, thank you for your notes." }],
+    });
+
+    const listResponse = await workflowsRoute.GET(new Request("http://test.local/api/letter-workflows?campaignId=" + campaign.id));
+    const listed = await listResponse.json();
+    expect(listed.workflows.map((workflow: { id: string }) => workflow.id)).toEqual([created.workflow.id]);
+
+    const workflowRoute = await import("../app/api/letter-workflows/[id]/route");
+    const patchResponse = await workflowRoute.PATCH(new Request("http://test.local/api/letter-workflows/" + created.workflow.id, {
+      method: "PATCH",
+      body: JSON.stringify({
+        tone: "Tender and concrete.",
+        constraints: "Open with affection, then one specific ask.",
+        status: "ready",
+      }),
+    }), { params: Promise.resolve({ id: created.workflow.id }) });
+    const patched = await patchResponse.json();
+
+    expect(patchResponse.status).toBe(200);
+    expect(patched.workflow).toMatchObject({
+      id: created.workflow.id,
+      tone: "Tender and concrete.",
+      constraints: "Open with affection, then one specific ask.",
+      status: "ready",
+    });
+    expect(getLocalLetterWorkflow(created.workflow.id)?.status).toBe("ready");
+
+    const deleteResponse = await workflowRoute.DELETE(new Request("http://test.local/api/letter-workflows/" + created.workflow.id), {
+      params: Promise.resolve({ id: created.workflow.id }),
+    });
+    expect(deleteResponse.status).toBe(200);
+
+    const afterDelete = await workflowsRoute.GET(new Request("http://test.local/api/letter-workflows?campaignId=" + campaign.id));
+    const remaining = await afterDelete.json();
+    expect(remaining.workflows).toEqual([]);
+  });
+
   it("creates a normal campaign piece from a local-first letter workflow", async () => {
     const {
       createLocalCampaign,
