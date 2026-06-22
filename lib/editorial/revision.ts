@@ -88,6 +88,13 @@ function choosePlan(input: {
   const prompt = `${buildFullFindingsBlock(input.piece.packet || {})}\n\n${draft}`;
   const chunks = buildTextChunks(draft, { maxTokens: 1_600, overlapTokens: 0, preferHeadings: true });
   if (input.mode !== "full") return { plan: "light_polish", chunks, warnings: chunks.length > 1 ? [`revision_chunked:${chunks.length}`] : [] };
+  if (input.categoryCtx.revisionModeDefaults?.allowStructuralPass === false) {
+    return {
+      plan: "light_polish",
+      chunks,
+      warnings: ["category_structural_pass_disabled"].concat(chunks.length > 1 ? [`revision_chunked:${chunks.length}`] : []),
+    };
+  }
   const wholeDocOk = fitsSinglePass({ system, prompt, budget, safetyMarginTokens: 2_000 });
   if (wholeDocOk) return { plan: "structural_then_polish", chunks, warnings: chunks.length > 1 ? [`revision_chunked:${chunks.length}`] : [] };
   return { plan: "chunked_structural_plan_then_polish", chunks, warnings: [`long_input_staged:${chunks.length}`] };
@@ -159,7 +166,8 @@ export async function runCategoryAwareRevision(input: {
   await input.onProgress?.({ text: "", changelog: [], status: "running", trace });
 
   if (plan.plan !== "chunked_structural_plan_then_polish") {
-    stage(trace, mode === "full" ? "structure" : "polish", mode === "full" ? "Restructuring and polishing" : "Polishing passages", "running");
+    const effectiveMode = plan.plan === "light_polish" ? "light" : mode;
+    stage(trace, effectiveMode === "full" ? "structure" : "polish", effectiveMode === "full" ? "Restructuring and polishing" : "Polishing passages", "running");
     let progressCalls = 0;
     const result = await generateRevision(
       { ...input.piece, categoryContext: input.categoryCtx } as RevisionPieceInput,
@@ -169,10 +177,10 @@ export async function runCategoryAwareRevision(input: {
         progressCalls = Math.max(progressCalls, done);
         await input.onProgress?.({ text: "", changelog: [], status: "running", trace: { ...trace, chunks: total } });
       },
-      { mode },
+      { mode: effectiveMode },
     );
-    callCount = (mode === "full" ? 1 : 0) + Math.max(progressCalls, plan.chunks.length);
-    stage(trace, mode === "full" ? "structure" : "polish", mode === "full" ? "Restructuring and polishing" : "Polishing passages", "succeeded");
+    callCount = (effectiveMode === "full" ? 1 : 0) + Math.max(progressCalls, plan.chunks.length);
+    stage(trace, effectiveMode === "full" ? "structure" : "polish", effectiveMode === "full" ? "Restructuring and polishing" : "Polishing passages", "succeeded");
     return { revision: { ...result, status: "complete", trace }, callCount };
   }
 

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { GATES, PREAMBLE, SEVERITY, runGate, type GateResult } from "@/lib/gates";
 import { buildCategoryContext } from "@/lib/editorial/categoryContext";
-import { chooseReviewPlan, runGateWithContext } from "@/lib/editorial/review";
+import { chooseReviewPlan, runCategoryAwareReview, runGateWithContext } from "@/lib/editorial/review";
 import type { AI } from "@/lib/llm";
 
 // A fake AI that records the prompts/systems it was called with and returns a
@@ -108,5 +108,31 @@ describe("runGate normalization", () => {
     expect(plan.plan).toBe("chunked_reduce");
     expect(plan.chunks.length).toBeGreaterThan(1);
     expect(plan.warnings[0]).toContain("long_input_chunked");
+  });
+
+  it("runs review with category trace metadata and category-aware systems", async () => {
+    const ai = fakeAI(() => ({ summary: "ok", findings: [] }));
+    const categoryCtx = buildCategoryContext({
+      category: "letter",
+      categoryContext: { recipientName: "Ada", toneGuidance: "warm but direct" },
+    });
+
+    const result = await runCategoryAwareReview({
+      draft: "Dear Ada, thank you for yesterday.",
+      refCtx: "REF",
+      categoryCtx,
+      taskAI: { provider: "ollama", model: "gemma4:26b-mlx" },
+      ai,
+    });
+
+    expect(result.trace).toMatchObject({
+      category: "letter",
+      categoryLabel: "Letter: Ada",
+      plan: "single_pass",
+      chunks: 1,
+    });
+    expect(result.callCount).toBe(GATES.length);
+    expect(ai.calls.every((call) => call.system?.includes("Letter / direct communication"))).toBe(true);
+    expect(ai.calls.every((call) => call.system?.includes("warm but direct"))).toBe(true);
   });
 });

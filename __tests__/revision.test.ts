@@ -197,6 +197,45 @@ describe("REVISION_SYSTEM", () => {
 });
 
 describe("category-aware revision orchestration", () => {
+  it("uses a letter lens and skips structural rewrite when no structure guidance is provided", async () => {
+    const calls: { prompt: string; system?: string }[] = [];
+    const ai: AI = {
+      calls,
+      async text(prompt: string, opts?: { system?: string }) {
+        calls.push({ prompt, system: opts?.system });
+        return "@@REVISION@@\nDear Ada, thank you for yesterday.\n@@CHANGELOG@@\n- [C1] warmed the sentence :: letter tone\n@@END@@";
+      },
+      async json() { throw new Error("not used"); },
+      async complete() { throw new Error("not used"); },
+      extractJSON: () => null,
+      repairJSON: () => null,
+    } as AI & { calls: typeof calls };
+    const categoryCtx = buildCategoryContext({
+      category: "letter",
+      categoryContext: { recipientName: "Ada", toneGuidance: "warm but direct" },
+    });
+
+    const result = await runCategoryAwareRevision({
+      piece: { original: "Dear Ada, thanks.", packet: FULL_PACKET },
+      refCtx: "REF",
+      categoryCtx,
+      taskAI: { provider: "ollama", model: "gemma4:26b-mlx" },
+      ai,
+      opts: { mode: "full" },
+    });
+
+    expect(result.revision.trace).toMatchObject({
+      category: "letter",
+      categoryLabel: "Letter: Ada",
+      plan: "light_polish",
+      chunks: 1,
+    });
+    expect(result.revision.trace?.warnings).toContain("category_structural_pass_disabled");
+    expect(calls).toHaveLength(1);
+    expect(calls[0].system).toContain("Letter / direct communication");
+    expect(calls[0].system).toContain("warm but direct");
+  });
+
   it("uses staged structural planning for long full revisions", async () => {
     const calls: { prompt: string; system?: string }[] = [];
     const ai: AI = {
