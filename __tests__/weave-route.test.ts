@@ -127,4 +127,62 @@ describe("POST /api/weave", () => {
     });
     expect(reserveUsage).not.toHaveBeenCalled();
   });
+
+  it("accepts local campaign ids and injects local references into the weave run", async () => {
+    const ai = { complete: vi.fn(), json: vi.fn(), text: vi.fn() };
+    const getAIForTaskForUser = vi.fn(async () => ({
+      ai,
+      providerSource: "local",
+      provider: "ollama",
+      model: "gemma4:26b-mlx",
+    }));
+    const runWeave = vi.fn(async () => ({
+      extracts: [],
+      brief: {},
+      mapping: {},
+      draft: "draft",
+      generatedAt: 123,
+    }));
+    const reservation = { id: "usage_2", workspaceId: "local-workspace", idempotencyKey: "weave-local" };
+    const reserveUsage = vi.fn(async () => reservation);
+
+    vi.doMock("@/lib/auth", () => ({
+      requireUser: vi.fn(async () => ({ id: "local-owner", workspaceId: "local-workspace", role: "author" })),
+    }));
+    vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => true }));
+    vi.doMock("@/lib/local/database", () => ({
+      getLocalCampaign: vi.fn(() => ({ id: "camp_local", workspaceId: "local-workspace", name: "Local book" })),
+      getLocalReferences: vi.fn(() => ({ doc: { strategy: { note: "Use the house strategy." } } })),
+    }));
+    vi.doMock("@/lib/refContext", () => ({
+      buildRefContext: vi.fn(() => "LOCAL REF CONTEXT"),
+    }));
+    vi.doMock("@/lib/llm", () => ({ getAIForTaskForUser }));
+    vi.doMock("@/lib/weave", () => ({ runWeave }));
+    vi.doMock("@/lib/billing/usage", () => ({
+      reserveUsage,
+      completeUsageReservation: vi.fn(),
+      failUsageReservation: vi.fn(),
+    }));
+    vi.doMock("@/lib/db", () => ({
+      db: { query: { campaigns: { findFirst: vi.fn() }, references: { findFirst: vi.fn() } } },
+      campaigns: {},
+      references: {},
+    }));
+
+    const { POST } = await import("../app/api/weave/route");
+    const sources = [
+      { name: "A", text: "This first source has enough content for weaving." },
+      { name: "B", text: "This second source also has enough content for weaving." },
+    ];
+    const res = await POST(request("http://test.local/api/weave", { sources, campaignId: "camp_local" }));
+
+    expect(res.status).toBe(200);
+    expect(runWeave).toHaveBeenCalledWith(sources, "LOCAL REF CONTEXT", ai);
+    expect(reserveUsage).toHaveBeenCalledWith(expect.objectContaining({
+      campaignId: "camp_local",
+      provider: "ollama",
+      model: "gemma4:26b-mlx",
+    }));
+  });
 });

@@ -340,7 +340,7 @@ function Hint({ icon, text }) {
 }
 
 /* ---------- right: Source Pack (weave) ---------- */
-function SourcePack({ piece, refCtx, onDraft, busy, setBusy, setErr }) {
+function SourcePack({ piece, refCtx, campaignId, onDraft, busy, setBusy, setErr }) {
   const [notes, setNotes] = React.useState("");
   const [prog, setProg] = React.useState(null);
   const [uploading, setUploading] = React.useState(false);
@@ -365,7 +365,7 @@ function SourcePack({ piece, refCtx, onDraft, busy, setBusy, setErr }) {
     const sources = notesToSources(notes);
     setBusy("weave"); setErr(null); setProg(null);
     try {
-      const res = await window.WEAVE.runWeave(sources, refCtx, (p) => setProg(p));
+      const res = await window.WEAVE.runWeave(sources, refCtx, (p) => setProg(p), { campaignId: campaignId || piece.campaignId });
       window.Store.updatePiece(piece.id, { weave: res, original: res.draft, status: piece.status === "Draft" ? "Draft" : piece.status });
       onDraft(res.draft);
     } catch (e) { setErr(e.message || "Weave failed."); }
@@ -776,7 +776,7 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
             })}
           </div>
           <div className="scroll-y" style={{ flex: 1, padding: "18px 20px" }}>
-            {panel === "sources" && <SourcePack piece={piece} refCtx={refCtx} onDraft={(d) => setDraft(d)} busy={busy} setBusy={setBusy} setErr={setErr} />}
+            {panel === "sources" && <SourcePack piece={piece} refCtx={refCtx} campaignId={bookCampaign && bookCampaign.id} onDraft={(d) => setDraft(d)} busy={busy} setBusy={setBusy} setErr={setErr} />}
             {panel === "review" && <PacketView piece={piece} />}
             {panel === "revision" && <RevisionView piece={piece} onAccept={acceptRevision} accepting={false} />}
             {panel === "outputs" && <OutputsView piece={piece} />}

@@ -111,7 +111,7 @@ function BriefRow({ label, text }) {
   );
 }
 
-function Weave({ weave, refCtx, onOpenPiece }) {
+function Weave({ weave, refCtx, campaignId, onOpenPiece }) {
   const sources = weave.sources || [];
   const result = weave.result;
   const [expanded, setExpanded] = React.useState({});
@@ -150,7 +150,7 @@ function Weave({ weave, refCtx, onOpenPiece }) {
   const run = async () => {
     setRunning(true); setErr(null); setProgress(null); setView("intake");
     try {
-      const res = await window.WEAVE.runWeave(sources, refCtx, (p) => setProgress(p));
+      const res = await window.WEAVE.runWeave(sources, refCtx, (p) => setProgress(p), { campaignId });
       window.Store.setWeaveResult(res);
       setView("result");
     } catch (e) { setErr(e.message || "Weave failed."); }

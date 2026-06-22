@@ -42,7 +42,7 @@ describe("browser Book Writer screen", () => {
     expect(screen).toContain("window.GEN.generateRevision(window.Store.getPiece(selectedId), refCtx");
     expect(screen).toContain('fetch("/api/pieces/" + selectedId + "/revision/status"');
     expect(screen).toContain("window.GEN.generateOutputs(window.Store.getPiece(selectedId), active, BOOK_PLAT_AUD, refCtx");
-    expect(screen).toContain("window.WEAVE.runWeave(sources, refCtx");
+    expect(screen).toContain("window.WEAVE.runWeave(sources, refCtx, (p) => setProg(p), { campaignId: campaignId || piece.campaignId })");
     expect(screen).toContain("window.Store.updatePiece(piece.id, { weave: res, original: res.draft");
     expect(screen).toContain("window.BOOK.acceptRevisionPatch(p)");
   });

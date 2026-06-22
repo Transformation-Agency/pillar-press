@@ -1974,7 +1974,7 @@ function App() {
         <LetterDesk campaignId={activeCampaign.id} onOpenPiece={openPiece} />
       )}
       {activeCampaign && view === "weave" && (
-        <Weave weave={window.Store.getWeave()} refCtx={refCtx} onOpenPiece={openPiece} />
+        <Weave weave={window.Store.getWeave()} refCtx={refCtx} campaignId={activeCampaign.id} onOpenPiece={openPiece} />
       )}
       {activeCampaign && view === "gather" && (
         <Gather campaignId={activeCampaign.id} refCtx={refCtx} onGoWeave={() => goLibrarySection("weave")} />

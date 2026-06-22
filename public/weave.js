@@ -7,7 +7,7 @@
    ============================================================ */
 (function () {
 
-  async function runWeave(sources, refCtx, onProgress) {
+  async function runWeave(sources, refCtx, onProgress, options) {
     const all = sources || [];
     const usable = all.filter((s) => (s.text || "").trim().length > 20);
     if (usable.length < 2) throw new Error("Add at least two sources with content to weave.");
@@ -21,7 +21,10 @@
     const res = await fetch("/api/weave", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sources: usable.map((s) => ({ name: s.name, text: s.text })) }),
+      body: JSON.stringify(Object.assign(
+        { sources: usable.map((s) => ({ name: s.name, text: s.text })) },
+        options && options.campaignId ? { campaignId: options.campaignId } : {},
+      )),
     });
     if (!res.ok) {
       let msg = "Weave failed.";

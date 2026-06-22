@@ -50,7 +50,7 @@ describe("browser Weave API wrapper", () => {
       { name: "Too short", text: "brief" },
       { name: "Source A", text: "This source has more than twenty characters." },
       { name: "Source B", text: "This second source also has enough content." },
-    ], "ignored browser ref ctx", (p: unknown) => progress.push(p));
+    ], "ignored browser ref ctx", (p: unknown) => progress.push(p), { campaignId: "camp_local" });
 
     expect(calls[0].url).toBe("/api/weave");
     expect(JSON.parse(calls[0].init.body)).toEqual({
@@ -58,6 +58,7 @@ describe("browser Weave API wrapper", () => {
         { name: "Source A", text: "This source has more than twenty characters." },
         { name: "Source B", text: "This second source also has enough content." },
       ],
+      campaignId: "camp_local",
     });
     expect(output).toEqual(result);
     expect(progress).toEqual([
@@ -104,5 +105,17 @@ describe("browser Weave API wrapper", () => {
       { title: "Woven Draft", campaignId: null, opts: { original: "Generated unified draft" } },
     ]);
     expect(openPiece).toHaveBeenCalledWith("piece_1");
+  });
+
+  it("wires Weave screens to send campaign ids for reference-aware synthesis", () => {
+    const app = readFileSync(new URL("../public/app.jsx", import.meta.url), "utf8");
+    const screen = readFileSync(new URL("../public/screen-weave.jsx", import.meta.url), "utf8");
+    const book = readFileSync(new URL("../public/screen-book.jsx", import.meta.url), "utf8");
+
+    expect(app).toContain("<Weave weave={window.Store.getWeave()} refCtx={refCtx} campaignId={activeCampaign.id} onOpenPiece={openPiece} />");
+    expect(screen).toContain("function Weave({ weave, refCtx, campaignId, onOpenPiece })");
+    expect(screen).toContain("window.WEAVE.runWeave(sources, refCtx, (p) => setProgress(p), { campaignId })");
+    expect(book).toContain("function SourcePack({ piece, refCtx, campaignId, onDraft, busy, setBusy, setErr })");
+    expect(book).toContain("window.WEAVE.runWeave(sources, refCtx, (p) => setProg(p), { campaignId: campaignId || piece.campaignId })");
   });
 });
