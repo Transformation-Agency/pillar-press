@@ -69,6 +69,7 @@ function RevisionTab({ piece, onUpdate, refCtx }) {
   const [full, setFull] = React.useState(false);   // full = restructure + polish
   const isMobile = window.useIsMobile();
   const rev = piece.revision;
+  const accepted = !!(rev && (piece.original || "").trim() === (rev.text || "").trim());
 
   const generate = async () => {
     setBusy(true); setErr(null); setProg(null);
@@ -100,6 +101,13 @@ function RevisionTab({ piece, onUpdate, refCtx }) {
       onUpdate(patch);
     } catch (e) { polling = false; setErr(e.message || "Generation failed."); }
     setBusy(false); setProg(null);
+  };
+
+  const acceptRevision = () => {
+    if (!rev || !rev.text || accepted) return;
+    const patch = { original: rev.text };
+    if (piece.status !== "Revised") patch.status = "Revised";
+    onUpdate(patch);
   };
 
   const busyLabel = prog && prog.total > 1
@@ -160,6 +168,11 @@ function RevisionTab({ piece, onUpdate, refCtx }) {
             </div>
             <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
               {FullToggle}
+              {accepted
+                ? <span className="chip" style={{ color: "var(--st-approved)", borderColor: "var(--st-approved)" }}><span className="dot" /> Accepted into draft</span>
+                : <button className="btn primary sm" onClick={acceptRevision} disabled={busy}>
+                    <Icon name="check" size={14} /> Accept revision
+                  </button>}
               {window.AudioActions && <AudioActions text={() => rev.text} label="revision" filename={(piece.title || "revision") + "-revision.mp3"} pieceId={piece.id} campaignId={piece.campaignId} />}
               <CopyButton text={() => rev.text} label="Copy revision" />
               <button className="btn ghost sm" onClick={generate} disabled={busy}>
