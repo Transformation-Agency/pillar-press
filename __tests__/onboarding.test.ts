@@ -73,7 +73,7 @@ function createTestWindow() {
   return window;
 }
 
-function loadBrowserActions(options?: { fetch?: unknown }) {
+function loadBrowserActions(options?: { fetch?: unknown; navigator?: unknown }) {
   const window = createTestWindow();
   const manifestSource = readFileSync(new URL("../public/onboarding-manifest.js", import.meta.url), "utf8");
   const runtimeSource = readFileSync(new URL("../public/onboarding-runtime.js", import.meta.url), "utf8");
@@ -86,7 +86,7 @@ function loadBrowserActions(options?: { fetch?: unknown }) {
   }
   runInNewContext(manifestSource, { window });
   runInNewContext(runtimeSource, { window, Date });
-  runInNewContext(actionsSource, { window, Date, CustomEvent, Event, navigator: {}, fetch: options?.fetch });
+  runInNewContext(actionsSource, { window, Date, CustomEvent, Event, navigator: options?.navigator || {}, fetch: options?.fetch });
   return window;
 }
 
@@ -881,6 +881,49 @@ describe("browser onboarding action registry", () => {
 
     expect(received).toEqual([{ transcript: "LinkedIn and Substack", source: "desktop" }]);
     expect(cleaned).toBe(true);
+  });
+
+  it("requests microphone access, stops tracks, and starts desktop voice setup", async () => {
+    const stopped: string[] = [];
+    let requested: any = null;
+    let desktopStarted = false;
+    const window = loadBrowserActions({
+      navigator: {
+        mediaDevices: {
+          getUserMedia: async (constraints: any) => {
+            requested = constraints;
+            return {
+              getTracks: () => [{ stop: () => stopped.push("audio") }],
+            };
+          },
+        },
+      },
+    });
+    const registry = window.KP_ONBOARDING_ACTIONS;
+    window.KINGS_DESKTOP.startVoiceSession = async () => {
+      desktopStarted = true;
+    };
+
+    const result = await registry.requestVoice();
+
+    expect(result).toMatchObject({
+      intent: "request_voice",
+      status: "succeeded",
+      data: { voiceConnected: true },
+    });
+    expect(requested).toEqual({ audio: true });
+    expect(stopped).toEqual(["audio"]);
+    expect(desktopStarted).toBe(true);
+
+    const unsupported = loadBrowserActions();
+    unsupported.navigator = {};
+    const failure = await unsupported.KP_ONBOARDING_ACTIONS.requestVoice();
+
+    expect(failure).toMatchObject({
+      intent: "request_voice",
+      status: "failed",
+      error: "Microphone access is not available here.",
+    });
   });
 
   it("posts setup profile extraction for review without saving references", async () => {
