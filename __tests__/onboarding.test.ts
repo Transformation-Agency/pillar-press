@@ -277,6 +277,12 @@ describe("setup profile extraction schema", () => {
     const parsed = setupProfileSchema.parse({
       brand: "kings_press",
       communicationPlatforms: [{ platform: "Substack", priority: "primary" }],
+      publicationDefaults: {
+        humanReviewRequired: false,
+      },
+      voiceProfile: {
+        memoryPermission: "approved",
+      },
       permissions: {
         mayUseSavedMemory: true,
         mayUseUploadedVoiceExamples: true,
@@ -291,6 +297,8 @@ describe("setup profile extraction schema", () => {
       mayUseWebResearch: false,
       mayPublishOrSend: false,
     });
+    expect(parsed.publicationDefaults.humanReviewRequired).toBe(true);
+    expect(parsed.voiceProfile.memoryPermission).toBe("not_asked");
   });
 
   it("frames transcripts and uploads as untrusted source material", () => {
