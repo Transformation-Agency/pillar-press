@@ -21,8 +21,14 @@ function mockFetch(status: number, body: unknown, capture?: (url: string, init: 
   });
 }
 
-beforeEach(() => { process.env.HEDRA_API_KEY = KEY; });
-afterEach(() => { vi.restoreAllMocks(); });
+beforeEach(() => {
+  process.env.HEDRA_API_KEY = KEY;
+  process.env.HEDRA_RETRY_DELAY_MS = "0";
+});
+afterEach(() => {
+  delete process.env.HEDRA_RETRY_DELAY_MS;
+  vi.restoreAllMocks();
+});
 
 describe("hedra client", () => {
   it("sends the X-API-Key header and base URL", async () => {
