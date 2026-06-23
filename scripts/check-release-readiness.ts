@@ -1,9 +1,11 @@
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const workbookPath = join(process.cwd(), "docs", "kings-press-feature-status.xlsx");
 const sheetPath = "xl/worksheets/sheet1.xml";
+export const WAIVED_STATUS = "Waived by owner";
 const nonBlockingStatuses = new Set([
   "Retest passed",
   "Not independently verified (hosted; out of local-first scope)",
@@ -61,18 +63,25 @@ function sheetCells(sheetXml: string, strings: string[]): Map<string, string> {
   return cells;
 }
 
-type TrackerRow = {
+export type TrackerRow = {
   row: number;
   storyId: string;
   featureArea: string;
   feature: string;
   testStatus: string;
   evidenceStatus: string;
+  testEvidence: string;
   priority: string;
   errorsFound: string;
 };
 
-function trackerRows(): TrackerRow[] {
+export function isNonBlockingRow(row: Pick<TrackerRow, "testStatus" | "testEvidence" | "errorsFound">): boolean {
+  if (nonBlockingStatuses.has(row.testStatus)) return true;
+  if (row.testStatus !== WAIVED_STATUS) return false;
+  return /\bWAIVER:\s+\S/i.test(`${row.testEvidence}\n${row.errorsFound}`);
+}
+
+export function trackerRows(): TrackerRow[] {
   if (!existsSync(workbookPath)) throw new Error(`Missing canonical tracker workbook: ${workbookPath}`);
   const strings = sharedStrings();
   const cells = sheetCells(unzipText(sheetPath), strings);
@@ -87,6 +96,7 @@ function trackerRows(): TrackerRow[] {
       feature: cells.get(`C${row}`)?.trim() ?? "",
       evidenceStatus: cells.get(`G${row}`)?.trim() ?? "",
       testStatus: cells.get(`I${row}`)?.trim() ?? "",
+      testEvidence: cells.get(`J${row}`)?.trim() ?? "",
       errorsFound: cells.get(`K${row}`)?.trim() ?? "",
       priority: cells.get(`L${row}`)?.trim() ?? "",
     });
@@ -94,24 +104,34 @@ function trackerRows(): TrackerRow[] {
   return rows;
 }
 
-const rows = trackerRows();
-const counts = rows.reduce<Record<string, number>>((acc, row) => {
-  acc[row.testStatus] = (acc[row.testStatus] || 0) + 1;
-  return acc;
-}, {});
-const blocking = rows.filter((row) => !nonBlockingStatuses.has(row.testStatus));
-
-console.log(`King's Press release readiness from ${workbookPath}`);
-console.log(JSON.stringify({ totalStories: rows.length, statusCounts: counts }, null, 2));
-
-if (blocking.length) {
-  console.error("\nRelease is not ready. Remaining blocking or unwaived tracker rows:");
-  for (const row of blocking) {
-    console.error(`- ${row.storyId} (${row.priority}) ${row.featureArea} / ${row.feature}: ${row.testStatus}`);
-    if (row.errorsFound) console.error(`  ${row.errorsFound}`);
-  }
-  console.error("\nDo not build/notarize/upload final release DMGs until these rows pass or are explicitly waived in the tracker.");
-  process.exit(1);
+export function checkReleaseReadiness(rows: TrackerRow[]) {
+  const counts = rows.reduce<Record<string, number>>((acc, row) => {
+    acc[row.testStatus] = (acc[row.testStatus] || 0) + 1;
+    return acc;
+  }, {});
+  const blocking = rows.filter((row) => !isNonBlockingRow(row));
+  return { totalStories: rows.length, statusCounts: counts, blocking };
 }
 
-console.log("Release readiness passed: no unwaived tracker blockers remain.");
+function main() {
+  const result = checkReleaseReadiness(trackerRows());
+
+  console.log(`King's Press release readiness from ${workbookPath}`);
+  console.log(JSON.stringify({ totalStories: result.totalStories, statusCounts: result.statusCounts }, null, 2));
+
+  if (result.blocking.length) {
+    console.error("\nRelease is not ready. Remaining blocking or unwaived tracker rows:");
+    for (const row of result.blocking) {
+      console.error(`- ${row.storyId} (${row.priority}) ${row.featureArea} / ${row.feature}: ${row.testStatus}`);
+      if (row.errorsFound) console.error(`  ${row.errorsFound}`);
+    }
+    console.error("\nDo not build/notarize/upload final release DMGs until these rows pass or are explicitly waived in the tracker.");
+    process.exit(1);
+  }
+
+  console.log("Release readiness passed: no unwaived tracker blockers remain.");
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main();
+}

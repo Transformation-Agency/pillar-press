@@ -144,5 +144,10 @@ fails while any unwaived local-first release rows remain blocked, failed, or not
 independently verified. Hosted-auth rows marked out of local-first scope are
 reported in counts but do not block desktop notarization.
 
+If the owner explicitly waives a provider-key/credit row, set that row's Test
+Status to `Waived by owner` and include a `WAIVER:` note in either Test Evidence
+or Errors Found with the owner, date, and exact scope. Rows marked `Waived by
+owner` without a `WAIVER:` note still block release.
+
 Only after the tracker has no unwaived release blockers should signed/notarized
 dual-arch release DMGs be built and uploaded.

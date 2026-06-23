@@ -82,7 +82,7 @@ async function runCapture(command: string, args: string[], label: string) {
   });
 }
 
-async function runRetryingResourceBusy(command: string, args: string[], label: string, attempts = 3) {
+async function runRetryingResourceBusy(command: string, args: string[], label: string, attempts = 8) {
   let lastError: Error | null = null;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
@@ -92,7 +92,7 @@ async function runRetryingResourceBusy(command: string, args: string[], label: s
       lastError = error instanceof Error ? error : new Error(String(error));
       if (!/Resource busy/i.test(lastError.message) || attempt === attempts) throw lastError;
       console.log(`retry ${label}: resource busy (${attempt}/${attempts})`);
-      await new Promise((resolve) => setTimeout(resolve, 750 * attempt));
+      await new Promise((resolve) => setTimeout(resolve, 1_500 * attempt));
     }
   }
   throw lastError ?? new Error(`${label} failed`);

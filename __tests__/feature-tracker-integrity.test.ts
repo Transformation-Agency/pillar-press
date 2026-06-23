@@ -25,6 +25,7 @@ const allowedStatuses = new Set([
   "Needs retest (live GUI/LLM pending)",
   "Not independently verified (hosted; out of local-first scope)",
   "Not independently verified (no live OpenAI key)",
+  "Waived by owner",
   "Partial - code + artifact; live boot pending",
   "Partial - code + BUILT-ARTIFACT verified; live OS prompt pending",
   "Partial - code-verified; live dropdown click pending",
