@@ -4,6 +4,7 @@ import { requireUser } from "@/lib/auth";
 import { safeRecordAuditEvent } from "@/lib/audit";
 import { requireByokProviderAccess } from "@/lib/billing/entitlements";
 import { toErrorResponse } from "@/lib/errors";
+import { desktopMediaProvider } from "@/lib/desktopSettings";
 import { getCredits } from "@/lib/hedra";
 import { listVoices } from "@/lib/elevenlabs";
 import { normalizeHostedProviderBaseUrl } from "@/lib/hostedProviderUrls";
@@ -16,6 +17,8 @@ import {
 const bodySchema = z.object({
   profileId: z.string().trim().min(1).max(120),
 });
+
+const mediaProviderSchema = z.enum(["hedra", "elevenlabs", "openai", "xai", "custom-image"]);
 
 function defaultBaseUrl(provider: HostedMediaProviderProfileSecret["provider"]) {
   if (provider === "openai") return "https://api.openai.com/v1";
@@ -96,17 +99,38 @@ async function testProfile(profile: HostedMediaProviderProfileSecret) {
   return testOpenAICompatibleProfile(profile);
 }
 
+function desktopProviderFromProfileId(profileId: string) {
+  const raw = profileId.startsWith("desktop-") ? profileId.slice("desktop-".length) : profileId;
+  const parsed = mediaProviderSchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
+
 export async function POST(req: Request) {
   try {
     const user = await requireUser();
+    const body = bodySchema.parse(await req.json());
     if (isLocalFirstMode()) {
-      return NextResponse.json({ error: "Desktop media provider settings are stored by the desktop app.", code: "local_first" }, { status: 409 });
+      const provider = desktopProviderFromProfileId(body.profileId);
+      if (!provider) {
+        return NextResponse.json({ error: "Media provider profile not found.", code: "not_found" }, { status: 404 });
+      }
+      const saved = desktopMediaProvider(provider);
+      if (!saved?.apiKey) {
+        return NextResponse.json({ error: "Media provider profile not found.", code: "not_found" }, { status: 404 });
+      }
+      return testProfile({
+        id: `desktop-${provider}`,
+        provider,
+        label: provider,
+        hasApiKey: true,
+        apiKey: saved.apiKey,
+        baseUrl: saved.baseUrl,
+      });
     }
     if (!user.workspaceId) {
       return NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
     }
     await requireByokProviderAccess({ ...user, workspaceId: user.workspaceId });
-    const body = bodySchema.parse(await req.json());
     const profile = await getHostedMediaProviderProfile(user, body.profileId);
     if (!profile) {
       return NextResponse.json({ error: "Media provider profile not found.", code: "not_found" }, { status: 404 });

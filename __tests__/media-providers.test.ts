@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createCipheriv } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getMediaProviderStatus } from "@/lib/mediaProviders";
@@ -177,5 +177,61 @@ describe("media provider status", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("returns local-first desktop media provider settings without secrets", async () => {
+    vi.resetModules();
+    const dir = mkdtempSync(join(tmpdir(), "kings-press-media-settings-"));
+    const settingsPath = join(dir, "desktop-settings.json");
+    const secret = encryptDesktopSecret("desktop-openai-secret");
+    writeFileSync(settingsPath, JSON.stringify({
+      mediaProviders: {
+        openai: { apiKey: secret.encrypted, baseUrl: "https://api.openai.com/v1" },
+      },
+    }));
+    const prevPath = process.env.KINGS_PRESS_LLM_SETTINGS_PATH;
+    const prevKey = process.env.KINGS_PRESS_DESKTOP_SETTINGS_KEY;
+    process.env.KINGS_PRESS_LLM_SETTINGS_PATH = settingsPath;
+    process.env.KINGS_PRESS_DESKTOP_SETTINGS_KEY = secret.keyText;
+    try {
+      vi.doMock("@/lib/auth", () => ({
+        requireUser: vi.fn(async () => ({ id: "local-user", role: "author" })),
+      }));
+      vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => true }));
+      const { GET } = await import("../app/api/media/provider-settings/route");
+      const res = await GET();
+      const body = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(body).toEqual({
+        settings: {
+          profiles: [{
+            id: "desktop-openai",
+            label: "openai",
+            provider: "openai",
+            baseUrl: "https://api.openai.com/v1",
+            hasApiKey: true,
+          }],
+          defaultProfileId: "desktop-openai",
+        },
+      });
+      expect(JSON.stringify(body)).not.toContain("desktop-openai-secret");
+      expect(JSON.stringify(body)).not.toContain(secret.encrypted);
+    } finally {
+      if (prevPath === undefined) delete process.env.KINGS_PRESS_LLM_SETTINGS_PATH;
+      else process.env.KINGS_PRESS_LLM_SETTINGS_PATH = prevPath;
+      if (prevKey === undefined) delete process.env.KINGS_PRESS_DESKTOP_SETTINGS_KEY;
+      else process.env.KINGS_PRESS_DESKTOP_SETTINGS_KEY = prevKey;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps Studio desktop media provider saves on the encrypted native bridge", () => {
+    const source = readFileSync(new URL("../public/screen-studio.jsx", import.meta.url), "utf8");
+
+    expect(source).toContain("window.KINGS_DESKTOP");
+    expect(source).toContain("desktop.saveMediaProviderKey(provider, key");
+    expect(source).toContain("Provider saved encrypted on this Mac");
+    expect(source).toContain("onProviderSaved={refreshProviderStatus}");
   });
 });
