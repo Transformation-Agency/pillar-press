@@ -99,6 +99,9 @@ Developer ID signing and Apple notarization use the stricter signed path:
 npm run desktop:build:signed
 npm run desktop:verify-signed-release
 ```
+The signed build runs `npm run desktop:release-readiness` first and stops before
+signing/notarization if the canonical tracker still has unwaived release
+blockers.
 
 ## LLM Configuration
 `GET /api/llm/status` reports the active provider/model and capabilities without

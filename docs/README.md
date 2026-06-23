@@ -75,3 +75,6 @@ Developer ID signing and Apple notarization are supported on macOS with:
 npm run desktop:build:signed
 npm run desktop:verify-signed-release
 ```
+
+`desktop:build:signed` runs the canonical tracker release-readiness gate before
+signing or notarizing, and will stop if unwaived desktop release blockers remain.

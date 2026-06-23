@@ -150,4 +150,5 @@ or Errors Found with the owner, date, and exact scope. Rows marked `Waived by
 owner` without a `WAIVER:` note still block release.
 
 Only after the tracker has no unwaived release blockers should signed/notarized
-dual-arch release DMGs be built and uploaded.
+dual-arch release DMGs be built and uploaded. `npm run desktop:build:signed`
+also runs this readiness gate before signing/notarization begins.

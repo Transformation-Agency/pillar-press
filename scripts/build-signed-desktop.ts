@@ -44,6 +44,10 @@ function tauriBin() {
   return join(root, "node_modules", ".bin", bin);
 }
 
+async function assertReleaseReadiness() {
+  await run("npm", ["run", "desktop:release-readiness"]);
+}
+
 async function run(command: string, args: string[]) {
   await new Promise<void>((resolve, reject) => {
     const child = spawn(command, args, {
@@ -106,6 +110,8 @@ async function notarizeDmg() {
 if (process.platform !== "darwin") {
   throw new Error("Signed desktop release builds are currently configured for macOS only.");
 }
+
+await assertReleaseReadiness();
 
 const signingIdentity =
   required("KINGS_PRESS_SIGNING_IDENTITY") ||

@@ -194,7 +194,9 @@ npm run desktop:build:signed
 npm run desktop:verify-signed-release
 ```
 
-`desktop:build:signed` refuses to run unless it can use either
+`desktop:build:signed` first runs `npm run desktop:release-readiness`, so it
+refuses to sign or notarize while the canonical tracker has unwaived desktop
+release blockers. It also refuses to run unless it can use either
 `KINGS_PRESS_SIGNING_IDENTITY`, `APPLE_SIGNING_IDENTITY`, or
 `MACOS_SIGNING_IDENTITY`, or an importable `APPLE_CERTIFICATE` plus
 `APPLE_CERTIFICATE_PASSWORD`. It also requires notarization credentials through
