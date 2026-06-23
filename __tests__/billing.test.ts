@@ -3,7 +3,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 beforeEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
-  vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: vi.fn(() => false) }));
+  vi.doUnmock("@/lib/local/mode");
+  delete process.env.KINGS_PRESS_LOCAL_FIRST;
+  delete process.env.KINGS_PRESS_HOSTED_WEB;
+  delete process.env.KINGS_PRESS_RUNTIME;
+  delete process.env.DATA_BACKEND;
   delete process.env.STRIPE_PRICE_PRO;
 });
 
@@ -623,7 +627,6 @@ describe("hosted billing status API", () => {
 
 describe("hosted billing session audit events", () => {
   it("returns readable local desktop errors instead of starting checkout or portal sessions", async () => {
-    vi.resetModules();
     vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: vi.fn(() => true) }));
     vi.doMock("@/lib/billing/stripe", () => ({
       BillingError: TestBillingError,
@@ -634,6 +637,8 @@ describe("hosted billing session audit events", () => {
       requireBillingUser: vi.fn(),
       requireCheckoutPlan: vi.fn(),
     }));
+    const { isLocalFirstMode } = await import("@/lib/local/mode");
+    expect(isLocalFirstMode()).toBe(true);
 
     const checkoutRoute = await import("../app/api/billing/checkout/route");
     const portalRoute = await import("../app/api/billing/portal/route");
