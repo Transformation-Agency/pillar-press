@@ -9,12 +9,12 @@ describe("browser Book Writer screen", () => {
 
     expect(screen).toContain("Book Writer");
     expect(screen).toContain("Each book is its own campaign");
-    expect(screen).toContain("NEW BOOK");
+    expect(screen).toContain("Book title");
     expect(screen).toContain("Pick a book, or start a new one");
     expect(screen).toContain("A book is its own campaign with its own library of chapters");
     expect(screen).toContain("Write a book, one chapter at a time");
     expect(screen).toContain("Add chapter 1");
-    expect(screen).toContain("window.BOOK.promptForBookCampaign()");
+    expect(screen).toContain("window.BOOK.createBookCampaign(name)");
     expect(screen).toContain("window.BOOK.createBookChapter(bookId, bookCampaign, t, chapters.length)");
   });
 

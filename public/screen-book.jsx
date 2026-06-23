@@ -99,6 +99,27 @@ function notesToSources(notes) {
 const BOOK_PLAT_AUD = { substack: "builders", facebook: "relational", instagram: "women-ai", x: "builders", threads: "general" };
 
 /* ---------- book selector: a book IS a campaign (its own library) ---------- */
+function BookCreateForm({ onCreate, compact }) {
+  const [name, setName] = React.useState("");
+  const clean = name.trim();
+  const commit = () => {
+    if (!clean) return;
+    onCreate(clean);
+    setName("");
+  };
+  return (
+    <div style={{ display: "flex", gap: compact ? 6 : 8, alignItems: "center", flexWrap: compact ? "nowrap" : "wrap" }}>
+      <input className="field" value={name} onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") commit(); }}
+        placeholder="Book title"
+        style={{ flex: 1, minWidth: compact ? 0 : 220, fontSize: compact ? 13 : 14, padding: compact ? "7px 8px" : "9px 10px" }} />
+      <button className={compact ? "btn sm" : "btn primary"} onClick={commit} disabled={!clean}>
+        <Icon name="plus" size={compact ? 13 : 15} /> New book
+      </button>
+    </div>
+  );
+}
+
 function BookPicker({ campaigns, bookId, onPick, onNew, role }) {
   const [open, setOpen] = React.useState(false);
   const ref = React.useRef(null);
@@ -122,6 +143,12 @@ function BookPicker({ campaigns, bookId, onPick, onNew, role }) {
       {open && (
         <div className="card" style={{ position: "absolute", top: 64, left: 0, right: 0, padding: 6, zIndex: 60, boxShadow: "var(--shadow-lg)", maxHeight: "60vh", overflowY: "auto" }}>
           <div className="eyebrow" style={{ padding: "6px 10px 4px" }}>Each book is its own campaign</div>
+          {role !== "assistant" && (
+            <div style={{ padding: "7px 8px 8px", borderBottom: "1px solid var(--hair)", marginBottom: 5 }}>
+              <div className="eyebrow" style={{ marginBottom: 6 }}>New book</div>
+              <BookCreateForm compact onCreate={(name) => { onNew(name); setOpen(false); }} />
+            </div>
+          )}
           {(campaigns || []).map((c) => {
             const on = c.id === bookId;
             return (
@@ -138,15 +165,6 @@ function BookPicker({ campaigns, bookId, onPick, onNew, role }) {
               </button>
             );
           })}
-          {role !== "assistant" && (
-            <>
-              <hr className="rule" style={{ margin: "5px 4px" }} />
-              <button onClick={() => { onNew(); setOpen(false); }} className="mono"
-                style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, border: "none", background: "transparent", cursor: "pointer", borderRadius: "var(--radius)", padding: "9px 10px", color: "var(--ink-3)", fontSize: 12, letterSpacing: "0.04em" }}>
-                <Icon name="plus" size={13} /> NEW BOOK
-              </button>
-            </>
-          )}
         </div>
       )}
     </div>
@@ -476,8 +494,8 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
     if (!picked) return;
     setBookId(picked); setSelectedId(null); setErr(null); setNote(null);
   };
-  const newBook = () => {
-    const id = window.BOOK.promptForBookCampaign();
+  const newBook = (name) => {
+    const id = window.BOOK.createBookCampaign(name);
     if (!id) return;
     setBookId(id); setSelectedId(null); setErr(null); setNote(null);
   };
@@ -695,7 +713,7 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
               <div className="eyebrow" style={{ marginBottom: 10 }}>Book Writer</div>
               <h2 style={{ fontSize: 28, marginBottom: 10 }}>Pick a book, or start a new one</h2>
               <p className="muted" style={{ fontSize: 15.5, marginBottom: 18 }}>A book is its own campaign with its own library of chapters — separate from your article campaigns. Choose an existing book from the list, or create a new one.</p>
-              {role !== "assistant" && <button className="btn primary" onClick={newBook}><Icon name="plus" size={15} /> New book</button>}
+              {role !== "assistant" && <BookCreateForm onCreate={newBook} />}
             </div>
           </div>
         ) : !piece ? (
