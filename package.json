@@ -21,6 +21,7 @@
     "desktop:verify-release": "tsx scripts/verify-desktop-release.ts",
     "desktop:verify-installed": "tsx scripts/verify-installed-app.ts",
     "desktop:verify-signed-release": "tsx scripts/verify-desktop-release.ts --require-developer-id --require-notarized",
+    "desktop:verify-live-providers": "tsx scripts/verify-live-provider-flows.ts",
     "onboarding:verify": "tsx scripts/verify-onboarding-activation.ts",
     "onboarding:verify:browser": "tsx scripts/verify-onboarding-browser-shell.ts",
     "build": "next build",

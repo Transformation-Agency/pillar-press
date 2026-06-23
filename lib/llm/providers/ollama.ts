@@ -24,6 +24,7 @@ export function ollamaProvider(config: LLMConfig): LLMAdapter {
             model: config.model,
             messages,
             stream: false,
+            think: false,
             options: { num_predict: config.maxTokens },
           }),
         });

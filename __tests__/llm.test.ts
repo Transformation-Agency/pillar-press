@@ -552,6 +552,7 @@ describe("provider adapters", () => {
           model: "llama3.2",
           messages: [{ role: "user", content: "hi" }],
           stream: false,
+          think: false,
           options: { num_predict: 456 },
         }),
       }),
