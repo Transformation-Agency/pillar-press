@@ -156,6 +156,40 @@ describe("browser onboarding audio helpers", () => {
     expect(final).toBe("LinkedIn and Substack");
   });
 
+  it("turns raw microphone permission codes into readable setup guidance", async () => {
+    let instance: any = null;
+    function Recognition(this: any) {
+      instance = this;
+      this.start = () => {};
+      this.stop = () => {};
+    }
+    const audio = loadBrowserAudio({
+      SpeechRecognition: Recognition,
+      navigator: {
+        mediaDevices: {
+          getUserMedia: async () => {
+            throw Object.assign(new Error("not-allowed"), { name: "NotAllowedError" });
+          },
+        },
+      },
+    });
+    let listenMessage = "";
+
+    audio.listenOnce({
+      onError: (error: Error) => {
+        listenMessage = error.message;
+      },
+    });
+    instance.onerror({ error: "not-allowed" });
+
+    await expect(audio.requestMicrophonePermission()).rejects.toThrow(
+      "Microphone permission is blocked. Allow King's Press microphone access in macOS System Settings, then try again or keep typing."
+    );
+    expect(listenMessage).toBe(
+      "Microphone permission is blocked. Allow King's Press microphone access in macOS System Settings, then try again or keep typing."
+    );
+  });
+
   it("speaks setup prompts through desktop speech with browser fallback", async () => {
     const spoken: string[] = [];
     const cancelled: string[] = [];
