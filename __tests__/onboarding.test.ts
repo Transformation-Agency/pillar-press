@@ -188,6 +188,9 @@ describe("browser onboarding audio helpers", () => {
     expect(listenMessage).toBe(
       "Microphone permission is blocked. Allow King's Press microphone access in macOS System Settings, then try again or keep typing."
     );
+    expect(audio.describeAudioError(new Error("Microphone permission check has failed"))).toBe(
+      "Microphone permission is blocked. Allow King's Press microphone access in macOS System Settings, then try again or keep typing."
+    );
   });
 
   it("speaks setup prompts through desktop speech with browser fallback", async () => {

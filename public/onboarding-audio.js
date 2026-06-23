@@ -45,6 +45,7 @@
       code === "not-allowed" ||
       code === "permission-denied" ||
       code === "notallowederror" ||
+      code.includes("permission check has failed") ||
       code.includes("permission denied") ||
       code.includes("not allowed")
     ) {
