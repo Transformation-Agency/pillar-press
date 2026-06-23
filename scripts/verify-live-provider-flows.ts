@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
@@ -21,6 +21,9 @@ const openaiBaseUrl = (process.env.KINGS_PRESS_LIVE_OPENAI_BASE_URL || "https://
 const openaiChatModel = process.env.KINGS_PRESS_LIVE_OPENAI_CHAT_MODEL?.trim();
 const openaiImageModel = process.env.KINGS_PRESS_LIVE_OPENAI_IMAGE_MODEL?.trim() || "gpt-image-1";
 const openaiAudioModel = process.env.KINGS_PRESS_LIVE_OPENAI_AUDIO_MODEL?.trim() || "gpt-4o-mini-tts";
+const ollamaBaseUrl = (process.env.KINGS_PRESS_LIVE_OLLAMA_BASE_URL || "http://127.0.0.1:11434").replace(/\/+$/, "");
+const ollamaModel = process.env.KINGS_PRESS_LIVE_OLLAMA_MODEL?.trim() || "gemma4:26b-mlx";
+const llmTasks = ["gather", "weave", "draft", "review", "revision", "outputs", "utility", "mediaPrompt", "file"] as const;
 const secretValues = [openaiKey, elevenKey, hedraKey].filter((value): value is string => Boolean(value && value.length >= 6));
 const nodePath = join(root, "src-tauri", "resources", "node", "bin", "node");
 const serverPath = join(root, "src-tauri", "resources", "desktop-server", "server.js");
@@ -128,13 +131,23 @@ async function main() {
     throw new Error("Missing packaged desktop server resources. Run `npm run desktop:web:build` or `npm run desktop:build` first.");
   }
 
-  if (!openaiKey && !elevenKey && !hedraKey) {
-    console.log("skip live provider verification: no live provider keys supplied.");
-    console.log("Set one or more of KINGS_PRESS_LIVE_OPENAI_API_KEY, KINGS_PRESS_LIVE_ELEVENLABS_API_KEY, KINGS_PRESS_LIVE_HEDRA_API_KEY.");
-    return;
-  }
-
   const dataDir = await mkdtemp(join(tmpdir(), "kings-press-live-provider-"));
+  const settingsPath = join(dataDir, "desktop-settings.json");
+  const taskDefaults = Object.fromEntries(llmTasks.map((task) => [task, "ollama-local"]));
+  await writeFile(settingsPath, JSON.stringify({
+    provider: "ollama",
+    model: ollamaModel,
+    baseUrl: ollamaBaseUrl,
+    profiles: [{
+      id: "ollama-local",
+      label: "Ollama local",
+      provider: "ollama",
+      model: ollamaModel,
+      baseUrl: ollamaBaseUrl,
+    }],
+    defaultProfileId: "ollama-local",
+    taskDefaults,
+  }, null, 2));
   const port = await freePort();
   const baseUrl = `http://127.0.0.1:${port}`;
   const child = spawn(nodePath, [serverPath], {
@@ -152,7 +165,7 @@ async function main() {
       STORAGE_PROVIDER: "local",
       KINGS_PRESS_STORAGE: "local",
       KINGS_PRESS_DATA_DIR: dataDir,
-      KINGS_PRESS_LLM_SETTINGS_PATH: join(dataDir, "desktop-settings.json"),
+      KINGS_PRESS_LLM_SETTINGS_PATH: settingsPath,
       OPENAI_API_KEY: openaiKey || "",
       MEDIA_OPENAI_API_KEY: openaiKey || "",
       MEDIA_OPENAI_BASE_URL: openaiBaseUrl,
@@ -170,6 +183,23 @@ async function main() {
     const status = await requestJson(baseUrl, "/api/llm/status");
     assertNoSecrets(status, "llm status");
     console.log(`ok packaged server ready ${baseUrl}`);
+    await runCheck(checks, "PROV-005 Ollama desktop task defaults", async () => {
+      const body = status as {
+        provider?: string;
+        model?: string;
+        defaultProfileId?: string;
+        taskDefaults?: Record<string, string>;
+        tasks?: Record<string, { provider?: string; model?: string; profileId?: string }>;
+      };
+      if (body.provider !== "ollama" || body.model !== ollamaModel) {
+        throw new Error(`Packaged server did not load the local Ollama default: ${JSON.stringify(body)}`);
+      }
+      const mappedTasks = llmTasks.filter((task) => body.taskDefaults?.[task] === "ollama-local" || body.tasks?.[task]?.model === ollamaModel);
+      if (mappedTasks.length !== llmTasks.length) {
+        throw new Error(`Expected all LLM tasks to map to ${ollamaModel}; got ${mappedTasks.length}/${llmTasks.length}.`);
+      }
+      return { provider: body.provider, model: body.model, mappedTasks: mappedTasks.length };
+    });
 
     const providers = await requestJson(baseUrl, "/api/media/providers");
     await runCheck(checks, "secret-free media provider catalog", async () => {
@@ -179,6 +209,43 @@ async function main() {
         elevenlabsConfigured: providerConfigured(providers, "elevenlabs"),
         hedraConfigured: providerConfigured(providers, "hedra"),
       };
+    });
+
+    await runCheck(checks, "PROV-005 Ollama model listing", async () => {
+      const modelsPayload = await requestJson(baseUrl, "/api/llm/models", {
+        method: "POST",
+        body: JSON.stringify({ provider: "ollama", baseUrl: ollamaBaseUrl }),
+      });
+      const models = modelIds(modelsPayload);
+      if (!models.includes(ollamaModel)) throw new Error(`Ollama did not list ${ollamaModel}. Listed: ${models.join(", ")}`);
+      if (models.some((model) => /embed/i.test(model))) throw new Error(`Ollama listing included embedding-only model(s): ${models.join(", ")}`);
+      return { modelCount: models.length, firstModel: models[0], requestedModel: ollamaModel };
+    });
+
+    await runCheck(checks, "PROV-005 Ollama text test", async () => {
+      const body = await requestJson(baseUrl, "/api/llm/test", {
+        method: "POST",
+        body: JSON.stringify({
+          provider: "ollama",
+          baseUrl: ollamaBaseUrl,
+          model: ollamaModel,
+        }),
+      });
+      if ((body as { sample?: string }).sample?.trim() !== "OK") throw new Error(`Unexpected Ollama sample: ${JSON.stringify(body)}`);
+      return { model: ollamaModel };
+    });
+
+    await runCheck(checks, "PROV-005 Ollama task-default utility call", async () => {
+      const body = await requestJson(baseUrl, "/api/llm/util", {
+        method: "POST",
+        body: JSON.stringify({
+          task: "utility",
+          prompt: "Reply with exactly: KINGSPRESS_GEMMA4_OK",
+        }),
+      });
+      const text = (body as { text?: string }).text?.trim();
+      if (text !== "KINGSPRESS_GEMMA4_OK") throw new Error(`Unexpected Ollama utility response: ${JSON.stringify(body)}`);
+      return { model: ollamaModel, text };
     });
 
     if (openaiKey) {

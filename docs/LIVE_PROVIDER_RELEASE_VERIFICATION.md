@@ -41,6 +41,20 @@ npm run desktop:build
 
 ## No-Credit Provider Readiness
 
+Local Ollama/Gemma readiness runs by default and does not require cloud keys:
+
+```sh
+npm run desktop:verify-live-providers
+```
+
+Optional local model override:
+
+```sh
+KINGS_PRESS_LIVE_OLLAMA_MODEL="gemma4:26b-mlx" \
+KINGS_PRESS_LIVE_OLLAMA_BASE_URL="http://127.0.0.1:11434" \
+npm run desktop:verify-live-providers
+```
+
 OpenAI LLM/media readiness:
 
 ```sh
@@ -88,6 +102,9 @@ npm run desktop:verify-live-providers
 
 The script currently performs:
 
+- Local Ollama model listing and `/api/llm/test`
+- Local Ollama task-default `/api/llm/util` call through an isolated desktop
+  settings file
 - OpenAI chat model listing and `/api/llm/test`
 - OpenAI media-provider configured check
 - OpenAI image generation through `/api/hedra/generate`
