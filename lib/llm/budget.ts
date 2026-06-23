@@ -21,6 +21,9 @@ export function llmBudgetForResolvedTask(taskAI: Pick<ResolvedTaskAI, "provider"
     return { contextTokens: 96_000, responseReserve: 6_000 };
   }
   if (model.includes("grok")) return { contextTokens: 96_000, responseReserve: 6_000 };
+  if (provider === "ollama" && model.includes("gemma4")) {
+    return { contextTokens: 192_000, responseReserve: 8_000 };
+  }
   if (provider === "ollama" || provider === "openai-compatible") {
     return { contextTokens: 24_000, responseReserve: 4_000 };
   }
