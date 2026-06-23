@@ -131,12 +131,18 @@ After a successful run:
 3. Run:
 
 ```sh
+npm run desktop:release-readiness
 npm run typecheck
 npm test
 cargo test --manifest-path src-tauri/Cargo.toml
 npm run desktop:verify-release
 npm run desktop:verify-installed
 ```
+
+`npm run desktop:release-readiness` reads the canonical tracker and intentionally
+fails while any unwaived local-first release rows remain blocked, failed, or not
+independently verified. Hosted-auth rows marked out of local-first scope are
+reported in counts but do not block desktop notarization.
 
 Only after the tracker has no unwaived release blockers should signed/notarized
 dual-arch release DMGs be built and uploaded.
