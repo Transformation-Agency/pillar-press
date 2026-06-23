@@ -626,6 +626,12 @@ describe("hosted billing session audit events", () => {
     vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: vi.fn(() => true) }));
     vi.doMock("@/lib/billing/stripe", () => ({
       BillingError: TestBillingError,
+      appBaseUrl: vi.fn(() => "http://test.local"),
+      getLatestSubscription: vi.fn(),
+      getOrCreateBillingCustomer: vi.fn(),
+      getStripe: vi.fn(),
+      requireBillingUser: vi.fn(),
+      requireCheckoutPlan: vi.fn(),
     }));
 
     const checkoutRoute = await import("../app/api/billing/checkout/route");

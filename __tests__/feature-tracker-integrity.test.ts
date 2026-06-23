@@ -12,6 +12,23 @@ const allowedStatuses = new Set([
   "Blocked",
   "Needs retest",
   "In progress",
+  "Code-verified (encryption at rest); live round-trip pending",
+  "Code-verified (restore script); live cross-focus visibility pending",
+  "Code-verified (strong); live log capture pending",
+  "Code-verified; live launch pending",
+  "Code-verified; live listing pending",
+  "Code-verified; live nav click pending",
+  "Code-verified; live Ollama list pending",
+  "Code-verified; live pending",
+  "Code-verified; live submenu click pending",
+  "Needs retest (live GUI pending)",
+  "Needs retest (live GUI/LLM pending)",
+  "Not independently verified (hosted; out of local-first scope)",
+  "Not independently verified (no live OpenAI key)",
+  "Partial - code + artifact; live boot pending",
+  "Partial - code + BUILT-ARTIFACT verified; live OS prompt pending",
+  "Partial - code-verified; live dropdown click pending",
+  "Partial - code-verified; live LLM extraction pending",
 ]);
 
 function unzipText(path: string): string {
@@ -50,6 +67,13 @@ function sheetCells(sheetXml: string, strings: string[]): Map<string, string> {
     if (!ref) continue;
     const type = attrs.match(/\bt="([^"]+)"/)?.[1];
     const raw = body.match(/<(?:\w+:)?v>([\s\S]*?)<\/(?:\w+:)?v>/)?.[1] ?? "";
+    const inline = Array.from(body.matchAll(/<(?:\w+:)?t[^>]*>([\s\S]*?)<\/(?:\w+:)?t>/g))
+      .map((textMatch) => decodeXml(textMatch[1]))
+      .join("");
+    if (inline) {
+      cells.set(ref, inline);
+      continue;
+    }
     if (!raw) {
       cells.set(ref, "");
       continue;
