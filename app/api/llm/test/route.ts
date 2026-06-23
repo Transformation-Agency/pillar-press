@@ -24,6 +24,8 @@ const Body = z.object({
   profileId: z.string().trim().optional(),
 });
 
+export const maxDuration = 120;
+
 function defaultBaseUrl(provider: LLMProvider): string | undefined {
   if (provider === "ollama") return DEFAULT_OLLAMA_BASE_URL;
   if (provider === "openai") return DEFAULT_OPENAI_BASE_URL;
