@@ -82,6 +82,22 @@ async function runCapture(command: string, args: string[], label: string) {
   });
 }
 
+async function runRetryingResourceBusy(command: string, args: string[], label: string, attempts = 3) {
+  let lastError: Error | null = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      await run(command, args, label);
+      return;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      if (!/Resource busy/i.test(lastError.message) || attempt === attempts) throw lastError;
+      console.log(`retry ${label}: resource busy (${attempt}/${attempts})`);
+      await new Promise((resolve) => setTimeout(resolve, 750 * attempt));
+    }
+  }
+  throw lastError ?? new Error(`${label} failed`);
+}
+
 async function findEnvFiles(dir: string): Promise<string[]> {
   const out: string[] = [];
   for (const entry of await readdir(dir, { withFileTypes: true })) {
@@ -128,7 +144,7 @@ async function verifyDmgPayload() {
   const mountDir = await mkdtemp(join(tmpdir(), "kings-press-dmg-mount-"));
   let attached = false;
   try {
-    await run("hdiutil", ["attach", "-readonly", "-nobrowse", "-mountpoint", mountDir, dmgPath], "DMG mount");
+    await runRetryingResourceBusy("hdiutil", ["attach", "-readonly", "-nobrowse", "-mountpoint", mountDir, dmgPath], "DMG mount");
     attached = true;
     const mountedApp = join(mountDir, "King's Press Editorial Desk.app");
     const applicationsLink = join(mountDir, "Applications");
