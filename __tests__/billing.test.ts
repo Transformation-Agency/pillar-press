@@ -623,6 +623,7 @@ describe("hosted billing status API", () => {
 
 describe("hosted billing session audit events", () => {
   it("returns readable local desktop errors instead of starting checkout or portal sessions", async () => {
+    vi.resetModules();
     vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: vi.fn(() => true) }));
     vi.doMock("@/lib/billing/stripe", () => ({
       BillingError: TestBillingError,

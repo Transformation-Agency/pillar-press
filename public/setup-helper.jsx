@@ -1860,6 +1860,13 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     }
   }
 
+  function readableVoiceInputError(error) {
+    if (ONBOARDING_AUDIO.describeAudioError) {
+      return ONBOARDING_AUDIO.describeAudioError(error, "Speech recognition is not available here. You can type instead.");
+    }
+    return (error && error.message) || "Speech recognition is not available here. You can type instead.";
+  }
+
   transcriptHandlerRef.current = handleTranscript;
 
   function listenForAnswer(targetStep) {
@@ -1872,7 +1879,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
         handleTranscript(transcript, targetStep);
       },
       onError: (error) => {
-        setSetupError((error && error.message) || "Speech recognition is not available here. You can type instead.");
+        setSetupError(readableVoiceInputError(error));
         listenSessionRef.current = null;
         setListening(false);
       },

@@ -265,6 +265,14 @@ describe("desktop OpenAI media provider setup wiring", () => {
     expect(helperSource).not.toContain('list="kp-inline-model-options"');
   });
 
+  it("routes setup speech input errors through readable audio guidance", () => {
+    const helperSource = readFileSync(new URL("../public/setup-helper.jsx", import.meta.url), "utf8");
+
+    expect(helperSource).toContain("function readableVoiceInputError");
+    expect(helperSource).toContain("ONBOARDING_AUDIO.describeAudioError(error");
+    expect(helperSource).toContain("setSetupError(readableVoiceInputError(error))");
+  });
+
   it("main desktop setup saves OpenAI as an encrypted desktop media provider", () => {
     const source = readFileSync(new URL("../public/app.jsx", import.meta.url), "utf8");
 
