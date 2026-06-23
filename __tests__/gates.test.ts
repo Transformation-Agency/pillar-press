@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { GATES, PREAMBLE, SEVERITY, runGate, type GateResult } from "@/lib/gates";
 import { buildCategoryContext } from "@/lib/editorial/categoryContext";
 import { chooseReviewPlan, runCategoryAwareReview, runGateWithContext } from "@/lib/editorial/review";
-import type { AI } from "@/lib/llm";
+import { LLMError, type AI } from "@/lib/llm";
 
 // A fake AI that records the prompts/systems it was called with and returns a
 // canned JSON object. Proves the gate logic is PURE — no DB, no network.
@@ -134,5 +134,35 @@ describe("runGate normalization", () => {
     expect(result.callCount).toBe(GATES.length);
     expect(ai.calls.every((call) => call.system?.includes("Letter / direct communication"))).toBe(true);
     expect(ai.calls.every((call) => call.system?.includes("warm but direct"))).toBe(true);
+  });
+
+  it("keeps a review packet when a gate returns malformed JSON", async () => {
+    const ai = fakeAI((prompt) => {
+      if (prompt.includes("TASK — Self-alignment")) {
+        throw new LLMError(502, "llm_parse", "Could not parse JSON from model output.", "ollama");
+      }
+      return { summary: "ok", findings: [] };
+    });
+    const persisted: unknown[] = [];
+
+    const result = await runCategoryAwareReview({
+      draft: "A small draft.",
+      refCtx: "REF",
+      categoryCtx: buildCategoryContext({ category: "article" }),
+      taskAI: { provider: "ollama", model: "gemma4:26b-mlx" },
+      ai,
+      onGate(packet) {
+        persisted.push(JSON.parse(JSON.stringify(packet)));
+      },
+    });
+
+    expect(result.packet.self).toMatchObject({
+      summary: expect.stringContaining("Self-alignment could not be parsed"),
+      warning: "llm_parse",
+      findings: [{ severity: "consider", title: "Gate needs retry", anchor: null }],
+    });
+    expect(result.trace.warnings).toContain("gate_failed:self");
+    expect(result.trace.stages.at(-1)).toMatchObject({ id: "self", status: "failed" });
+    expect(persisted.length).toBeGreaterThan(0);
   });
 });

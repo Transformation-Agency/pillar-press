@@ -1,5 +1,6 @@
 import { GATES, PREAMBLE, runGate, type Gate, type GateResult } from "@/lib/gates";
 import type { AI, ResolvedTaskAI } from "@/lib/llm";
+import { LLMError } from "@/lib/llm";
 import { buildTextChunks, estimateTokens, fitsSinglePass, llmBudgetForResolvedTask } from "@/lib/llm/budget";
 import type { CategoryContext } from "@/lib/editorial/categoryContext";
 import { withCategoryPrompt } from "@/lib/editorial/categoryContext";
@@ -105,6 +106,24 @@ Return ONLY the canonical JSON object for this gate.`;
   return reduced;
 }
 
+function isParseFailure(err: unknown): boolean {
+  return err instanceof LLMError && err.code === "llm_parse";
+}
+
+function fallbackGateResult(gate: Gate, err: unknown): GateResult {
+  const detail = err instanceof Error ? err.message : "The model returned malformed JSON.";
+  return {
+    summary: `${gate.name} could not be parsed from the selected model output.`,
+    findings: [{
+      severity: "consider",
+      title: "Gate needs retry",
+      detail: `King's Press kept the review moving, but this gate needs a retry or a different model. ${detail}`,
+      anchor: null,
+    }],
+    warning: "llm_parse",
+  };
+}
+
 export async function runCategoryAwareReview(input: {
   draft: string;
   refCtx: string;
@@ -160,7 +179,9 @@ export async function runCategoryAwareReview(input: {
         warning: err instanceof Error ? err.message : "Gate failed",
       };
       trace.warnings.push(`gate_failed:${gate.id}`);
-      throw err;
+      if (!isParseFailure(err)) throw err;
+      callCount += 1;
+      packet[gate.id] = fallbackGateResult(gate, err);
     } finally {
       packet.__trace = trace;
       await input.onGate?.(packet, trace);
