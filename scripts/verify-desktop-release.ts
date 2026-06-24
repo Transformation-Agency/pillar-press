@@ -198,8 +198,11 @@ async function verifyOfflineBrowserRuntime(bundledServerRoot: string) {
   await Promise.all([
     assertExists(join(bundledServerRoot, "public", "vendor", "react.production.min.js"), "local React browser runtime"),
     assertExists(join(bundledServerRoot, "public", "vendor", "react-dom.production.min.js"), "local ReactDOM browser runtime"),
-    assertExists(join(bundledServerRoot, "public", "vendor", "babel.min.js"), "local Babel browser runtime"),
+    assertExists(join(bundledServerRoot, "public", "build", "app.compiled.js"), "compiled static browser shell"),
   ]);
+  if (index.includes("vendor/babel.min.js") || index.includes('type="text/babel"') || index.includes("'unsafe-eval'")) {
+    throw new Error("Packaged browser shell still uses runtime Babel or unsafe eval.");
+  }
   console.log("ok offline browser runtime");
 }
 

@@ -50,11 +50,12 @@ The Tauri webview is limited to the packaged app origin and the launcher-owned
 because that name can resolve outside the exact loopback address the launcher
 owns.
 
-The current browser shell still uses the vendored Babel runtime for static JSX
-modules, so the Tauri CSP keeps `unsafe-inline` and `unsafe-eval` until those
-modules are precompiled. The CSP is no longer disabled: it restricts default
-resources to self, network/API/media access to `https:` and `127.0.0.1`, blocks
-objects, and blocks framing.
+The browser shell precompiles the static JSX modules into
+`public/build/app.compiled.js`, so the Tauri CSP no longer allows `unsafe-eval`.
+The CSP is no longer disabled: it restricts default resources to self,
+network/API/media access to `https:` and `127.0.0.1`, blocks objects, and blocks
+framing. Inline styles remain allowed because the React UI uses inline style
+objects.
 
 ## Dependency Audits
 

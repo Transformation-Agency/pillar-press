@@ -474,7 +474,7 @@ metric is recorded, and `/api/desk/chat` injects the active campaign's approved 
 into the live assistant context. Future app manifests can repeat this pattern for their own
 post-setup assistant surfaces. `npm run onboarding:verify` now proves both deferred-provider mode
 (`scripted_assistant_until_provider_ready`) and provider-ready mode (`live_assistant_ready`).
-`npm run onboarding:verify:browser` proves the actual React/Babel setup UI can reach
+`npm run onboarding:verify:browser` proves the actual compiled React setup UI can reach
 `live_assistant_ready` after the model status endpoint reports a usable provider.
 
 ### Slice 5: Voice Runtime Upgrade
@@ -522,7 +522,7 @@ Use `npm run onboarding:verify` as the repeatable local proof that the bootstrap
 value through both typed-fallback and voice-ready paths, request setup on a clean first run, stay
 closed after completion or activation, persist its transcript, preserve the required answer input
 methods, bridge a desktop STT final transcript, and seed the Desk assistant handoff. Use
-`npm run onboarding:verify:browser` as the browser-shell proof that the actual static React/Babel
+`npm run onboarding:verify:browser` as the browser-shell proof that the actual static React
 front end opens setup on a clean install, exposes and toggles the mute control, completes both
 typed and mocked speech-recognition paths through the real Store cache, captures focus and
 preference answers with the correct input method in the transcript, saves first value, records

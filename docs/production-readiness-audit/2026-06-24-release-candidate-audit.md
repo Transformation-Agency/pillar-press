@@ -153,7 +153,7 @@ Validated instruction/governance hygiene:
 | RC-02 | Pass | Covered by test suite and release verifier local-file/storage checks. |
 | RC-03 | Pass | Rust backup redaction tests passed; release verifier confirmed no bundled env files. |
 | RC-04 | Pass with warning | Provider-neutral path covered by tests and status/verifier evidence; live hosted provider calls were not run in this local audit. |
-| RC-05 | Pass | Tauri config/capability review shows app constrained to `127.0.0.1:*`; CSP enabled with documented `unsafe-eval` exception for vendored Babel runtime. |
+| RC-05 | Pass | Tauri config/capability review shows app constrained to `127.0.0.1:*` with a native navigation guard; CSP removes `unsafe-eval`, and global Tauri exposure is disabled. |
 | RC-06 | Pass | Onboarding activation proof, browser shell proof, and installed-app onboarding smoke passed. |
 | RC-07 | Pass | Desktop build and verifier confirmed packaged server, bundled Node runtime, native resources, and DMG payload. |
 | RC-08 | Pass | Release readiness tracker has no unwaived blockers. |
@@ -169,10 +169,10 @@ Validated instruction/governance hygiene:
   only after exact human approval and signing credential confirmation.
 - P2: Live hosted provider checks were not run. This audit proves local gates
   and packaged behavior, not live cloud-provider billing or availability.
-- P2: The Tauri CSP still allows `unsafe-inline` and `unsafe-eval` because the
-  static browser shell uses vendored Babel/JSX at startup. This is documented in
-  `docs/PRODUCTION_READINESS.md`; precompiling the static shell would reduce
-  webview risk in a future hardening pass.
+- P2: The static browser shell now precompiles JSX, the Tauri CSP no longer
+  allows `unsafe-eval`, and global Tauri exposure is disabled. Residual webview
+  risk remains because the main webview still owns setup/settings/backup IPC
+  permissions and style `unsafe-inline` remains for React inline styles.
 - P2: The worktree has untracked instruction/audit/constitution files and
   unrelated pre-existing untracked release artifacts. They must be reviewed
   before a clean release commit.
@@ -197,5 +197,5 @@ this local pass.
 2. Commit the verifier fallback fix if accepted.
 3. For public distribution, run the signed/notarized build flow with explicit
    signing identity approval, then verify both Apple silicon and Intel DMGs.
-4. Consider replacing the static Babel browser startup path to remove
-   `unsafe-eval` from the Tauri CSP.
+4. Consider splitting the desktop setup IPC permission into narrower setup,
+   backup, speech, and provider-settings capabilities.

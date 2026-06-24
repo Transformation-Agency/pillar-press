@@ -28,7 +28,7 @@ storage, and uses local models by default.
 | Database | SQLite in the app data directory |
 | Storage | Local app-data files served through `/api/local-files/...` |
 | Auth | Embedded local owner/workspace |
-| Browser shell | Local bundled React/Babel runtime and system fonts |
+| Browser shell | Local bundled React runtime, precompiled static UI, and system fonts |
 | LLM | Local-first provider-neutral layer |
 | Scheduling | Tauri-started background Gather scheduler |
 | Installer artifact | macOS `.app` + DMG |
@@ -56,7 +56,7 @@ The first-run desktop setup supports:
 The app can run without cloud compute when a local model is available.
 
 The desktop browser shell is also packaged for offline startup: it does not
-fetch React, Babel, or fonts from CDNs during launch.
+fetch React or fonts from CDNs during launch.
 
 ## Release Checks
 

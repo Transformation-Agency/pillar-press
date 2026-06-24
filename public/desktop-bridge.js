@@ -1,10 +1,15 @@
 /* King’s Press desktop bridge.
-   In a browser this is inert. In Tauri it exposes local-first setup commands. */
-(function () {
-  const core = window.__TAURI__ && window.__TAURI__.core;
-  const event = window.__TAURI__ && window.__TAURI__.event;
+   Bundled by scripts/build-static-browser-shell.ts for the Tauri app. */
+import { invoke as tauriInvoke } from "@tauri-apps/api/core";
+import { listen as tauriListen } from "@tauri-apps/api/event";
 
-  function isDesktop() { return !!(core && typeof core.invoke === "function"); }
+(function () {
+  function isDesktop() {
+    return !!(
+      window.__TAURI_INTERNALS__ &&
+      typeof window.__TAURI_INTERNALS__.invoke === "function"
+    );
+  }
 
   function clean(value) {
     if (value === undefined) return undefined;
@@ -22,12 +27,12 @@
 
   async function invoke(command, args) {
     if (!isDesktop()) throw new Error("Desktop runtime is not available.");
-    return core.invoke(command, clean(args || {}));
+    return tauriInvoke(command, clean(args || {}));
   }
 
   async function listen(name, handler) {
-    if (!isDesktop() || !event || typeof event.listen !== "function") return function () {};
-    return event.listen(name, handler);
+    if (!isDesktop()) return function () {};
+    return tauriListen(name, handler);
   }
 
   window.KINGS_DESKTOP = {

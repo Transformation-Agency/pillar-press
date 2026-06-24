@@ -189,9 +189,8 @@ export async function driveOnboardingUiProof(page: Page, options?: OnboardingUiP
   const expectedCampaignName = options?.expectedCampaignName || focusName;
   const sentimentRating = Math.max(1, Math.min(5, Math.round(Number(options?.sentimentRating || 5))));
 
-  // The desktop bundle still uses in-browser Babel. Polling the page while Babel is
-  // compiling can wedge Chromium protocol calls on slower machines, so give the
-  // shell a short grace period before the readiness assertion.
+  // Give the static shell a short grace period before the readiness assertion;
+  // slower machines can still be finishing initial React/store hydration.
   await new Promise((resolve) => setTimeout(resolve, 5000));
   trace("assert setup ready");
   const setupReady = await page.evaluate(() => {

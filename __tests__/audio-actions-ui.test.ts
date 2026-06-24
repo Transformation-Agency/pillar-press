@@ -126,7 +126,8 @@ describe("audio action UI wiring", () => {
     const outputs = readFileSync(new URL("../public/screen-outputs.jsx", import.meta.url), "utf8");
     const index = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
 
-    expect(index).toContain('<script type="text/babel" src="audio-actions.jsx"></script>');
+    expect(index).toContain('<script src="build/app.compiled.js"></script>');
+    expect(index).not.toContain('type="text/babel"');
     expect(audio).toContain("function AudioActions({ text, label = \"text\", filename = \"audio.mp3\", pieceId = null, campaignId = null })");
     expect(audio).toContain("Object.assign(window, { AudioActions })");
     expect(workspace).toContain("<AudioActions text={() => text} label=\"draft\"");

@@ -89,7 +89,8 @@ describe("preferences theme and tweaks", () => {
     const tweaks = readFileSync(new URL("../public/tweaks-panel.jsx", import.meta.url), "utf8");
     const index = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
 
-    expect(index).toContain('<script type="text/babel" src="tweaks-panel.jsx"></script>');
+    expect(index).toContain('<script src="build/app.compiled.js"></script>');
+    expect(index).not.toContain('type="text/babel"');
     expect(app).toContain('const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/');
     expect(app).toContain('function TweaksLayer({ theme })');
     expect(app).toContain('const [t, setTweak] = window.useTweaks(TWEAK_DEFAULTS)');

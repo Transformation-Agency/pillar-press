@@ -28,8 +28,9 @@ Editorial Desk**.
 - The sidecar preparation step prunes hosted-only Google Drive SDK packages from
   the desktop resource bundle. Local exports remain available; hosted/web builds
   still use Google Drive support from normal `node_modules` when configured.
-- The browser shell is self-contained at startup. React, ReactDOM, and Babel are
-  vendored under `public/vendor/`, and typography uses system serif/mono stacks
+- The browser shell is self-contained at startup. React and ReactDOM are
+  vendored under `public/vendor/`, static JSX modules are precompiled to
+  `public/build/app.compiled.js`, and typography uses system serif/mono stacks
   instead of remote font downloads.
 - First-run setup opens with a skippable, audio-ready introduction. Microphone
   access is requested only after the user chooses voice setup. The first product

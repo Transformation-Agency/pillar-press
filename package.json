@@ -1,6 +1,6 @@
 {
   "name": "kings-press-editorial-desk",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -11,6 +11,7 @@
     "web:prepare-standalone": "tsx scripts/prepare-hosted-standalone.ts",
     "web:start": "tsx scripts/run-hosted-web.ts start",
     "desktop:web": "tsx scripts/run-desktop-web.ts dev",
+    "desktop:build-static-shell": "tsx scripts/build-static-browser-shell.ts",
     "desktop:web:build": "tsx scripts/run-desktop-web.ts build",
     "desktop:prepare-sidecar": "tsx scripts/prepare-tauri-sidecar.ts",
     "desktop:sign-macos-resources": "tsx scripts/sign-macos-desktop-resources.ts",
@@ -39,6 +40,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.100.0",
     "@supabase/supabase-js": "^2.45.0",
+    "@tauri-apps/api": "^2.11.1",
     "better-sqlite3": "^12.10.0",
     "cheerio": "^1.2.0",
     "drizzle-orm": "^0.45.2",

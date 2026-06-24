@@ -6,6 +6,8 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use rand::RngCore;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::{
     collections::HashMap,
     fs,
@@ -20,7 +22,7 @@ use std::{
 use std::{net::TcpListener, process::Stdio, thread, time::Duration};
 use tauri::{
     menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu},
-    AppHandle, Emitter, Manager, Url,
+    plugin, AppHandle, Emitter, Manager, Url,
 };
 
 const MENU_SETUP_MODEL: &str = "setup-local-model";
@@ -182,6 +184,40 @@ fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app_data_dir(app)?.join("desktop-settings.json"))
 }
 
+fn write_private_file(path: PathBuf, contents: impl AsRef<[u8]>) -> Result<(), String> {
+    fs::write(&path, contents).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        let permissions = fs::Permissions::from_mode(0o600);
+        fs::set_permissions(&path, permissions).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+fn official_provider_base_url(provider: &str) -> Option<&'static str> {
+    if provider.eq_ignore_ascii_case("openai") {
+        Some("https://api.openai.com/v1")
+    } else if provider.eq_ignore_ascii_case("xai") {
+        Some("https://api.x.ai/v1")
+    } else if provider.eq_ignore_ascii_case("anthropic") {
+        Some("https://api.anthropic.com/v1")
+    } else if provider.eq_ignore_ascii_case("gemini") {
+        Some("https://generativelanguage.googleapis.com/v1beta")
+    } else {
+        None
+    }
+}
+
+fn clean_desktop_base_url(provider: &str, value: Option<&str>) -> Option<String> {
+    if let Some(url) = official_provider_base_url(provider) {
+        return Some(url.into());
+    }
+    value
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_string)
+}
+
 fn read_desktop_settings(app: &AppHandle) -> Result<DesktopSettings, String> {
     let path = settings_path(app)?;
     if !path.exists() {
@@ -316,7 +352,7 @@ fn desktop_secret_key(app: &AppHandle) -> Result<String, String> {
 
     let secret = random_secret_key();
     if !should_use_keychain_secret() || !write_keychain_secret(&secret) {
-        fs::write(&local_path, &secret).map_err(|e| e.to_string())?;
+        write_private_file(local_path, &secret)?;
     }
     Ok(secret)
 }
@@ -967,6 +1003,71 @@ fn start_packaged_server(app: &AppHandle) -> Result<Option<String>, String> {
     }
 }
 
+fn desktop_dev_host() -> String {
+    std::env::var("KINGS_PRESS_DESKTOP_DEV_HOST")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "127.0.0.1".into())
+}
+
+fn desktop_dev_port() -> Option<u16> {
+    std::env::var("KINGS_PRESS_DESKTOP_DEV_PORT")
+        .ok()
+        .and_then(|value| value.trim().parse::<u16>().ok())
+        .or(Some(41739))
+}
+
+fn host_matches_loopback(host: &str, expected: &str) -> bool {
+    host == expected || (host == "localhost" && expected == "127.0.0.1")
+}
+
+fn allowed_desktop_navigation(
+    url: &Url,
+    active_server_port: Option<u16>,
+    debug_build: bool,
+) -> bool {
+    match url.scheme() {
+        "tauri" | "asset" => return true,
+        "http" => {}
+        _ => return false,
+    }
+
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    let Some(port) = url.port_or_known_default() else {
+        return false;
+    };
+
+    if host == "127.0.0.1" && active_server_port == Some(port) {
+        return true;
+    }
+
+    debug_build
+        && desktop_dev_port() == Some(port)
+        && host_matches_loopback(host, &desktop_dev_host())
+}
+
+fn navigation_guard_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    plugin::Builder::new("kings-press-navigation-guard")
+        .on_navigation(|webview, url| {
+            let active_server_port = webview
+                .state::<DesktopServer>()
+                .port
+                .lock()
+                .ok()
+                .and_then(|port| *port);
+            let allowed =
+                allowed_desktop_navigation(url, active_server_port, cfg!(debug_assertions));
+            if !allowed {
+                eprintln!("Blocked King’s Press webview navigation to {url}");
+            }
+            allowed
+        })
+        .build()
+}
+
 #[tauri::command]
 fn ollama_status() -> OllamaStatus {
     let version = ollama_command().arg("--version").output();
@@ -1234,7 +1335,7 @@ fn save_model_choice(app: AppHandle, model: String) -> Result<(), String> {
             .and_then(|s| s.media_providers),
     };
     let json = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
-    fs::write(settings_path(&app)?, json).map_err(|e| e.to_string())
+    write_private_file(settings_path(&app)?, json)
 }
 
 #[tauri::command]
@@ -1257,6 +1358,7 @@ fn save_llm_settings(app: AppHandle, settings: DesktopSettings) -> Result<(), St
             .get(&provider.to_lowercase())
             .and_then(|saved| saved.api_key.clone())
             .filter(|v| !v.trim().is_empty());
+        let base_url = clean_desktop_base_url(&provider, p.base_url.as_deref());
         profiles.push(DesktopLLMProfile {
             id,
             label: p
@@ -1267,12 +1369,7 @@ fn save_llm_settings(app: AppHandle, settings: DesktopSettings) -> Result<(), St
                 .map(str::to_string),
             provider,
             model,
-            base_url: p
-                .base_url
-                .as_deref()
-                .map(str::trim)
-                .filter(|v| !v.is_empty())
-                .map(str::to_string),
+            base_url,
             api_key: encrypt_setting_secret(
                 &app,
                 p.api_key
@@ -1332,11 +1429,7 @@ fn save_llm_settings(app: AppHandle, settings: DesktopSettings) -> Result<(), St
                     .base_url
                     .clone()
                     .filter(|v| !v.trim().is_empty())
-                    .or_else(|| Some(if media_provider == "xai" {
-                        "https://api.x.ai/v1".into()
-                    } else {
-                        "https://api.openai.com/v1".into()
-                    })),
+                    .or_else(|| official_provider_base_url(media_provider).map(str::to_string)),
             },
         );
     } else if (provider.eq_ignore_ascii_case("openai") || provider.eq_ignore_ascii_case("xai"))
@@ -1360,11 +1453,7 @@ fn save_llm_settings(app: AppHandle, settings: DesktopSettings) -> Result<(), St
                     .map(str::trim)
                     .filter(|v| !v.is_empty())
                     .map(str::to_string)
-                    .or_else(|| Some(if media_provider == "xai" {
-                        "https://api.x.ai/v1".into()
-                    } else {
-                        "https://api.openai.com/v1".into()
-                    })),
+                    .or_else(|| official_provider_base_url(media_provider).map(str::to_string)),
             },
         );
     }
@@ -1375,12 +1464,7 @@ fn save_llm_settings(app: AppHandle, settings: DesktopSettings) -> Result<(), St
         } else {
             Some(model.into())
         },
-        base_url: settings
-            .base_url
-            .as_deref()
-            .map(str::trim)
-            .filter(|v| !v.is_empty())
-            .map(str::to_string),
+        base_url: clean_desktop_base_url(provider, settings.base_url.as_deref()),
         api_key: encrypted_api_key,
         profiles: if profiles.is_empty() {
             None
@@ -1409,7 +1493,7 @@ fn save_llm_settings(app: AppHandle, settings: DesktopSettings) -> Result<(), St
         },
     };
     let json = serde_json::to_string_pretty(&cleaned).map_err(|e| e.to_string())?;
-    fs::write(settings_path(&app)?, json).map_err(|e| e.to_string())
+    write_private_file(settings_path(&app)?, json)
 }
 
 #[tauri::command]
@@ -1429,21 +1513,17 @@ fn save_media_provider_key(app: AppHandle, args: SaveMediaProviderKeyArgs) -> Re
     }
     let mut settings = read_desktop_settings(&app)?;
     let mut media = settings.media_providers.unwrap_or_default();
+    let base_url = clean_desktop_base_url(&provider, args.base_url.as_deref());
     media.insert(
         provider,
         DesktopMediaProviderSettings {
             api_key: encrypt_setting_secret(&app, api_key)?,
-            base_url: args
-                .base_url
-                .as_deref()
-                .map(str::trim)
-                .filter(|v| !v.is_empty())
-                .map(str::to_string),
+            base_url,
         },
     );
     settings.media_providers = Some(media);
     let json = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
-    fs::write(settings_path(&app)?, json).map_err(|e| e.to_string())
+    write_private_file(settings_path(&app)?, json)
 }
 
 #[tauri::command]
@@ -1558,6 +1638,7 @@ fn main() {
     disable_macos_window_restoration();
 
     tauri::Builder::default()
+        .plugin(navigation_guard_plugin())
         .menu(build_menu)
         .on_menu_event(|app, event| handle_menu_event(app, event.id().as_ref()))
         .manage(DesktopServer::new())
@@ -1594,9 +1675,13 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{redact_setting_secrets, write_backup_manifest};
+    use super::{
+        allowed_desktop_navigation, clean_desktop_base_url, redact_setting_secrets,
+        write_backup_manifest,
+    };
     use serde_json::json;
     use std::{fs, path::PathBuf};
+    use tauri::Url;
 
     #[test]
     fn redacts_secret_like_desktop_settings_without_removing_model_config() {
@@ -1649,5 +1734,59 @@ mod tests {
         assert_eq!(manifest["storage"], "storage/");
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn pins_official_provider_base_urls_while_allowing_custom_endpoints() {
+        assert_eq!(
+            clean_desktop_base_url("openai", Some("https://attacker.example/v1")).as_deref(),
+            Some("https://api.openai.com/v1")
+        );
+        assert_eq!(
+            clean_desktop_base_url("xai", Some("https://attacker.example/v1")).as_deref(),
+            Some("https://api.x.ai/v1")
+        );
+        assert_eq!(
+            clean_desktop_base_url("gemini", Some("https://attacker.example/v1")).as_deref(),
+            Some("https://generativelanguage.googleapis.com/v1beta")
+        );
+        assert_eq!(
+            clean_desktop_base_url("openai-compatible", Some("http://127.0.0.1:12434/v1"))
+                .as_deref(),
+            Some("http://127.0.0.1:12434/v1")
+        );
+        assert_eq!(
+            clean_desktop_base_url("custom-image", Some("https://images.example/v1")).as_deref(),
+            Some("https://images.example/v1")
+        );
+    }
+
+    #[test]
+    fn restricts_privileged_navigation_to_app_and_expected_local_ports() {
+        assert!(allowed_desktop_navigation(
+            &Url::parse("tauri://localhost/index.html").unwrap(),
+            None,
+            false
+        ));
+        assert!(allowed_desktop_navigation(
+            &Url::parse("http://127.0.0.1:3219/index.html").unwrap(),
+            Some(3219),
+            false
+        ));
+        assert!(!allowed_desktop_navigation(
+            &Url::parse("http://127.0.0.1:9999/index.html").unwrap(),
+            Some(3219),
+            false
+        ));
+        assert!(!allowed_desktop_navigation(
+            &Url::parse("https://example.com/").unwrap(),
+            Some(3219),
+            false
+        ));
+        assert!(allowed_desktop_navigation(
+            &Url::parse("http://127.0.0.1:41739/index.html").unwrap(),
+            None,
+            true
+        ));
     }
 }

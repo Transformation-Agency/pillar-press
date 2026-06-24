@@ -158,6 +158,11 @@ function Desk({ campaignId, onOpenPiece }) {
     saveThreads([t].concat(threads), t.id);
   };
   const deleteThread = (id) => {
+    const target = threads.find((t) => t.id === id);
+    if (target && (target.messages || []).length) {
+      const label = target.title || "this Desk thread";
+      if (!window.confirm(`Delete "${label}"? This can't be undone.`)) return;
+    }
     const rest = threads.filter((t) => t.id !== id);
     const next = rest.length ? rest : [newDeskThread()];
     saveThreads(next, desk.activeId === id ? next[0].id : desk.activeId);
@@ -220,16 +225,17 @@ function Desk({ campaignId, onOpenPiece }) {
           {threads.map((t) => {
             const on = active && t.id === active.id;
             return (
-              <button key={t.id} onClick={() => window.Store.setDesk({ threads, activeId: t.id })}
-                style={{ all: "unset", cursor: "pointer", boxSizing: "border-box", display: "grid", gridTemplateColumns: "1fr auto", gap: 8, width: "100%", padding: "10px 11px", borderRadius: "var(--radius)", marginBottom: 3, background: on ? "var(--paper-2)" : "transparent", border: "1px solid " + (on ? "var(--hair)" : "transparent") }}>
-                <span style={{ minWidth: 0 }}>
+              <div key={t.id}
+                style={{ boxSizing: "border-box", display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 8, width: "100%", padding: "6px 7px 6px 11px", borderRadius: "var(--radius)", marginBottom: 3, background: on ? "var(--paper-2)" : "transparent", border: "1px solid " + (on ? "var(--hair)" : "transparent") }}>
+                <button type="button" onClick={() => window.Store.setDesk({ threads, activeId: t.id })}
+                  style={{ all: "unset", cursor: "pointer", minWidth: 0 }}>
                   <span style={{ display: "block", fontFamily: "var(--font-display)", fontSize: 15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.title || "New thread"}</span>
                   <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)" }}>
                     {t.source === "kings_press_setup" ? "setup handoff · " : ""}{(t.messages || []).length} turns
                   </span>
-                </span>
-                <span onClick={(e) => { e.stopPropagation(); deleteThread(t.id); }} title="Delete thread" style={{ color: "var(--ink-3)", padding: 2 }}><Icon name="trash" size={13} /></span>
-              </button>
+                </button>
+                <button type="button" className="icon-btn" onClick={() => deleteThread(t.id)} title="Delete thread" aria-label={`Delete ${t.title || "Desk thread"}`} style={{ width: 28, height: 28, color: "var(--ink-3)" }}><Icon name="trash" size={13} /></button>
+              </div>
             );
           })}
         </div>

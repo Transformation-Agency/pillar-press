@@ -167,7 +167,7 @@ can still use environment variables instead.
 - The packaged app launches from the app icon, starts its local server, initializes SQLite,
   starts with no default campaigns, serves the UI, and does not require Supabase/Postgres.
 - The desktop browser shell boots from local packaged JS and system fonts; it does not
-  require CDN access for React, Babel, or typography.
+  require CDN access for React or typography.
 - First-run setup lets a normal user install/use Ollama, start an existing Ollama install,
   choose an installed/pulled local model, use Docker Model Runner models, or save an
   optional hosted provider API key. The desk UI also lets the user reopen model settings,
