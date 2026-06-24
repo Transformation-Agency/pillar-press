@@ -1,6 +1,7 @@
 import { uploadPublicFile, persistRemoteImage } from "@/lib/storage";
 import type { ImageProviderConfig } from "@/lib/mediaProviders";
 import type { SessionUser } from "@/lib/auth";
+import { LLMError, providerMessage, safeProviderDetail } from "@/lib/llm/errors";
 
 type ImageGenerationResult = {
   outputUrl: string;
@@ -15,6 +16,19 @@ function sizeForAspect(aspectRatio: string | undefined, resolution: string | und
   return "1024x1024";
 }
 
+function xaiResolution(resolution: string | undefined) {
+  if (resolution === "2k") return "2k";
+  return "1k";
+}
+
+function xaiAspectRatio(aspectRatio: string | undefined) {
+  if (["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "2:1", "1:2", "19.5:9", "9:19.5", "20:9", "9:20", "auto"].includes(aspectRatio || "")) {
+    return aspectRatio;
+  }
+  if (aspectRatio === "4:5") return "3:4";
+  return "1:1";
+}
+
 export async function generateOpenAICompatibleImage(input: {
   config: ImageProviderConfig;
   model: string;
@@ -23,24 +37,41 @@ export async function generateOpenAICompatibleImage(input: {
   resolution?: string;
   user?: SessionUser | null;
 }): Promise<ImageGenerationResult> {
+  const body = input.config.provider === "xai"
+    ? {
+        model: input.model,
+        prompt: input.prompt,
+        n: 1,
+        aspect_ratio: xaiAspectRatio(input.aspectRatio),
+        resolution: xaiResolution(input.resolution),
+      }
+    : {
+        model: input.model,
+        prompt: input.prompt,
+        n: 1,
+        size: sizeForAspect(input.aspectRatio, input.resolution),
+      };
+
   const res = await fetch(`${input.config.baseUrl}/images/generations`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${input.config.apiKey}`,
     },
-    body: JSON.stringify({
-      model: input.model,
-      prompt: input.prompt,
-      n: 1,
-      size: sizeForAspect(input.aspectRatio, input.resolution),
-    }),
+    body: JSON.stringify(body),
     signal: AbortSignal.timeout(120_000),
   });
 
   const text = await res.text();
   if (!res.ok) {
-    throw new Error(`Image provider request failed (${res.status}).`);
+    const errorProvider = input.config.provider === "custom-image" ? "openai-compatible" : input.config.provider;
+    throw new LLMError(
+      res.status,
+      "media_provider",
+      providerMessage(errorProvider, res.status, text),
+      errorProvider,
+      safeProviderDetail(text),
+    );
   }
 
   const json = JSON.parse(text || "{}") as {

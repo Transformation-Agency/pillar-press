@@ -16,6 +16,8 @@ import { completeUsageReservation, failUsageReservation, reserveUsage, type Usag
 const notFound = () =>
   NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
 
+export const maxDuration = 900;
+
 /**
  * Load a piece the caller may touch, or null. The piece must be owned by the
  * caller AND live in a campaign within the caller's workspace. Anything else

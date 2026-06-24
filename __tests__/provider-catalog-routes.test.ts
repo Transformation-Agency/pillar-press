@@ -6,6 +6,27 @@ beforeEach(() => {
 });
 
 describe("hosted provider catalog routes", () => {
+  it("returns a desktop-friendly ElevenLabs missing-key error without env var labels", async () => {
+    vi.doMock("@/lib/auth", () => ({
+      requireUser: vi.fn(async () => ({ id: "local-owner", workspaceId: "local-workspace", role: "author" })),
+    }));
+    vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => true }));
+    vi.doMock("@/lib/mediaProviders", () => ({
+      getElevenLabsProviderForUser: vi.fn(async () => null),
+    }));
+
+    const { GET } = await import("../app/api/eleven/voices/route");
+    const res = await GET(new Request("http://test.local/api/eleven/voices"));
+    const body = await res.json();
+
+    expect(res.status).toBe(502);
+    expect(body).toMatchObject({
+      code: "config",
+      error: "Add an ElevenLabs API key in media provider settings before listing voices or generating speech.",
+    });
+    expect(JSON.stringify(body)).not.toMatch(/ELEVENLABS_API_KEY|xi-api-key|sk-[A-Za-z0-9_-]+/i);
+  });
+
   it("requires managed provider access before listing platform ElevenLabs voices", async () => {
     const listVoices = vi.fn(async () => [
       { voice_id: "voice_1", name: "Narrator", category: "premade", preview_url: "https://example.test/v.mp3" },

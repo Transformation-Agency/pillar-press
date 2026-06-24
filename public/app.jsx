@@ -299,11 +299,14 @@ function Workspace({ piece, refs, onBack, onGoStudio }) {
   const [tab, setTab] = React.useState("draft");
   const [running, setRunning] = React.useState(false);
   const [gateStatus, setGateStatus] = React.useState({});
+  const [reviewError, setReviewError] = React.useState("");
+  const [reviewJumpGate, setReviewJumpGate] = React.useState(null);
   const isMobile = window.useIsMobile();
 
   const update = (patch) => window.Store.updatePiece(piece.id, patch);
 
   const runGates = async () => {
+    setReviewError("");
     setRunning(true); setTab("draft");
     // First gate is "running", rest "pending"; the rail advances as completed[] grows.
     const init = {}; window.GATES.forEach((g, i) => init[g.id] = i === 0 ? "running" : "pending"); setGateStatus(init);
@@ -353,13 +356,14 @@ function Workspace({ piece, refs, onBack, onGoStudio }) {
       });
       polling = false;
       await pollPromise;
-      if (!r.ok) throw new Error("review failed: " + r.status);
-      const { packet, status } = await r.json();
+      const body = await r.json().catch(() => null);
+      if (!r.ok) throw new Error((body && (body.error || body.message)) || ("Review failed: " + r.status));
+      const { packet, status } = body || {};
       // All gates done; sync the local cache (packet already persisted server-side).
       const finalStatus = {}; window.GATES.forEach((g) => finalStatus[g.id] = (packet && packet[g.id]) ? "done" : "pending"); setGateStatus(finalStatus);
       window.Store.updatePiece(piece.id, { packet, status: status || "Reviewed" });
       setRunning(false);
-      if (packet && Object.keys(packet).length) setTab("review");
+      if (packet && Object.keys(packet).length) { setReviewJumpGate(null); setTab("review"); }
     } catch (e) {
       polling = false;
       console.error("Review failed:", e);
@@ -368,12 +372,17 @@ function Workspace({ piece, refs, onBack, onGoStudio }) {
         window.GATES.forEach((g) => { if (next[g.id] === "running") next[g.id] = "error"; });
         return next;
       });
+      setReviewError((e && e.message) || "Review failed.");
       setRunning(false);
     }
   };
 
   const refCtx = window.AI.refContext(refs);
   const findingCount = piece.packet ? window.GATES.reduce((n, g) => n + (piece.packet[g.id] ? piece.packet[g.id].findings.length : 0), 0) : null;
+  const openReview = (gateId = null) => {
+    setReviewJumpGate(gateId || null);
+    setTab("review");
+  };
 
   const tabs = [
     { id: "draft", label: "Draft" },
@@ -394,17 +403,17 @@ function Workspace({ piece, refs, onBack, onGoStudio }) {
           </div>
           <StatusPipeline piece={piece} onSet={(s) => window.Store.setStatus(piece.id, s)} />
         </div>
-        <Tabs tabs={tabs} active={tab} onChange={setTab} />
+        <Tabs tabs={tabs} active={tab} onChange={(next) => { if (next !== "review") setReviewJumpGate(null); setTab(next); }} />
       </div>
 
       {/* tab body */}
       {tab === "draft" && (
-        <DraftTab piece={piece} running={running} gateStatus={gateStatus}
+        <DraftTab piece={piece} running={running} gateStatus={gateStatus} reviewError={reviewError}
           onRun={runGates} onChangeOriginal={(t) => update({ original: t })}
-          onGoReview={() => setTab("review")} />
+          onGoReview={openReview} />
       )}
       {tab === "review" && (piece.packet
-        ? <ReviewTab piece={piece} />
+        ? <ReviewTab piece={piece} jumpGate={reviewJumpGate} />
         : <EmptyState icon="flag" title="No review packet yet" body="Paste a draft on the Draft tab and run the seven gates. The packet appears here, beside your original." />)}
       {tab === "revision" && <RevisionTab piece={piece} onUpdate={update} refCtx={refCtx} />}
       {tab === "outputs" && <OutputsTab piece={piece} onUpdate={update} refCtx={refCtx} onGoStudio={onGoStudio} />}
@@ -502,7 +511,7 @@ function RoleSwitch({ role, onChange }) {
   );
 }
 
-function CampaignSwitcher({ campaigns, activeId, onSelect, onAdd }) {
+function CampaignSwitcher({ campaigns, activeId, pieceCounts, onSelect, onAdd }) {
   const [open, setOpen] = React.useState(false);
   const ref = React.useRef(null);
   React.useEffect(() => {
@@ -511,6 +520,8 @@ function CampaignSwitcher({ campaigns, activeId, onSelect, onAdd }) {
     return () => document.removeEventListener("mousedown", h);
   }, []);
   const active = campaigns.find((c) => c.id === activeId) || campaigns[0];
+  const counts = pieceCounts || {};
+  const activeCount = active ? (counts[active.id] || 0) : 0;
   return (
     <div ref={ref} style={{ position: "relative" }}>
       <button onClick={() => setOpen((o) => !o)} title="Switch campaign"
@@ -519,11 +530,17 @@ function CampaignSwitcher({ campaigns, activeId, onSelect, onAdd }) {
           borderRadius: 999, padding: "6px 12px", height: 34 }}>
         <span style={{ width: 7, height: 7, borderRadius: 99, background: "var(--accent)" }} />
         <span style={{ fontFamily: "var(--font-display)", fontSize: 15, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{active ? active.name : "No campaign"}</span>
+        {active && (
+          <span className="mono" style={{
+            fontSize: 10.5, color: "var(--ink-3)", border: "1px solid var(--hair)",
+            borderRadius: 999, padding: "2px 6px", lineHeight: 1,
+          }}>{activeCount}</span>
+        )}
         <Icon name="chevD" size={14} style={{ color: "var(--ink-3)" }} />
       </button>
       {open && (
-        <div className="card" style={{ position: "absolute", top: 42, right: 0, width: 248, padding: 6, zIndex: 60, boxShadow: "var(--shadow-lg)", maxHeight: "70vh", overflowY: "auto" }}>
-          <div className="eyebrow" style={{ padding: "6px 10px 4px" }}>Campaign · guidelines</div>
+        <div className="card" style={{ position: "absolute", top: 42, right: 0, width: 292, padding: 6, zIndex: 60, boxShadow: "var(--shadow-lg)", maxHeight: "70vh", overflowY: "auto" }}>
+          <div className="eyebrow" style={{ padding: "6px 10px 4px" }}>Campaign · pieces</div>
           {!campaigns.length && (
             <div className="muted" style={{ padding: "8px 10px", fontSize: 13.5 }}>No campaigns yet.</div>
           )}
@@ -537,11 +554,16 @@ function CampaignSwitcher({ campaigns, activeId, onSelect, onAdd }) {
                   fontFamily: "var(--font-body)", fontSize: 15, textAlign: "left" }}
                 onMouseEnter={(e) => { if (!on) e.currentTarget.style.background = "var(--paper-sunk)"; }}
                 onMouseLeave={(e) => { if (!on) e.currentTarget.style.background = "transparent"; }}>
-                <span style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                <span style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
                   <span style={{ width: 6, height: 6, borderRadius: 99, background: on ? "var(--accent)" : "var(--hair-2)" }} />
-                  {c.name}
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</span>
                 </span>
-                {on && <Icon name="check" size={15} />}
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 7, flex: "0 0 auto" }}>
+                  <span className="mono" style={{ fontSize: 10.5, color: on ? "var(--accent-ink)" : "var(--ink-3)" }}>
+                    {counts[c.id] || 0}
+                  </span>
+                  {on && <Icon name="check" size={15} />}
+                </span>
               </button>
             );
           })}
@@ -550,6 +572,56 @@ function CampaignSwitcher({ campaigns, activeId, onSelect, onAdd }) {
             className="mono" style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, border: "none", background: "transparent", cursor: "pointer", borderRadius: "var(--radius)", padding: "9px 10px", color: "var(--ink-3)", fontSize: 12, letterSpacing: "0.04em" }}>
             <Icon name="plus" size={13} /> NEW CAMPAIGN
           </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const LIBRARY_VIEWS = new Set(["library", "workspace", "weave", "studio"]);
+function isLibraryView(view) { return LIBRARY_VIEWS.has(view); }
+
+function LibraryMenuButton({ view, onSelect }) {
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef(null);
+  React.useEffect(() => {
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, []);
+  const items = [
+    { id: "pieces", label: "Pieces", active: view === "library" || view === "workspace" },
+    { id: "weave", label: "Weave", active: view === "weave" },
+    { id: "studio", label: "Studio", active: view === "studio" },
+  ];
+  return (
+    <div ref={ref} className="nav-menu" style={{ position: "relative" }}>
+      <button
+        className={"nav-menu-trigger " + (isLibraryView(view) ? "active" : "")}
+        onClick={() => setOpen((o) => !o)}
+        title="Open Library sections"
+      >
+        Library <Icon name="chevD" size={12} style={{ marginLeft: 4 }} />
+      </button>
+      {open && (
+        <div className="card" style={{ position: "absolute", top: 38, left: 0, width: 172, padding: 6, zIndex: 65, boxShadow: "var(--shadow-lg)" }}>
+          {items.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => { onSelect(item.id); setOpen(false); }}
+              style={{
+                width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
+                border: "none", background: item.active ? "var(--accent-soft)" : "transparent", cursor: "pointer",
+                borderRadius: "var(--radius)", padding: "9px 10px", color: item.active ? "var(--accent-ink)" : "var(--ink)",
+                fontFamily: "var(--font-body)", fontSize: 15, textAlign: "left", textTransform: "none", letterSpacing: 0,
+              }}
+              onMouseEnter={(e) => { if (!item.active) e.currentTarget.style.background = "var(--paper-sunk)"; }}
+              onMouseLeave={(e) => { if (!item.active) e.currentTarget.style.background = "transparent"; }}
+            >
+              <span>{item.label}</span>
+              {item.active && <Icon name="check" size={15} />}
+            </button>
+          ))}
         </div>
       )}
     </div>
@@ -609,6 +681,7 @@ function DesktopOnboarding() {
   const [status, setStatus] = React.useState(null);
   const [models, setModels] = React.useState([]);
   const [dockerModels, setDockerModels] = React.useState([]);
+  const [cloudListedModels, setCloudListedModels] = React.useState({});
   const [model, setModel] = React.useState("llama3.2");
   const [dockerBaseUrl, setDockerBaseUrl] = React.useState("http://localhost:12434/engines/v1");
   const [cloudProvider, setCloudProvider] = React.useState("openai");
@@ -627,7 +700,7 @@ function DesktopOnboarding() {
   const setupCompleteKey = (window.KP_CONVERSATIONAL_ONBOARDING &&
     window.KP_CONVERSATIONAL_ONBOARDING.flags &&
     window.KP_CONVERSATIONAL_ONBOARDING.flags.computeSetupLocalStorageKey) || "kingspress.desktopSetupComplete";
-  const modelOptions = ["llama3.2", "mistral", "qwen2.5:7b", "gemma3:4b"];
+  const fallbackOllamaModels = ["gemma4:26b-mlx", "llama3.2", "qwen2.5:latest", "mistral"];
   const cloudModels = {
     openai: ["gpt-4o-mini", "gpt-4.1-mini", "gpt-4o"],
     anthropic: ["claude-haiku-4-5", "claude-sonnet-4-5"],
@@ -662,6 +735,22 @@ function DesktopOnboarding() {
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-+|-+$/g, "")
       .slice(0, 80) || "llm-profile";
+  const preferGemma = (items) => {
+    const values = (items || []).filter((item) => item && !/embed/i.test(item));
+    return values.slice().sort((a, b) => {
+      const aGemma = /^gemma4/i.test(a) ? 0 : /^gemma/i.test(a) ? 1 : 2;
+      const bGemma = /^gemma4/i.test(b) ? 0 : /^gemma/i.test(b) ? 1 : 2;
+      return aGemma - bGemma || a.localeCompare(b);
+    });
+  };
+  const suggestedOllamaModels = () => fallbackOllamaModels.filter((m) => !models.includes(m));
+  const uniqueModelOptions = (items) => Array.from(new Set((items || []).map((item) => String(item || "").trim()).filter(Boolean)));
+  const modelOptionsForSetup = () => {
+    if (setupMode === "ollama") return uniqueModelOptions(models.concat(suggestedOllamaModels()));
+    if (setupMode === "docker") return uniqueModelOptions(dockerModels);
+    const listed = cloudListedModels[cloudProvider] || [];
+    return uniqueModelOptions(listed.length ? listed : (cloudModels[cloudProvider] || []));
+  };
 
   const profilesFromSettings = (settings) => {
     if (settings && Array.isArray(settings.profiles) && settings.profiles.length) return settings.profiles;
@@ -839,14 +928,15 @@ function DesktopOnboarding() {
         desktop.getModelChoice().catch(() => null),
       ]);
       setStatus(s);
-      setModels(list || []);
+      const localModels = preferGemma(list || []);
+      setModels(localModels);
       let savedDockerModels = [];
       const activeSaved = activeProfileFromSettings(saved);
       if (isDockerModelRunnerSettings(activeSaved)) {
         savedDockerModels = await fetchOpenAICompatibleModels(activeSaved.baseUrl).catch(() => []);
         setDockerModels(savedDockerModels);
       }
-      const hasSavedModelChoice = savedModelChoiceComplete(saved, s, list || [], savedDockerModels);
+      const hasSavedModelChoice = savedModelChoiceComplete(saved, s, localModels, savedDockerModels);
       setSavedSettings(saved);
       setTaskDefaults((saved && saved.taskDefaults) || {});
       if (activeSaved && activeSaved.provider) {
@@ -866,7 +956,7 @@ function DesktopOnboarding() {
         setModel(activeSaved.model);
         setProfileName(activeSaved.label || providerLabel(activeSaved.provider) + " " + activeSaved.model);
       }
-      else if (list && list.length) setModel(list[0]);
+      else if (localModels.length) setModel(localModels[0]);
       if (options && options.syncSetupOpen) {
         if (hasSavedModelChoice) {
           window.localStorage.setItem(setupCompleteKey, "true");
@@ -977,6 +1067,24 @@ function DesktopOnboarding() {
     setBusy(false);
   };
 
+  const refreshOllamaModels = async () => {
+    setBusy(true); setMessage("Refreshing Ollama models.");
+    try {
+      const [s, list] = await Promise.all([
+        desktop.ollamaStatus().catch((e) => ({ installed: false, running: false, message: e.message })),
+        desktop.listOllamaModels().catch(() => []),
+      ]);
+      const localModels = preferGemma(list || []);
+      setStatus(s);
+      setModels(localModels);
+      if (localModels.length && (!model.trim() || !localModels.includes(model.trim()))) setModel(localModels[0]);
+      setMessage(localModels.length ? "Loaded " + localModels.length + " Ollama model" + (localModels.length === 1 ? "" : "s") + "." : "Ollama responded, but no local chat models were listed.");
+    } catch (e) {
+      setMessage((e && e.message) || "Could not refresh Ollama models.");
+    }
+    setBusy(false);
+  };
+
   const listDockerModels = async () => {
     setBusy(true); setMessage("Checking Docker Model Runner.");
     try {
@@ -996,8 +1104,9 @@ function DesktopOnboarding() {
     const config = currentProviderConfig();
     setBusy(true); setMessage("Listing models from " + providerLabel(config.provider) + ".");
     try {
+      const canUseSavedDesktopKey = !isHostedSetup && (config.provider === "openai" || config.provider === "xai");
       if (config.provider === "openai-compatible" && !config.baseUrl) throw new Error("Add a base URL first.");
-      if (config.provider !== "openai-compatible" && config.provider !== "ollama" && !config.apiKey && !config.profileId) throw new Error("Add an API key first.");
+      if (!canUseSavedDesktopKey && config.provider !== "openai-compatible" && config.provider !== "ollama" && !config.apiKey && !config.profileId) throw new Error("Add an API key first.");
       const res = await fetch("/api/llm/models", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -1006,11 +1115,12 @@ function DesktopOnboarding() {
       const json = await res.json().catch(() => null);
       if (!res.ok) throw new Error((json && json.error) || "Could not list models.");
       const listed = json && Array.isArray(json.models) ? json.models : [];
+      setCloudListedModels((current) => Object.assign({}, current, { [config.provider]: listed }));
       if (listed.length) {
         setModel(listed[0]);
-        setMessage("Loaded " + listed.length + " model" + (listed.length === 1 ? "" : "s") + ".");
+        setMessage((json && json.warning) || ("Loaded " + listed.length + " model" + (listed.length === 1 ? "" : "s") + "."));
       } else {
-        setMessage("Provider responded, but no models were listed. You can still type a model name and test it.");
+        setMessage((json && json.warning) || "Provider responded, but no models were listed. You can still type a model name and test it.");
       }
     } catch (e) {
       setMessage((e && e.message) || "Could not list models. You can still type a model name and test it.");
@@ -1058,7 +1168,8 @@ function DesktopOnboarding() {
         };
       } else {
         const key = apiKey.trim();
-        if (!key) throw new Error("Add an API key for the selected cloud provider.");
+        const canUseSavedDesktopKey = !isHostedSetup && (cloudProvider === "openai" || cloudProvider === "xai");
+        if (!key && !canUseSavedDesktopKey) throw new Error("Add an API key for the selected cloud provider.");
         nextProfile = {
           provider: cloudProvider,
           model: picked,
@@ -1153,6 +1264,9 @@ function DesktopOnboarding() {
   const installed = !!(status && status.installed);
   const running = !!(status && status.running);
   const hasModel = models.includes(model);
+  const ollamaSuggestions = suggestedOllamaModels();
+  const visibleModelOptions = modelOptionsForSetup();
+  const listedCloudCount = setupMode === "cloud" && cloudListedModels[cloudProvider] ? cloudListedModels[cloudProvider].length : 0;
   const canUseModel = setupMode === "ollama"
     ? installed && running && hasModel && !!model.trim()
     : setupMode === "docker"
@@ -1178,7 +1292,7 @@ function DesktopOnboarding() {
         <div style={{ maxWidth: 980, margin: "0 auto" }}>
         {!isHostedSetup && (
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 16 }}>
-            <button className={"btn " + (setupMode === "ollama" ? "primary" : "ghost")} onClick={() => { setSetupMode("ollama"); if (models.length) setModel(models[0]); setProfileName(""); }} disabled={busy}>Ollama</button>
+            <button className={"btn " + (setupMode === "ollama" ? "primary" : "ghost")} onClick={() => { setSetupMode("ollama"); setModel(models.length ? models[0] : fallbackOllamaModels[0]); setProfileName(""); }} disabled={busy}>Ollama</button>
             <button className={"btn " + (setupMode === "docker" ? "primary" : "ghost")} onClick={() => { setSetupMode("docker"); setModel(dockerModels.length ? dockerModels[0] : ""); setProfileName(""); }} disabled={busy}>Docker Model Runner</button>
             <button className={"btn " + (setupMode === "cloud" ? "primary" : "ghost")} onClick={() => { setSetupMode("cloud"); setModel((cloudModels[cloudProvider] || [""])[0]); setProfileName(""); }} disabled={busy}>Cloud API key</button>
           </div>
@@ -1191,10 +1305,15 @@ function DesktopOnboarding() {
             <div style={{ fontSize: 15 }}>{installed ? (running ? "Installed and running" : "Installed, not running") : "Not detected"}</div>
           </div>
           <div className="card" style={{ padding: 12, borderRadius: "var(--radius)" }}>
-            <div className="mono" style={{ fontSize: 11, color: "var(--ink-3)" }}>LOCAL MODELS</div>
+            <div className="mono" style={{ fontSize: 11, color: "var(--ink-3)" }}>INSTALLED CHAT MODELS</div>
             <div style={{ fontSize: 15 }}>{models.length ? models.join(", ") : "None found yet"}</div>
           </div>
         </div>
+            {!!ollamaSuggestions.length && (
+          <p className="muted" style={{ marginTop: 10, fontSize: 13.5 }}>
+            Suggestions available to pull: {ollamaSuggestions.join(", ")}
+          </p>
+            )}
             {!installed && (
           <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <p style={{ margin: 0, fontSize: 14.5 }}>Ollama is not installed yet.</p>
@@ -1227,7 +1346,13 @@ function DesktopOnboarding() {
         {setupMode === "cloud" && (
           <div style={{ marginTop: 18, display: "grid", gap: 10 }}>
             <div style={{ display: "grid", gridTemplateColumns: "minmax(160px, 0.6fr) minmax(220px, 1fr)", gap: 8 }}>
-              <select className="field" value={cloudProvider} onChange={(e) => { setCloudProvider(e.target.value); setModel((cloudModels[e.target.value] || [""])[0]); setProfileName(""); }}>
+              <select className="field" value={cloudProvider} onChange={(e) => {
+                const nextProvider = e.target.value;
+                const listed = cloudListedModels[nextProvider] || [];
+                setCloudProvider(nextProvider);
+                setModel(((listed.length ? listed : cloudModels[nextProvider]) || [""])[0] || "");
+                setProfileName("");
+              }}>
                 <option value="openai">OpenAI / ChatGPT</option>
                 <option value="anthropic">Anthropic</option>
                 <option value="gemini">Gemini</option>
@@ -1242,17 +1367,45 @@ function DesktopOnboarding() {
           </div>
         )}
         <label className="eyebrow" style={{ display: "block", marginTop: 18, marginBottom: 6 }}>Model</label>
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(180px, 1fr) auto auto auto", gap: 8 }}>
-          <input className="field" value={model} onChange={(e) => setModel(e.target.value)} list="desktop-model-options" placeholder={setupMode === "cloud" ? "model name" : "llama3.2"} />
-          <datalist id="desktop-model-options">{(setupMode === "docker" ? dockerModels : setupMode === "cloud" ? (cloudModels[cloudProvider] || []) : modelOptions).map((m) => <option key={m} value={m} />)}</datalist>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(180px, 1fr) repeat(4, max-content)", gap: 8, alignItems: "center", overflowX: "auto" }}>
+          <input className="field" value={model} onChange={(e) => setModel(e.target.value)} placeholder={setupMode === "cloud" ? "model name" : "gemma4:26b-mlx"} />
           {setupMode === "ollama" && (
             <button className="btn" disabled={busy || !installed || !running || hasModel || !model.trim()} onClick={pullModel}><Icon name="doc" size={14} /> Pull</button>
+          )}
+          {setupMode === "ollama" && (
+            <button className="btn" disabled={busy || !installed || !running} onClick={refreshOllamaModels}><Icon name="check" size={14} /> Refresh models</button>
           )}
           {setupMode === "cloud" && (
             <button className="btn" disabled={busy || (cloudProvider !== "openai-compatible" && !apiKey.trim()) || (cloudProvider === "openai-compatible" && !cloudBaseUrl.trim())} onClick={listCloudModels}><Icon name="check" size={14} /> List models</button>
           )}
           <button className="btn" disabled={busy || !canUseModel} onClick={testModel}><Icon name="play" size={14} /> Test</button>
           <button className="btn primary" disabled={busy || !canUseModel} onClick={finish}>Use model</button>
+          <div style={{ gridColumn: "1 / -1", minWidth: 0 }}>
+            <div className="muted" style={{ fontSize: 12.5, margin: "2px 0 8px" }}>
+              {setupMode === "cloud" && listedCloudCount
+                ? "Showing " + listedCloudCount + " fetched " + providerLabel(cloudProvider) + " models."
+                : setupMode === "cloud"
+                  ? "Showing " + providerLabel(cloudProvider) + " defaults until you list models."
+                  : setupMode === "docker"
+                    ? (visibleModelOptions.length ? "Showing Docker Model Runner results." : "List Docker models or type a model name.")
+                    : (models.length ? "Showing installed Ollama models and suggested pulls." : "Refresh Ollama models or type a model to pull.")}
+            </div>
+            {!!visibleModelOptions.length && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 132, overflowY: "auto", padding: 2 }}>
+                {visibleModelOptions.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    className={"btn sm " + (m === model ? "" : "ghost")}
+                    onClick={() => setModel(m)}
+                    title={m}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
         <label className="eyebrow" style={{ display: "block", marginTop: 14, marginBottom: 6 }}>Profile name</label>
         <input className="field" value={profileName} onChange={(e) => setProfileName(e.target.value)} placeholder={providerLabel(setupMode === "cloud" ? cloudProvider : setupMode === "docker" ? "openai-compatible" : "ollama") + " " + (model || "model")} />
@@ -1519,6 +1672,85 @@ function BillingPanel({ open, onClose, billing, notice }) {
   );
 }
 
+const DESK_WORKFLOWS = [
+  { id: "article", label: "Article", icon: "doc", title: "Untitled article" },
+  { id: "book", label: "Book", icon: "book", view: "book" },
+  { id: "letter", label: "Letter", icon: "doc", view: "letter" },
+  { id: "communication", label: "Other Communication", icon: "doc", title: "Untitled communication" },
+  { id: "gather", label: "Gather", icon: "globe", view: "gather" },
+];
+
+function DeskWorkflowMenu({ activeView, activeWorkflow, onOpenWorkflow, onOpenDesk }) {
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef(null);
+  React.useEffect(() => {
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, []);
+  const deskActive = activeView === "desk" || activeView === "book" || activeView === "gather" || activeView === "letter" || (activeView === "workspace" && !!activeWorkflow);
+  const choose = (workflowId) => {
+    setOpen(false);
+    onOpenWorkflow(workflowId);
+  };
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <button
+        className={deskActive ? "active" : ""}
+        onClick={() => setOpen((v) => !v)}
+        onDoubleClick={onOpenDesk}
+        title="Desk workflows"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        style={{ display: "inline-flex", alignItems: "center", gap: 5 }}
+      >
+        Desk <Icon name="chevD" size={12} />
+      </button>
+      {open && (
+        <div
+          className="card"
+          role="menu"
+          style={{
+            position: "absolute", top: 38, left: 0, width: 238, padding: 6,
+            zIndex: 70, boxShadow: "var(--shadow-lg)",
+          }}
+        >
+          <button
+            role="menuitem"
+            onClick={() => { setOpen(false); onOpenDesk(); }}
+            style={{
+              width: "100%", display: "flex", alignItems: "center", gap: 9,
+              border: "none", background: activeView === "desk" ? "var(--accent-soft)" : "transparent",
+              cursor: "pointer", borderRadius: "var(--radius)", padding: "9px 10px",
+              color: activeView === "desk" ? "var(--accent-ink)" : "var(--ink)",
+              fontFamily: "var(--font-body)", fontSize: 15, textAlign: "left",
+            }}
+          >
+            <Icon name="sparkle" size={14} /> Desk
+          </button>
+          <hr className="rule" style={{ margin: "5px 4px" }} />
+          {DESK_WORKFLOWS.map((workflow) => (
+            <button
+              key={workflow.id}
+              role="menuitem"
+              onClick={() => choose(workflow.id)}
+              style={{
+                width: "100%", display: "flex", alignItems: "center", gap: 9,
+                border: "none", background: (activeView === workflow.view || activeWorkflow === workflow.id) ? "var(--accent-soft)" : "transparent",
+                cursor: "pointer", borderRadius: "var(--radius)", padding: "9px 10px",
+                color: (activeView === workflow.view || activeWorkflow === workflow.id) ? "var(--accent-ink)" : "var(--ink)",
+                fontFamily: "var(--font-body)", fontSize: 15, textAlign: "left",
+              }}
+            >
+              <Icon name={workflow.icon} size={14} /> {workflow.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function App() {
   const state = useStore();
   const auth = useHostedAuth();
@@ -1532,6 +1764,7 @@ function App() {
   const [campaignCreateOpen, setCampaignCreateOpen] = React.useState(false);
   const [billingOpen, setBillingOpen] = React.useState(false);
   const [billingNotice, setBillingNotice] = React.useState(null);
+  const [activeDeskWorkflow, setActiveDeskWorkflow] = React.useState(null);
   const isMobile = window.useIsMobile();
   const role = state.role || "author";
 
@@ -1540,6 +1773,21 @@ function App() {
   const refs = window.Store.activeReferences ? window.Store.activeReferences() : ((activeCampaign && activeCampaign.references) || {});
   const refCtx = window.AI.refContext(refs);
   const campaignPieces = activeCampaign ? state.pieces.filter((p) => p.campaignId === activeCampaign.id) : [];
+  const pieceCountsByCampaign = React.useMemo(() => {
+    const counts = {};
+    (campaigns || []).forEach((c) => {
+      if (c && c.id) counts[c.id] = Number(c.pieceCount || 0);
+    });
+    const loadedCounts = {};
+    (state.pieces || []).forEach((p) => {
+      if (!p || !p.campaignId) return;
+      loadedCounts[p.campaignId] = (loadedCounts[p.campaignId] || 0) + 1;
+    });
+    Object.keys(loadedCounts).forEach((id) => {
+      counts[id] = loadedCounts[id];
+    });
+    return counts;
+  }, [campaigns, state.pieces]);
 
   const active = state.pieces.find((p) => p.id === state.activePieceId);
   const inWorkspace = view === "workspace" && active;
@@ -1557,9 +1805,41 @@ function App() {
     window.KP_CONVERSATIONAL_ONBOARDING.flags &&
     window.KP_CONVERSATIONAL_ONBOARDING.flags.handoffPref) || "onboardingAssistantHandoffV1";
 
-  const openPiece = (id) => { window.Store.setActive(id); setView("workspace"); };
-  const goLibrary = () => { setView("library"); window.Store.setActive(null); };
+  const openPiece = (id) => { setActiveDeskWorkflow(null); window.Store.setActive(id); setView("workspace"); };
+  const goLibrary = () => { setActiveDeskWorkflow(null); setView("library"); window.Store.setActive(null); };
+  const goLibrarySection = (target) => {
+    setActiveDeskWorkflow(null);
+    if (target === "pieces" || target === "library") {
+      goLibrary();
+      return;
+    }
+    setView(target);
+  };
   const openModelSetup = () => window.dispatchEvent(new Event("kingspress:open-model-setup"));
+  const openWorkflow = (workflowId) => {
+    const workflow = DESK_WORKFLOWS.find((item) => item.id === workflowId);
+    if (!workflow) return;
+    if (window.Store && window.Store.setPref) window.Store.setPref("lastDeskWorkflow", workflowId);
+    setActiveDeskWorkflow(workflowId);
+    if (workflow.id === "book" || workflow.id === "gather" || workflow.id === "letter") {
+      window.Store.setActive(null);
+      setView(workflow.view);
+      return;
+    }
+    if (!activeCampaign) {
+      setCampaignCreateOpen(true);
+      return;
+    }
+    const category = workflow.id === "letter" ? "letter" : workflow.id === "communication" ? "other" : "article";
+    window.Store.createPiece(workflow.title, activeCampaign.id, {
+      category,
+      categoryContext: {
+        communicationGoal: workflow.id === "communication" ? workflow.title : undefined,
+        publicationGoal: workflow.id === "article" ? workflow.title : undefined,
+      },
+    });
+    setView("workspace");
+  };
   React.useEffect(() => {
     let cancelled = false;
     Promise.resolve(window.Store.ready).then(() => {
@@ -1640,6 +1920,7 @@ function App() {
     if (!clean) return;
     window.Store.addCampaign(clean);
     setCampaignCreateOpen(false);
+    setActiveDeskWorkflow(null);
     setView("library");
   };
   const createDesktopBackup = async () => {
@@ -1669,16 +1950,23 @@ function App() {
           <span className="sub">Editorial Desk</span>
         </div>
         <nav className="topnav">
-          <button className={view === "desk" ? "active" : ""} onClick={() => setView("desk")}>Desk</button>
-          <button className={view === "library" ? "active" : ""} onClick={goLibrary}>Library</button>
-          <button className={view === "book" ? "active" : ""} onClick={() => setView("book")}>Book</button>
-          <button className={view === "gather" ? "active" : ""} onClick={() => setView("gather")}>Gather</button>
-          <button className={view === "weave" ? "active" : ""} onClick={() => setView("weave")}>Weave</button>
-          <button className={view === "studio" ? "active" : ""} onClick={() => setView("studio")}>Studio</button>
-          <button className={view === "references" ? "active" : ""} onClick={() => setView("references")}>Preferences</button>
+          <DeskWorkflowMenu
+            activeView={view}
+            activeWorkflow={activeDeskWorkflow}
+            onOpenWorkflow={openWorkflow}
+            onOpenDesk={() => { setActiveDeskWorkflow(null); window.Store.setActive(null); setView("desk"); }}
+          />
+          <LibraryMenuButton view={view} onSelect={goLibrarySection} />
+          <button
+            className={view === "references" ? "active" : ""}
+            aria-current={view === "references" ? "page" : undefined}
+            onClick={() => { setActiveDeskWorkflow(null); window.Store.setActive(null); setView("references"); }}
+          >
+            Preferences
+          </button>
         </nav>
         <div className="spacer" />
-        <CampaignSwitcher campaigns={campaigns} activeId={state.activeCampaignId}
+        <CampaignSwitcher campaigns={campaigns} activeId={state.activeCampaignId} pieceCounts={pieceCountsByCampaign}
           onSelect={(id) => window.Store.setActiveCampaign(id)} onAdd={() => setCampaignCreateOpen(true)} />
         {!isMobile && <RoleSwitch role={role} onChange={(r) => window.Store.setRole(r)} />}
         <button className="btn sm" onClick={() => setSetupOpen(true)} title="Setup provider, campaign, and preferences">
@@ -1724,11 +2012,14 @@ function App() {
       {activeCampaign && view === "desk" && (
         <Desk campaignId={activeCampaign.id} onOpenPiece={openPiece} />
       )}
+      {activeCampaign && view === "letter" && (
+        <LetterDesk campaignId={activeCampaign.id} onOpenPiece={openPiece} />
+      )}
       {activeCampaign && view === "weave" && (
-        <Weave weave={window.Store.getWeave()} refCtx={refCtx} onOpenPiece={openPiece} />
+        <Weave weave={window.Store.getWeave()} refCtx={refCtx} campaignId={activeCampaign.id} onOpenPiece={openPiece} />
       )}
       {activeCampaign && view === "gather" && (
-        <Gather campaignId={activeCampaign.id} refCtx={refCtx} onGoWeave={() => setView("weave")} />
+        <Gather campaignId={activeCampaign.id} refCtx={refCtx} onGoWeave={() => goLibrarySection("weave")} />
       )}
       {activeCampaign && view === "studio" && (
         <Studio campaignId={activeCampaign.id} pieces={campaignPieces} onOpenPiece={openPiece} />
@@ -1738,11 +2029,16 @@ function App() {
           onOpenPiece={openPiece} onActivateCampaign={(id) => window.Store.setActiveCampaign(id)} />
       )}
       {activeCampaign && view === "library" && (
-        <Library pieces={campaignPieces} campaignName={activeCampaign && activeCampaign.name} onOpen={openPiece}
-          onNew={() => { window.Store.createPiece("Untitled piece"); setView("workspace"); }}
-          onDelete={(id) => window.Store.deletePiece(id)} />
+        <Library pieces={campaignPieces} campaignName={activeCampaign && activeCampaign.name}
+          campaigns={campaigns} allPieces={state.pieces} activeCampaignId={activeCampaign.id}
+          onOpen={openPiece}
+          onNew={() => { setActiveDeskWorkflow(null); window.Store.createPiece("Untitled piece"); setView("workspace"); }}
+          onDelete={(id) => window.Store.deletePiece(id)}
+          onOpenWeave={() => goLibrarySection("weave")}
+          onOpenStudio={() => goLibrarySection("studio")}
+          onSwitchCampaign={(id) => { window.Store.setActiveCampaign(id); setView("library"); }} />
       )}
-      {activeCampaign && inWorkspace && <Workspace piece={active} refs={refs} onBack={goLibrary} onGoStudio={() => setView("studio")} />}
+      {activeCampaign && inWorkspace && <Workspace piece={active} refs={refs} onBack={goLibrary} onGoStudio={() => goLibrarySection("studio")} />}
       {activeCampaign && view === "workspace" && !active && (
         <EmptyState icon="doc" title="No piece open" body="Head back to the Library to open or start one." />
       )}

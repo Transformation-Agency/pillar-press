@@ -22,6 +22,25 @@ function gateSectionToText(g, r) {
   return out;
 }
 
+function ReviewTraceStrip({ piece }) {
+  const trace = piece && piece.packet && piece.packet.__trace;
+  if (!trace) return null;
+  const warnings = trace.warnings || [];
+  return (
+    <div className="card" style={{ padding: "10px 12px", marginBottom: 14, display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+      <span className="eyebrow">{trace.categoryLabel || trace.category || "Article"}</span>
+      <span className="mono muted" style={{ fontSize: 11 }}>{String(trace.plan || "single_pass").replace(/_/g, " ")}</span>
+      {trace.chunks > 1 && <span className="mono muted" style={{ fontSize: 11 }}>{trace.chunks} chunks</span>}
+      {trace.model && <span className="mono muted" style={{ fontSize: 11 }}>{trace.provider ? trace.provider + " · " : ""}{trace.model}</span>}
+      {warnings.map((w, i) => (
+        <span key={i} className="mono" style={{ fontSize: 11, color: "var(--accent-ink)" }}>
+          {String(w).startsWith("long_input_chunked") ? "Long draft reviewed in chunks" : w}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function FindingItem({ f, idx, gateId, selected, onSelect }) {
   return (
     <div onClick={() => onSelect(gateId, idx, f.anchor)}
@@ -193,18 +212,21 @@ function useDictation(getBase, onText, onDone) {
     rec.continuous = true; rec.interimResults = true; rec.lang = "en-US";
     let base = getBase() ? getBase() + " " : "";
     rec.onresult = (e) => {
-      let interim = "", finalAdd = "";
+      let interim = "";
+      const finalParts = [];
       for (let i = e.resultIndex; i < e.results.length; i++) {
-        const t = e.results[i][0].transcript;
-        if (e.results[i].isFinal) finalAdd += t; else interim += t;
+        const t = String(e.results[i][0].transcript || "").trim();
+        if (e.results[i].isFinal) finalParts.push(t);
+        else interim += " " + t;
       }
-      if (finalAdd) base += finalAdd;
+      const finalAdd = finalParts.filter(Boolean).join(" ");
+      if (finalAdd) base = (base + finalAdd + " ").replace(/\s+/g, " ");
       onText((base + interim).replace(/\s+/g, " ").trim());
     };
-    rec.onerror = () => { setMsg("Dictation error."); setListening(false); };
+    rec.onerror = () => { setMsg("Dictation could not continue. Check microphone permission, then try again or type your notes."); setListening(false); };
     rec.onend = () => { setListening(false); recRef.current = null; onDone && onDone(); };
     recRef.current = rec; setMsg(null); setListening(true);
-    try { rec.start(); } catch (e) { setListening(false); }
+    try { rec.start(); } catch (e) { recRef.current = null; setListening(false); setMsg("Dictation could not start."); }
   };
   return { listening, msg, toggle };
 }
@@ -271,12 +293,29 @@ function DirectionBox({ piece }) {
   );
 }
 
-function ReviewTab({ piece }) {
+function ReviewTab({ piece, jumpGate }) {
   const isMobile = window.useIsMobile();
   const [sel, setSel] = React.useState({ key: null, anchor: null, bump: 0 });
   const [sevFilter, setSevFilter] = React.useState({ must: true, consider: true, note: true });
+  const [jumpedGate, setJumpedGate] = React.useState(null);
   const [mView, setMView] = React.useState("packet"); // mobile: packet | original
   const packet = piece.packet || {};
+
+  React.useEffect(() => {
+    if (!jumpGate) return undefined;
+    const run = () => {
+      const target = document.getElementById("gate-" + jumpGate);
+      if (!target) return;
+      target.scrollIntoView({ behavior: "smooth", block: "start" });
+      setJumpedGate(jumpGate);
+      window.setTimeout(() => setJumpedGate((gate) => gate === jumpGate ? null : gate), 1800);
+    };
+    const raf = window.requestAnimationFrame ? window.requestAnimationFrame(run) : window.setTimeout(run, 0);
+    return () => {
+      if (window.cancelAnimationFrame && typeof raf === "number") window.cancelAnimationFrame(raf);
+      else window.clearTimeout(raf);
+    };
+  }, [jumpGate, piece.id]);
 
   const onSelect = (gateId, idx, anchor) => {
     setSel((s) => ({ key: gateId + ":" + idx, anchor: anchor || null, bump: s.bump + 1 }));
@@ -308,6 +347,7 @@ function ReviewTab({ piece }) {
             <div className="eyebrow">Review Packet</div>
             <CopyButton text={() => packetToText(piece)} label="Copy packet" />
           </div>
+          <ReviewTraceStrip piece={piece} />
           <div style={{ display: "flex", gap: 6, marginBottom: 18 }}>
             {["must", "consider", "note"].map((sv) => {
               const on = sevFilter[sv]; const s = window.SEVERITY[sv];
@@ -328,8 +368,12 @@ function ReviewTab({ piece }) {
           {window.GATES.map((g) => {
             const r = packet[g.id]; if (!r) return null;
             const filtered = { ...r, findings: r.findings.filter((f) => sevFilter[f.severity]) };
+            const highlighted = jumpedGate === g.id;
             return (
-              <div key={g.id} id={"gate-" + g.id} style={{ marginBottom: 26 }}>
+              <div key={g.id} id={"gate-" + g.id} style={{
+                marginBottom: 26, borderRadius: 8, background: highlighted ? "var(--accent-soft)" : "transparent",
+                boxShadow: highlighted ? "0 0 0 2px var(--accent)" : "none", transition: "background 0.2s, box-shadow 0.2s",
+              }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", borderBottom: "1px solid var(--hair-2)", paddingBottom: 8, marginBottom: 12 }}>
                   <h3 style={{ fontSize: 21 }}><span className="mono" style={{ fontSize: 13, color: "var(--ink-3)", marginRight: 8 }}>{String(g.n).padStart(2, "0")}</span>{g.name}</h3>
                   <CopyButton text={() => gateSectionToText(g, r)} label="" />

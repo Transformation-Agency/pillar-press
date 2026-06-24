@@ -15,17 +15,23 @@ resolves the embedded local owner instead of a cloud session.
 
 ## Pieces
 - `GET    /api/campaigns/:cid/pieces` — list (Library).
-- `POST   /api/campaigns/:cid/pieces` — `{ title, original? }` → create (status Draft).
+- `POST   /api/campaigns/:cid/pieces` — `{ title, original?, category?, categoryContext? }` → create (status Draft). `category` defaults to `article`; valid values are `article`, `letter`, `book`, `other`.
 - `GET    /api/pieces/:id` — full piece.
-- `PATCH  /api/pieces/:id` — update title/original/status.
+- `PATCH  /api/pieces/:id` — update title/original/status/category/categoryContext and author revision guidance.
 - `DELETE /api/pieces/:id`.
 
 ## AI passes (server runs the configured LLM provider with the prototype's prompts)
-- `POST   /api/pieces/:id/review` — run the **7 gates in order**; persist `packet`
-  incrementally; set Draft→Reviewed. Consider SSE/streaming or a job + `GET .../review/status`
-  so the UI can show the gate-by-gate rail. Logic: `gates.js`.
-- `POST   /api/pieces/:id/revision` — chunked **proposed revision** + changelog; persist;
-  set Reviewed→Revised. Logic: `generators.js#generateRevision`.
+- `POST   /api/pieces/:id/review` — run the **7 gates in order** with durable
+  category/workflow context; persist `packet` incrementally; set Draft→Reviewed.
+  Long drafts are reviewed in chunks and reduced into the same canonical gate
+  packet shape. `packet.__trace` carries category, provider/model, plan, chunk,
+  stage, and warning metadata.
+- `GET    /api/pieces/:id/review/status` — returns `{ packet, trace, completed, total, done }`.
+- `POST   /api/pieces/:id/revision` — chunked **proposed revision** + changelog;
+  persist progress and final `{ text, changelog, trace, status }`; set
+  Reviewed→Revised. Full revision uses staged structural planning for long
+  drafts instead of silently overfilling the model context.
+- `GET    /api/pieces/:id/revision/status` — returns running/final revision trace.
 - `POST   /api/pieces/:id/outputs` — `{ active:string[], audiences:{[platform]:audienceId} }`;
   generate platforms in fixed order; persist `outputs`+`outputOrder`. Logic:
   `generators.js#generateOutputs` (two calls/platform: body + metadata).

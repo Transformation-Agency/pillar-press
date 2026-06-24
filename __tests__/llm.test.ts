@@ -84,6 +84,19 @@ describe("LLM config", () => {
     });
   });
 
+  it("uses the larger local Gemma 4 Ollama context budget", async () => {
+    const { llmBudgetForResolvedTask } = await import("@/lib/llm/budget");
+
+    expect(llmBudgetForResolvedTask({ provider: "ollama", model: "gemma4:26b-mlx" })).toEqual({
+      contextTokens: 192000,
+      responseReserve: 8000,
+    });
+    expect(llmBudgetForResolvedTask({ provider: "ollama", model: "llama3.2:latest" })).toEqual({
+      contextTokens: 24000,
+      responseReserve: 4000,
+    });
+  });
+
   it("resolves first-class optional cloud providers", () => {
     expect(resolveMainLLMConfig({
       LLM_PROVIDER: "openai",
@@ -539,6 +552,7 @@ describe("provider adapters", () => {
           model: "llama3.2",
           messages: [{ role: "user", content: "hi" }],
           stream: false,
+          think: false,
           options: { num_predict: 456 },
         }),
       }),

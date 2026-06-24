@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+const MAC_APP_DIR_NAME = "com.kingspress.editorialdesk";
 const APP_DIR_NAME = "King's Press Editorial Desk";
 
 export function localDataDir(): string {
@@ -8,7 +9,7 @@ export function localDataDir(): string {
   if (explicit) return explicit;
 
   if (process.platform === "darwin") {
-    return join(homedir(), "Library", "Application Support", APP_DIR_NAME);
+    return join(homedir(), "Library", "Application Support", MAC_APP_DIR_NAME);
   }
   if (process.platform === "win32") {
     return join(process.env.APPDATA || homedir(), APP_DIR_NAME);

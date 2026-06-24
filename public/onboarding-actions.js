@@ -206,16 +206,23 @@
   async function requestVoice() {
     const intent = INTENTS.REQUEST_VOICE || "request_voice";
     try {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error("Microphone access is not available here.");
+      const audio = window.KP_ONBOARDING_AUDIO;
+      const permission = audio && audio.requestMicrophonePermission
+        ? await audio.requestMicrophonePermission()
+        : null;
+      if (!permission) {
+        const nav = window.navigator || (typeof navigator !== "undefined" ? navigator : null);
+        if (!nav || !nav.mediaDevices || !nav.mediaDevices.getUserMedia) {
+          throw new Error("Microphone access is not available here. You can keep typing instead.");
+        }
+        const stream = await nav.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach((track) => track.stop());
       }
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stream.getTracks().forEach((track) => track.stop());
       const desktop = window.KINGS_DESKTOP;
       if (desktop && desktop.isDesktop && desktop.isDesktop() && desktop.startVoiceSession) {
         await desktop.startVoiceSession();
       }
-      return succeeded(intent, { voiceConnected: true });
+      return succeeded(intent, { voiceConnected: true, permission: permission || { microphone: "granted" } });
     } catch (error) {
       return failed(intent, error, "Audio setup failed. You can continue by typing.");
     }

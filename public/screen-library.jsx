@@ -2,7 +2,7 @@
 
 function wordCount(t) { return (t || "").trim() ? (t.trim().split(/\s+/).length) : 0; }
 
-function PieceRow({ piece, onOpen, onDelete }) {
+function PieceRow({ piece, campaignLabel, onOpen, onDelete }) {
   const [hover, setHover] = React.useState(false);
   const [titling, setTitling] = React.useState(false);
   const autoTitle = async (e) => {
@@ -34,6 +34,7 @@ function PieceRow({ piece, onOpen, onDelete }) {
       <div style={{ minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 5 }}>
           <h3 style={{ fontSize: 22, letterSpacing: "-0.01em" }}>{piece.title}</h3>
+          {campaignLabel && <span className="eyebrow" style={{ color: "var(--ink-3)" }}>{campaignLabel}</span>}
         </div>
         <p className="muted" style={{
           margin: 0, fontSize: 15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
@@ -81,13 +82,29 @@ function ProgressPip({ on, label }) {
   );
 }
 
-function Library({ pieces, campaignName, onOpen, onNew, onDelete }) {
+function Library({ pieces, campaignName, campaigns, allPieces, activeCampaignId, onOpen, onNew, onDelete, onOpenWeave, onOpenStudio, onSwitchCampaign }) {
   const [filter, setFilter] = React.useState("All");
+  const [scope, setScope] = React.useState("all");
+  React.useEffect(() => {
+    if (window.Store && window.Store.hydrateLibraryPieces) {
+      window.Store.hydrateLibraryPieces().catch(() => null);
+    }
+  }, []);
   const filters = ["All", ...window.Store.STATUSES];
+  const campaignNames = {};
+  (campaigns || []).forEach((c) => { if (c && c.id) campaignNames[c.id] = c.name; });
+  const scopedPieces = scope === "all" ? (allPieces || []) : pieces;
   const counts = {};
-  window.Store.STATUSES.forEach((s) => { counts[s] = pieces.filter((p) => p.status === s).length; });
-  const shown = (filter === "All" ? pieces : pieces.filter((p) => p.status === filter))
+  window.Store.STATUSES.forEach((s) => { counts[s] = scopedPieces.filter((p) => p.status === s).length; });
+  const shown = (filter === "All" ? scopedPieces : scopedPieces.filter((p) => p.status === filter))
     .slice().sort((a, b) => b.updatedAt - a.updatedAt);
+  const campaignsWithPieces = window.LIBRARY.campaignsWithRestoredPieces(campaigns, allPieces, activeCampaignId, 4);
+  const openPiece = (piece) => {
+    if (piece && piece.campaignId && piece.campaignId !== activeCampaignId && onSwitchCampaign) {
+      onSwitchCampaign(piece.campaignId);
+    }
+    onOpen(piece.id);
+  };
 
   return (
     <div className="scroll-y" style={{ flex: 1 }}>
@@ -106,10 +123,70 @@ function Library({ pieces, campaignName, onOpen, onNew, onDelete }) {
           from draft to formatted.
         </p>
 
+        <div style={{ display: "inline-flex", gap: 4, padding: 4, border: "1px solid var(--hair)", borderRadius: 999, background: "var(--paper-2)", marginTop: 18 }}>
+          {[
+            ["active", "This focus"],
+            ["all", "All focuses"],
+          ].map(([id, label]) => (
+            <button
+              key={id}
+              className="mono"
+              onClick={() => setScope(id)}
+              style={{
+                border: "none", borderRadius: 999, padding: "7px 12px", cursor: "pointer",
+                background: scope === id ? "var(--ink)" : "transparent",
+                color: scope === id ? "var(--paper)" : "var(--ink-2)",
+                fontSize: 11.5,
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {campaignsWithPieces.length > 0 && (
+          <div style={{ margin: "22px 0 4px" }}>
+            <div className="eyebrow" style={{ marginBottom: 8 }}>Documents in other focuses</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 8 }}>
+              {campaignsWithPieces.map(({ campaign, count }) => (
+                <button
+                  key={campaign.id}
+                  className="btn ghost"
+                  onClick={() => onSwitchCampaign && onSwitchCampaign(campaign.id)}
+                  style={{ justifyContent: "space-between", border: "1px solid var(--hair)", background: "var(--paper-2)", padding: "11px 13px" }}
+                >
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                    <Icon name="book" size={14} />
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{campaign.name}</span>
+                  </span>
+                  <span className="mono" style={{ fontSize: 11, color: "var(--ink-3)", flex: "0 0 auto" }}>
+                    {count} {count === 1 ? "piece" : "pieces"}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10, margin: "24px 0 6px" }}>
+          <button className="btn ghost" onClick={onOpenWeave} style={{ justifyContent: "space-between", padding: "13px 14px", border: "1px solid var(--hair)", background: "var(--paper-2)" }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+              <Icon name="sparkle" size={14} /> Weave sources
+            </span>
+            <Icon name="arrowR" size={14} />
+          </button>
+          <button className="btn ghost" onClick={onOpenStudio} style={{ justifyContent: "space-between", padding: "13px 14px", border: "1px solid var(--hair)", background: "var(--paper-2)" }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+              <Icon name="image" size={14} /> Studio media
+            </span>
+            <Icon name="arrowR" size={14} />
+          </button>
+        </div>
+
         <div style={{ display: "flex", gap: 6, margin: "28px 0 8px", flexWrap: "wrap" }}>
           {filters.map((f) => {
             const on = f === filter;
-            const c = f === "All" ? pieces.length : counts[f];
+            const c = f === "All" ? scopedPieces.length : counts[f];
             return (
               <button key={f} onClick={() => setFilter(f)}
                 className="mono"
@@ -128,13 +205,21 @@ function Library({ pieces, campaignName, onOpen, onNew, onDelete }) {
         <div className="card" style={{ marginTop: 18, overflow: "hidden" }}>
           {shown.length === 0 ? (
             <div style={{ padding: "60px 24px", textAlign: "center" }}>
-              <p className="muted" style={{ fontStyle: "italic" }}>Nothing here yet.</p>
+              <p className="muted" style={{ fontStyle: "italic" }}>
+                {scopedPieces.length ? "No pieces match this filter." : (scope === "all" ? "No pieces yet." : "Nothing in this campaign yet.")}
+              </p>
               <button className="btn" onClick={onNew} style={{ marginTop: 8 }}>
                 <Icon name="plus" size={15} /> Start a piece
               </button>
             </div>
           ) : shown.map((p) => (
-            <PieceRow key={p.id} piece={p} onOpen={onOpen} onDelete={onDelete} />
+            <PieceRow
+              key={p.id}
+              piece={p}
+              campaignLabel={scope === "all" && p.campaignId !== activeCampaignId ? campaignNames[p.campaignId] : null}
+              onOpen={() => openPiece(p)}
+              onDelete={onDelete}
+            />
           ))}
         </div>
       </div>

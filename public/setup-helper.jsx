@@ -462,7 +462,7 @@ function kpMediaProviderBaseUrl(provider) {
 function kpMediaProviderModel(provider, fallback) {
   if (fallback) return fallback;
   if (provider === "openai") return "gpt-4o-mini-tts";
-  if (provider === "xai") return "grok-2-image";
+  if (provider === "xai") return "grok-imagine-image-quality";
   if (provider === "elevenlabs") return "eleven-tts-multilingual-v2";
   return undefined;
 }
@@ -526,8 +526,18 @@ function InlineModelSetup({ status, onSaved }) {
     xai: ["grok-4.3", "grok-3-mini"],
     "openai-compatible": ["local-model"],
   };
-  const ollamaModels = ["llama3.2", "mistral", "qwen2.5:7b", "gemma3:4b"];
+  const fallbackOllamaModels = ["gemma4:26b-mlx", "llama3.2", "qwen2.5:latest", "mistral"];
   const dockerUrl = "http://localhost:12434/engines/v1";
+  const preferGemma = (items) => {
+    const values = (items || []).filter((item) => item && !/embed/i.test(item));
+    return values.slice().sort((a, b) => {
+      const aGemma = /^gemma4/i.test(a) ? 0 : /^gemma/i.test(a) ? 1 : 2;
+      const bGemma = /^gemma4/i.test(b) ? 0 : /^gemma/i.test(b) ? 1 : 2;
+      return aGemma - bGemma || a.localeCompare(b);
+    });
+  };
+  const suggestedOllamaModels = () => fallbackOllamaModels.filter((item) => !listedModels.includes(item));
+  const uniqueModelOptions = (items) => Array.from(new Set((items || []).map((item) => String(item || "").trim()).filter(Boolean)));
 
   const providerLabel = (value) => ({
     openai: "OpenAI / ChatGPT",
@@ -553,6 +563,15 @@ function InlineModelSetup({ status, onSaved }) {
   React.useEffect(() => {
     if (!hasDesktop || !desktop.ollamaStatus) return;
     desktop.ollamaStatus().then(setOllamaStatus).catch(() => setOllamaStatus(null));
+    if (desktop.listOllamaModels) {
+      desktop.listOllamaModels()
+        .then((items) => {
+          const localModels = preferGemma(items || []);
+          setListedModels(localModels);
+          if (localModels[0] && (!model.trim() || model === "gpt-4o-mini")) setModel(localModels[0]);
+        })
+        .catch(() => {});
+    }
   }, [hasDesktop]);
 
   function applyMode(nextMode) {
@@ -560,7 +579,8 @@ function InlineModelSetup({ status, onSaved }) {
     setMessage("");
     if (nextMode === "ollama") {
       setProvider("ollama");
-      setModel("llama3.2");
+      const localModels = preferGemma(listedModels.length ? listedModels : fallbackOllamaModels);
+      setModel(localModels[0] || "gemma4:26b-mlx");
       return;
     }
     if (nextMode === "docker") {
@@ -590,8 +610,20 @@ function InlineModelSetup({ status, onSaved }) {
     setBusy(true);
     setMessage("Looking for models.");
     try {
+      if (config.provider === "ollama" && hasDesktop && desktop.listOllamaModels) {
+        const [status, items] = await Promise.all([
+          desktop.ollamaStatus ? desktop.ollamaStatus().catch(() => null) : Promise.resolve(null),
+          desktop.listOllamaModels(),
+        ]);
+        const localModels = preferGemma(items || []);
+        if (status) setOllamaStatus(status);
+        setListedModels(localModels);
+        if (localModels[0]) setModel(localModels[0]);
+        setMessage(localModels.length ? "Loaded " + localModels.length + " installed Ollama model" + (localModels.length === 1 ? "" : "s") + "." : "Ollama responded, but no installed chat models were listed.");
+        return;
+      }
       if (config.provider === "openai-compatible" && !config.baseUrl) throw new Error("Add a base URL first.");
-      if (["openai", "anthropic", "gemini", "xai"].includes(config.provider) && !config.apiKey) throw new Error("Paste an API key first.");
+      if (!(hasDesktop && ["openai", "xai"].includes(config.provider)) && ["openai", "anthropic", "gemini", "xai"].includes(config.provider) && !config.apiKey) throw new Error("Paste an API key first.");
       const response = await fetch("/api/llm/models", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -600,9 +632,10 @@ function InlineModelSetup({ status, onSaved }) {
       const body = await response.json().catch(() => null);
       if (!response.ok) throw new Error((body && body.error) || "Could not load models.");
       const models = body && Array.isArray(body.models) ? body.models : [];
-      setListedModels(models);
-      if (models[0]) setModel(models[0]);
-      setMessage(models.length ? "Models loaded." : "Provider responded, but no models were listed. You can still type one.");
+      const nextModels = config.provider === "ollama" ? preferGemma(models) : models;
+      setListedModels(nextModels);
+      if (nextModels[0]) setModel(nextModels[0]);
+      setMessage((body && body.warning) || (models.length ? "Models loaded." : "Provider responded, but no models were listed. You can still type one."));
     } catch (error) {
       setMessage((error && error.message) || "Could not load models. You can still type one.");
     } finally {
@@ -657,7 +690,7 @@ function InlineModelSetup({ status, onSaved }) {
       setMessage("Choose or type a model first.");
       return;
     }
-    if (["openai", "anthropic", "gemini", "xai"].includes(config.provider) && !config.apiKey) {
+    if (!(hasDesktop && ["openai", "xai"].includes(config.provider)) && ["openai", "anthropic", "gemini", "xai"].includes(config.provider) && !config.apiKey) {
       setMessage("Paste an API key first.");
       return;
     }
@@ -710,8 +743,9 @@ function InlineModelSetup({ status, onSaved }) {
     }
   }
 
-  const options = mode === "ollama" ? ollamaModels : (listedModels.length ? listedModels : (cloudModels[provider] || []));
-  const canList = mode !== "ollama";
+  const ollamaSuggestions = suggestedOllamaModels();
+  const options = uniqueModelOptions(mode === "ollama" ? listedModels.concat(ollamaSuggestions) : (listedModels.length ? listedModels : (cloudModels[provider] || [])));
+  const canList = true;
   const currentStatus = status && status.provider && status.model
     ? providerLabel(status.provider) + " · " + status.model
     : "Not connected";
@@ -739,6 +773,7 @@ function InlineModelSetup({ status, onSaved }) {
               <select className="kp-setup-input" value={provider} onChange={(event) => {
                 const next = event.target.value;
                 setProvider(next);
+                setListedModels([]);
                 setModel((cloudModels[next] || [""])[0]);
                 setBaseUrl(next === "openai-compatible" ? baseUrl : "");
               }}>
@@ -764,18 +799,40 @@ function InlineModelSetup({ status, onSaved }) {
         {mode === "ollama" && (
           <div className="kp-inline-model-local">
             <strong>{ollamaStatus && ollamaStatus.running ? "Ollama is running" : "Ollama local model"}</strong>
-            <span>{hasDesktop ? "Use an existing local model or pull one below." : "Use the desktop app to start or pull local models."}</span>
+            <span>{listedModels.length ? "Installed: " + listedModels.join(", ") : hasDesktop ? "No installed chat models listed yet." : "Use the desktop app to start or pull local models."}</span>
+            {!!ollamaSuggestions.length && <span>Suggested pulls: {ollamaSuggestions.join(", ")}</span>}
           </div>
         )}
         <label>
           <span>Model</span>
-          <input className="kp-setup-input" value={model} onChange={(event) => setModel(event.target.value)} list="kp-inline-model-options" placeholder="model name" />
-          <datalist id="kp-inline-model-options">{options.map((item) => <option key={item} value={item} />)}</datalist>
+          <input className="kp-setup-input" value={model} onChange={(event) => setModel(event.target.value)} placeholder="model name" />
         </label>
+        {!!options.length && (
+          <div className="kp-inline-model-wide">
+            <span style={{ display: "block", color: "#766A63", fontSize: 13, marginBottom: 8 }}>
+              {listedModels.length ? "Available models" : "Suggested models"}
+            </span>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, maxHeight: 138, overflowY: "auto" }}>
+              {options.map((item) => (
+                <button
+                  key={item}
+                  className="kp-setup-outline"
+                  type="button"
+                  data-active={model === item ? "true" : "false"}
+                  onClick={() => setModel(item)}
+                  title={item}
+                  style={{ minHeight: 38, padding: "8px 12px", fontSize: 13 }}
+                >
+                  {item}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
       <div className="kp-inline-model-actions">
         {mode === "ollama" && <button className="kp-setup-outline" type="button" disabled={busy || !model.trim()} onClick={pullModel}>Pull</button>}
-        {canList && <button className="kp-setup-outline" type="button" disabled={busy} onClick={listModels}>List models</button>}
+        {canList && <button className="kp-setup-outline" type="button" disabled={busy} onClick={listModels}>{mode === "ollama" ? "Refresh models" : "List models"}</button>}
         <button className="kp-setup-outline" type="button" disabled={busy || !model.trim()} onClick={testModel}>Test</button>
         <button className="kp-setup-primary" type="button" disabled={busy || !model.trim()} onClick={saveModel}>{busy ? "Working..." : "Use model"}</button>
       </div>
@@ -1102,6 +1159,10 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
   const [profileAnswer, setProfileAnswer] = React.useState("");
   const [setupProfileDraft, setSetupProfileDraft] = React.useState(null);
   const [profileBusy, setProfileBusy] = React.useState(false);
+  const [contextFiles, setContextFiles] = React.useState([]);
+  const [contextBusy, setContextBusy] = React.useState(false);
+  const [contextMessage, setContextMessage] = React.useState("");
+  const [contextFeedback, setContextFeedback] = React.useState("");
   const [focusActivation, setFocusActivation] = React.useState(null);
   const [conversationState, setConversationStateBase] = React.useState(() => ONBOARDING_CONVERSATION.createState());
   const conversationStateRef = React.useRef(conversationState);
@@ -1113,6 +1174,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
   }, []);
   const transcriptHandlerRef = React.useRef(null);
   const listenSessionRef = React.useRef(null);
+  const contextFileInputRef = React.useRef(null);
   const setupStartedAtRef = React.useRef(Date.now());
   const metricsSessionIdRef = React.useRef(createSetupSessionId());
   const lastStepMetricRef = React.useRef(null);
@@ -1521,6 +1583,131 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     });
   }
 
+  function profileExtractionPayload(text, fileText, currentDraft) {
+    return {
+      brand: "kings_press",
+      transcript: String(text || "Analyze these onboarding context files for writing preferences.").slice(0, 30000),
+      fileText: String(fileText || "").slice(0, 80000),
+      currentDraft: currentDraft || setupProfileDraft,
+    };
+  }
+
+  async function extractSetupProfileDraft(payload, fallbackTranscript, inputMethod) {
+    if (ONBOARDING_ACTION_REGISTRY && ONBOARDING_ACTION_REGISTRY.extractSetupProfile) {
+      const result = await ONBOARDING_ACTION_REGISTRY.extractSetupProfile(payload);
+      if (result.status === ONBOARDING_ACTION_STATUSES.SUCCEEDED && result.data && result.data.profileDraft) {
+        recordAction(ONBOARDING_ACTIONS.EXTRACT_SETUP_PROFILE, ONBOARDING_ACTION_STATUSES.SUCCEEDED, result);
+        return Object.assign({ version: "server" }, result.data.profileDraft, {
+          sourceTranscript: payload.transcript || fallbackTranscript || "",
+        });
+      }
+      if (result.status === ONBOARDING_ACTION_STATUSES.FAILED) throw new Error(result.error);
+    }
+    recordMetric(ONBOARDING_METRIC_EVENTS.FALLBACK_USED || "fallback_used", {
+      stepId: "preferences",
+      fallbackKind: "local_profile_extraction",
+      fallbackReason: "server_profile_unavailable",
+      inputMethod: inputMethod || "typed",
+      conversational: true,
+    });
+    recordAction(ONBOARDING_ACTIONS.EXTRACT_SETUP_PROFILE, ONBOARDING_ACTION_STATUSES.SUCCEEDED, { data: { fallback: "local" } });
+    return ONBOARDING_PROFILE.buildProfileDraft({
+      transcript: payload.transcript || fallbackTranscript || "",
+      currentDraft: payload.currentDraft || setupProfileDraft,
+    });
+  }
+
+  async function addContextFiles(fileList) {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+    setContextBusy(true);
+    setContextMessage("Reading context files.");
+    setSetupError("");
+    try {
+      if (!window.extractFileText) throw new Error("File extraction is not available here.");
+      const extracted = [];
+      for (const file of files) {
+        const text = await window.extractFileText(file);
+        extracted.push({
+          id: String(Date.now()) + "-" + extracted.length + "-" + file.name,
+          name: file.name,
+          size: file.size || 0,
+          mimeType: file.type || "",
+          text: String(text || "").slice(0, 80000),
+        });
+      }
+      setContextFiles((current) => current.concat(extracted));
+      setContextMessage("Added " + extracted.length + " context file" + (extracted.length === 1 ? "" : "s") + ".");
+    } catch (error) {
+      const message = (error && error.message) || "Could not read those context files.";
+      setContextMessage(message);
+      setSetupError(message);
+    } finally {
+      setContextBusy(false);
+      if (contextFileInputRef.current) contextFileInputRef.current.value = "";
+    }
+  }
+
+  async function analyzeContextFiles(options) {
+    const regenerate = !!(options && options.regenerate);
+    if (!contextFiles.length) {
+      setContextMessage("Add context files first.");
+      return;
+    }
+    setContextBusy(true);
+    setProfileBusy(true);
+    setContextMessage(regenerate ? "Regenerating preferences from context." : "Analyzing context files.");
+    recordAction(ONBOARDING_ACTIONS.EXTRACT_SETUP_PROFILE, ONBOARDING_ACTION_STATUSES.PENDING);
+    try {
+      let workingDraft = regenerate ? null : setupProfileDraft;
+      const baseTranscript = [
+        profileAnswer,
+        regenerate ? "Regenerate the onboarding preference profile from the uploaded context. Do not copy the prior result unless the files support it." : "Analyze the uploaded context files for onboarding preferences.",
+        contextFeedback ? "User feedback for this regeneration: " + contextFeedback : "",
+      ].filter(Boolean).join("\n\n");
+      for (let index = 0; index < contextFiles.length; index += 1) {
+        const file = contextFiles[index];
+        const payload = profileExtractionPayload(
+          baseTranscript + "\n\nPass " + (index + 1) + " of " + contextFiles.length + ": extract only what this file supports.",
+          "File: " + file.name + "\n\n" + file.text,
+          workingDraft,
+        );
+        workingDraft = await extractSetupProfileDraft(payload, baseTranscript, "context_files");
+        setContextMessage("Analyzed " + (index + 1) + " of " + contextFiles.length + " context files.");
+      }
+      const combined = contextFiles
+        .map((file) => "File: " + file.name + "\n" + String(file.text || "").slice(0, 12000))
+        .join("\n\n---\n\n")
+        .slice(0, 80000);
+      const synthesized = await extractSetupProfileDraft(
+        profileExtractionPayload(baseTranscript + "\n\nSynthesize the final editable onboarding profile from the file passes.", combined, workingDraft),
+        baseTranscript,
+        "context_files",
+      );
+      mergeProfileIntoPreferences(synthesized);
+      setSetupProfileDraft(synthesized);
+      setContextMessage(regenerate ? "Regenerated preferences from context." : "Preferences drafted from context.");
+      setConversationState((current) => ONBOARDING_CONVERSATION.captureAnswer(
+        current,
+        ONBOARDING_CONVERSATION.SLOT_IDS.VOICE_PROFILE,
+        baseTranscript || "Uploaded context files analyzed.",
+        "context_files",
+      ));
+      recordMetric(
+        ONBOARDING_METRIC_EVENTS.ANSWER_CAPTURED,
+        ONBOARDING_CONVERSATION.metricForAnswer(ONBOARDING_CONVERSATION.SLOT_IDS.VOICE_PROFILE, "context_files"),
+      );
+    } catch (error) {
+      const message = (error && error.message) || "Could not analyze context files.";
+      setContextMessage(message);
+      setSetupError(message);
+      recordAction(ONBOARDING_ACTIONS.EXTRACT_SETUP_PROFILE, ONBOARDING_ACTION_STATUSES.FAILED, { error: message });
+    } finally {
+      setContextBusy(false);
+      setProfileBusy(false);
+    }
+  }
+
   async function interpretProfileAnswer(text, inputMethod) {
     const clean = String(text || "").trim();
     if (!clean) return;
@@ -1548,32 +1735,11 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     setRepairState(null);
     recordAction(ONBOARDING_ACTIONS.EXTRACT_SETUP_PROFILE, ONBOARDING_ACTION_STATUSES.PENDING);
     try {
-      let profile = null;
-      if (ONBOARDING_ACTION_REGISTRY && ONBOARDING_ACTION_REGISTRY.extractSetupProfile) {
-        const result = await ONBOARDING_ACTION_REGISTRY.extractSetupProfile({
-          brand: "kings_press",
-          transcript: clean,
-          currentDraft: setupProfileDraft,
-        });
-        if (result.status === ONBOARDING_ACTION_STATUSES.SUCCEEDED && result.data && result.data.profileDraft) {
-          profile = Object.assign({ version: "server" }, result.data.profileDraft, { sourceTranscript: clean });
-          recordAction(ONBOARDING_ACTIONS.EXTRACT_SETUP_PROFILE, ONBOARDING_ACTION_STATUSES.SUCCEEDED, result);
-        }
-      }
-      if (!profile) {
-        profile = ONBOARDING_PROFILE.buildProfileDraft({
-          transcript: clean,
-          currentDraft: setupProfileDraft,
-        });
-        recordAction(ONBOARDING_ACTIONS.EXTRACT_SETUP_PROFILE, ONBOARDING_ACTION_STATUSES.SUCCEEDED, { data: { fallback: "local" } });
-        recordMetric(ONBOARDING_METRIC_EVENTS.FALLBACK_USED || "fallback_used", {
-          stepId: "preferences",
-          fallbackKind: "local_profile_extraction",
-          fallbackReason: "server_profile_unavailable",
-          inputMethod: inputMethod || "typed",
-          conversational: true,
-        });
-      }
+      const profile = await extractSetupProfileDraft(
+        profileExtractionPayload(clean, "", setupProfileDraft),
+        clean,
+        inputMethod || "typed",
+      );
       mergeProfileIntoPreferences(profile);
       setConversationState((current) => ONBOARDING_CONVERSATION.captureAnswer(
         current,
@@ -1694,6 +1860,13 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     }
   }
 
+  function readableVoiceInputError(error) {
+    if (ONBOARDING_AUDIO.describeAudioError) {
+      return ONBOARDING_AUDIO.describeAudioError(error, "Speech recognition is not available here. You can type instead.");
+    }
+    return (error && error.message) || "Speech recognition is not available here. You can type instead.";
+  }
+
   transcriptHandlerRef.current = handleTranscript;
 
   function listenForAnswer(targetStep) {
@@ -1706,7 +1879,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
         handleTranscript(transcript, targetStep);
       },
       onError: (error) => {
-        setSetupError((error && error.message) || "Speech recognition is not available here. You can type instead.");
+        setSetupError(readableVoiceInputError(error));
         listenSessionRef.current = null;
         setListening(false);
       },
@@ -1777,11 +1950,16 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     try {
       if (result && result.status === ONBOARDING_ACTION_STATUSES.FAILED) throw new Error(result.error);
       if (!result) {
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-          throw new Error("Microphone access is not available here.");
+        if (ONBOARDING_AUDIO.requestMicrophonePermission) {
+          await ONBOARDING_AUDIO.requestMicrophonePermission();
+        } else {
+          const nav = window.navigator || (typeof navigator !== "undefined" ? navigator : null);
+          if (!nav || !nav.mediaDevices || !nav.mediaDevices.getUserMedia) {
+            throw new Error("Microphone access is not available here. You can keep typing instead.");
+          }
+          const stream = await nav.mediaDevices.getUserMedia({ audio: true });
+          stream.getTracks().forEach((track) => track.stop());
         }
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        stream.getTracks().forEach((track) => track.stop());
         if (hasDesktopBridge && window.KINGS_DESKTOP.startVoiceSession) {
           await window.KINGS_DESKTOP.startVoiceSession();
         }
@@ -3082,6 +3260,88 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
                 interpretProfileAnswer(next, "button");
               }}
             />
+            <div style={{ height: 28 }} />
+            <section
+              onDragOver={(event) => {
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "copy";
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                addContextFiles(event.dataTransfer.files);
+              }}
+              style={{
+                border: "1px solid #D8CEC3",
+                borderRadius: 10,
+                background: "rgba(255, 252, 246, 0.64)",
+                padding: "24px 26px",
+                display: "grid",
+                gap: 16,
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 18, alignItems: "flex-start", flexWrap: "wrap" }}>
+                <div>
+                  <p className="kp-profile-eyebrow" style={{ margin: "0 0 8px" }}>Context files</p>
+                  <h2 style={{ margin: 0, fontFamily: "var(--font-serif)", fontSize: 27, fontWeight: 500 }}>Build preferences from examples</h2>
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <input
+                    ref={contextFileInputRef}
+                    type="file"
+                    multiple
+                    accept={window.UPLOAD_ACCEPT}
+                    onChange={(event) => addContextFiles(event.target.files)}
+                    style={{ display: "none" }}
+                  />
+                  <button className="kp-setup-outline" type="button" disabled={contextBusy} onClick={() => contextFileInputRef.current && contextFileInputRef.current.click()}>
+                    <Icon name="upload" size={15} /> Add files
+                  </button>
+                  <button className="kp-setup-primary" type="button" disabled={contextBusy || !contextFiles.length} onClick={() => analyzeContextFiles()}>
+                    {contextBusy ? "Analyzing" : "Analyze"} <Icon name="arrowR" size={18} />
+                  </button>
+                </div>
+              </div>
+              {!!contextFiles.length && (
+                <div style={{ display: "grid", gap: 8 }}>
+                  {contextFiles.map((file, index) => (
+                    <div key={file.id || file.name + index} style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr auto",
+                      gap: 10,
+                      alignItems: "center",
+                      border: "1px solid #E5DCD2",
+                      borderRadius: 8,
+                      padding: "10px 12px",
+                      background: "rgba(247, 242, 235, 0.5)",
+                    }}>
+                      <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{file.name}</span>
+                      <button
+                        className="kp-setup-link"
+                        type="button"
+                        style={{ fontSize: 13, padding: 0 }}
+                        onClick={() => setContextFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <textarea
+                className="kp-setup-input"
+                value={contextFeedback}
+                onChange={(event) => setContextFeedback(event.target.value)}
+                rows={2}
+                placeholder="Optional feedback for regenerate"
+                style={{ resize: "vertical", minHeight: 82 }}
+              />
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                <p role="status" style={{ margin: 0, color: "#766A63", fontSize: 15 }}>{contextMessage || (contextFiles.length ? contextFiles.length + " file" + (contextFiles.length === 1 ? "" : "s") + " ready." : "Drop files here.")}</p>
+                <button className="kp-setup-outline" type="button" disabled={contextBusy || !contextFiles.length} onClick={() => analyzeContextFiles({ regenerate: true })}>
+                  Regenerate
+                </button>
+              </div>
+            </section>
             <div style={{ height: 28 }} />
             <SetupProfileReview profile={setupProfileDraft} />
             <section style={{

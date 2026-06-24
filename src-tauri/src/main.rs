@@ -6,25 +6,23 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use rand::RngCore;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::{
     collections::HashMap,
     fs,
+    io::{Read, Write},
+    net::TcpStream,
     path::PathBuf,
     process::{Child, Command},
     sync::Mutex,
     time::{SystemTime, UNIX_EPOCH},
 };
 #[cfg(not(debug_assertions))]
-use std::{
-    io::{Read, Write},
-    net::{TcpListener, TcpStream},
-    process::Stdio,
-    thread,
-    time::Duration,
-};
+use std::{net::TcpListener, process::Stdio, thread, time::Duration};
 use tauri::{
     menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu},
-    AppHandle, Emitter, Manager, Url,
+    plugin, AppHandle, Emitter, Manager, Url,
 };
 
 const MENU_SETUP_MODEL: &str = "setup-local-model";
@@ -186,6 +184,40 @@ fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app_data_dir(app)?.join("desktop-settings.json"))
 }
 
+fn write_private_file(path: PathBuf, contents: impl AsRef<[u8]>) -> Result<(), String> {
+    fs::write(&path, contents).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        let permissions = fs::Permissions::from_mode(0o600);
+        fs::set_permissions(&path, permissions).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+fn official_provider_base_url(provider: &str) -> Option<&'static str> {
+    if provider.eq_ignore_ascii_case("openai") {
+        Some("https://api.openai.com/v1")
+    } else if provider.eq_ignore_ascii_case("xai") {
+        Some("https://api.x.ai/v1")
+    } else if provider.eq_ignore_ascii_case("anthropic") {
+        Some("https://api.anthropic.com/v1")
+    } else if provider.eq_ignore_ascii_case("gemini") {
+        Some("https://generativelanguage.googleapis.com/v1beta")
+    } else {
+        None
+    }
+}
+
+fn clean_desktop_base_url(provider: &str, value: Option<&str>) -> Option<String> {
+    if let Some(url) = official_provider_base_url(provider) {
+        return Some(url.into());
+    }
+    value
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_string)
+}
+
 fn read_desktop_settings(app: &AppHandle) -> Result<DesktopSettings, String> {
     let path = settings_path(app)?;
     if !path.exists() {
@@ -320,7 +352,7 @@ fn desktop_secret_key(app: &AppHandle) -> Result<String, String> {
 
     let secret = random_secret_key();
     if !should_use_keychain_secret() || !write_keychain_secret(&secret) {
-        fs::write(&local_path, &secret).map_err(|e| e.to_string())?;
+        write_private_file(local_path, &secret)?;
     }
     Ok(secret)
 }
@@ -971,6 +1003,71 @@ fn start_packaged_server(app: &AppHandle) -> Result<Option<String>, String> {
     }
 }
 
+fn desktop_dev_host() -> String {
+    std::env::var("KINGS_PRESS_DESKTOP_DEV_HOST")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "127.0.0.1".into())
+}
+
+fn desktop_dev_port() -> Option<u16> {
+    std::env::var("KINGS_PRESS_DESKTOP_DEV_PORT")
+        .ok()
+        .and_then(|value| value.trim().parse::<u16>().ok())
+        .or(Some(41739))
+}
+
+fn host_matches_loopback(host: &str, expected: &str) -> bool {
+    host == expected || (host == "localhost" && expected == "127.0.0.1")
+}
+
+fn allowed_desktop_navigation(
+    url: &Url,
+    active_server_port: Option<u16>,
+    debug_build: bool,
+) -> bool {
+    match url.scheme() {
+        "tauri" | "asset" => return true,
+        "http" => {}
+        _ => return false,
+    }
+
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    let Some(port) = url.port_or_known_default() else {
+        return false;
+    };
+
+    if host == "127.0.0.1" && active_server_port == Some(port) {
+        return true;
+    }
+
+    debug_build
+        && desktop_dev_port() == Some(port)
+        && host_matches_loopback(host, &desktop_dev_host())
+}
+
+fn navigation_guard_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    plugin::Builder::new("kings-press-navigation-guard")
+        .on_navigation(|webview, url| {
+            let active_server_port = webview
+                .state::<DesktopServer>()
+                .port
+                .lock()
+                .ok()
+                .and_then(|port| *port);
+            let allowed =
+                allowed_desktop_navigation(url, active_server_port, cfg!(debug_assertions));
+            if !allowed {
+                eprintln!("Blocked King’s Press webview navigation to {url}");
+            }
+            allowed
+        })
+        .build()
+}
+
 #[tauri::command]
 fn ollama_status() -> OllamaStatus {
     let version = ollama_command().arg("--version").output();
@@ -1008,6 +1105,122 @@ fn is_ollama_running() -> bool {
         .output()
         .map(|out| out.status.success())
         .unwrap_or(false)
+}
+
+fn is_embedding_only_model_name(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    lower.contains("embed")
+        || lower.contains("embedding")
+        || lower.contains("nomic-embed")
+        || lower.contains("all-minilm")
+}
+
+fn ollama_model_preference(name: &str) -> u8 {
+    let lower = name.to_lowercase();
+    if lower == "gemma4"
+        || lower.starts_with("gemma4:")
+        || lower.starts_with("gemma4-")
+        || lower.starts_with("gemma4.")
+    {
+        0
+    } else if lower == "gemma"
+        || lower.starts_with("gemma:")
+        || lower.starts_with("gemma-")
+        || lower.starts_with("gemma.")
+    {
+        1
+    } else {
+        2
+    }
+}
+
+fn ollama_api_host() -> (String, u16) {
+    let raw = std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "127.0.0.1:11434".into());
+    let without_scheme = raw
+        .trim()
+        .trim_start_matches("http://")
+        .trim_start_matches("https://");
+    let host_port = without_scheme.split('/').next().unwrap_or(without_scheme);
+    let mut parts = host_port.rsplitn(2, ':');
+    let port = parts
+        .next()
+        .and_then(|part| part.parse::<u16>().ok())
+        .unwrap_or(11434);
+    let host = parts
+        .next()
+        .unwrap_or(host_port)
+        .trim_matches('[')
+        .trim_matches(']');
+    (
+        if host.is_empty() { "127.0.0.1" } else { host }.into(),
+        port,
+    )
+}
+
+fn ollama_show_model_metadata(name: &str) -> Option<serde_json::Value> {
+    let (host, port) = ollama_api_host();
+    let body = serde_json::json!({ "model": name }).to_string();
+    let mut stream = TcpStream::connect((host.as_str(), port)).ok()?;
+    let request = format!(
+        "POST /api/show HTTP/1.1\r\nHost: {host}:{port}\r\nContent-Type: application/json\r\nAccept: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    stream.write_all(request.as_bytes()).ok()?;
+    let mut response = String::new();
+    stream.read_to_string(&mut response).ok()?;
+    let (headers, payload) = response.split_once("\r\n\r\n")?;
+    if !headers.starts_with("HTTP/1.1 200") && !headers.starts_with("HTTP/1.0 200") {
+        return None;
+    }
+    serde_json::from_str(payload).ok()
+}
+
+fn is_ollama_completion_capable_model(name: &str) -> bool {
+    if is_embedding_only_model_name(name) {
+        return false;
+    }
+    let Some(json) = ollama_show_model_metadata(name) else {
+        return true;
+    };
+
+    let capabilities = json
+        .get("capabilities")
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str())
+                .map(|item| item.to_lowercase())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if !capabilities.is_empty() {
+        let can_complete = capabilities
+            .iter()
+            .any(|cap| matches!(cap.as_str(), "completion" | "chat" | "generate"));
+        let can_embed = capabilities
+            .iter()
+            .any(|cap| matches!(cap.as_str(), "embedding" | "embed"));
+        return can_complete || !can_embed;
+    }
+
+    let details = json.get("details");
+    let family = details
+        .and_then(|value| value.get("family"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    if is_embedding_only_model_name(family) {
+        return false;
+    }
+    let families = details
+        .and_then(|value| value.get("families"))
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+    !families
+        .iter()
+        .filter_map(|value| value.as_str())
+        .any(is_embedding_only_model_name)
 }
 
 #[tauri::command]
@@ -1062,13 +1275,21 @@ fn list_ollama_models() -> Result<Vec<String>, String> {
         return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
     }
     let text = String::from_utf8_lossy(&out.stdout);
-    Ok(text
+    let mut models = text
         .lines()
         .skip(1)
         .filter_map(|line| line.split_whitespace().next())
         .filter(|name| !name.is_empty())
+        .filter(|name| is_ollama_completion_capable_model(name))
         .map(str::to_string)
-        .collect())
+        .collect::<Vec<_>>();
+    models.sort_by(|a, b| {
+        ollama_model_preference(a)
+            .cmp(&ollama_model_preference(b))
+            .then_with(|| a.cmp(b))
+    });
+    models.dedup();
+    Ok(models)
 }
 
 #[tauri::command]
@@ -1114,13 +1335,17 @@ fn save_model_choice(app: AppHandle, model: String) -> Result<(), String> {
             .and_then(|s| s.media_providers),
     };
     let json = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
-    fs::write(settings_path(&app)?, json).map_err(|e| e.to_string())
+    write_private_file(settings_path(&app)?, json)
 }
 
 #[tauri::command]
 fn save_llm_settings(app: AppHandle, settings: DesktopSettings) -> Result<(), String> {
     let provider = settings.provider.as_deref().unwrap_or("ollama").trim();
     let model = settings.model.as_deref().unwrap_or("").trim();
+    let mut media_providers = read_desktop_settings(&app)
+        .ok()
+        .and_then(|s| s.media_providers)
+        .unwrap_or_default();
     let mut profiles = Vec::new();
     for p in settings.profiles.unwrap_or_default() {
         let id = p.id.trim().to_string();
@@ -1129,6 +1354,11 @@ fn save_llm_settings(app: AppHandle, settings: DesktopSettings) -> Result<(), St
         if id.is_empty() || provider.is_empty() || model.is_empty() {
             continue;
         }
+        let saved_media_api_key = media_providers
+            .get(&provider.to_lowercase())
+            .and_then(|saved| saved.api_key.clone())
+            .filter(|v| !v.trim().is_empty());
+        let base_url = clean_desktop_base_url(&provider, p.base_url.as_deref());
         profiles.push(DesktopLLMProfile {
             id,
             label: p
@@ -1139,12 +1369,7 @@ fn save_llm_settings(app: AppHandle, settings: DesktopSettings) -> Result<(), St
                 .map(str::to_string),
             provider,
             model,
-            base_url: p
-                .base_url
-                .as_deref()
-                .map(str::trim)
-                .filter(|v| !v.is_empty())
-                .map(str::to_string),
+            base_url,
             api_key: encrypt_setting_secret(
                 &app,
                 p.api_key
@@ -1152,7 +1377,8 @@ fn save_llm_settings(app: AppHandle, settings: DesktopSettings) -> Result<(), St
                     .map(str::trim)
                     .filter(|v| !v.is_empty())
                     .map(str::to_string),
-            )?,
+            )?
+            .or(saved_media_api_key),
         });
     }
     if model.is_empty() {
@@ -1167,6 +1393,70 @@ fn save_llm_settings(app: AppHandle, settings: DesktopSettings) -> Result<(), St
         .filter(|v| !v.is_empty())
         .map(str::to_string)
         .or_else(|| profiles.first().map(|p| p.id.clone()));
+    let encrypted_api_key = encrypt_setting_secret(
+        &app,
+        settings
+            .api_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_string),
+    )?
+    .or_else(|| {
+        media_providers
+            .get(&provider.to_lowercase())
+            .and_then(|saved| saved.api_key.clone())
+            .filter(|v| !v.trim().is_empty())
+    });
+    let openai_compatible_media_profile = profiles.iter().find(|p| {
+        (p.provider.eq_ignore_ascii_case("openai") || p.provider.eq_ignore_ascii_case("xai"))
+            && p.api_key
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|v| !v.is_empty())
+    });
+    if let Some(profile) = openai_compatible_media_profile {
+        let media_provider = if profile.provider.eq_ignore_ascii_case("xai") {
+            "xai"
+        } else {
+            "openai"
+        };
+        media_providers.insert(
+            media_provider.into(),
+            DesktopMediaProviderSettings {
+                api_key: profile.api_key.clone(),
+                base_url: profile
+                    .base_url
+                    .clone()
+                    .filter(|v| !v.trim().is_empty())
+                    .or_else(|| official_provider_base_url(media_provider).map(str::to_string)),
+            },
+        );
+    } else if (provider.eq_ignore_ascii_case("openai") || provider.eq_ignore_ascii_case("xai"))
+        && encrypted_api_key
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|v| !v.is_empty())
+    {
+        let media_provider = if provider.eq_ignore_ascii_case("xai") {
+            "xai"
+        } else {
+            "openai"
+        };
+        media_providers.insert(
+            media_provider.into(),
+            DesktopMediaProviderSettings {
+                api_key: encrypted_api_key.clone(),
+                base_url: settings
+                    .base_url
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                    .map(str::to_string)
+                    .or_else(|| official_provider_base_url(media_provider).map(str::to_string)),
+            },
+        );
+    }
     let cleaned = DesktopSettings {
         provider: Some(provider.into()),
         model: if model.is_empty() {
@@ -1174,21 +1464,8 @@ fn save_llm_settings(app: AppHandle, settings: DesktopSettings) -> Result<(), St
         } else {
             Some(model.into())
         },
-        base_url: settings
-            .base_url
-            .as_deref()
-            .map(str::trim)
-            .filter(|v| !v.is_empty())
-            .map(str::to_string),
-        api_key: encrypt_setting_secret(
-            &app,
-            settings
-                .api_key
-                .as_deref()
-                .map(str::trim)
-                .filter(|v| !v.is_empty())
-                .map(str::to_string),
-        )?,
+        base_url: clean_desktop_base_url(provider, settings.base_url.as_deref()),
+        api_key: encrypted_api_key,
         profiles: if profiles.is_empty() {
             None
         } else {
@@ -1209,12 +1486,14 @@ fn save_llm_settings(app: AppHandle, settings: DesktopSettings) -> Result<(), St
                 })
                 .collect()
         }),
-        media_providers: read_desktop_settings(&app)
-            .ok()
-            .and_then(|s| s.media_providers),
+        media_providers: if media_providers.is_empty() {
+            None
+        } else {
+            Some(media_providers)
+        },
     };
     let json = serde_json::to_string_pretty(&cleaned).map_err(|e| e.to_string())?;
-    fs::write(settings_path(&app)?, json).map_err(|e| e.to_string())
+    write_private_file(settings_path(&app)?, json)
 }
 
 #[tauri::command]
@@ -1234,21 +1513,17 @@ fn save_media_provider_key(app: AppHandle, args: SaveMediaProviderKeyArgs) -> Re
     }
     let mut settings = read_desktop_settings(&app)?;
     let mut media = settings.media_providers.unwrap_or_default();
+    let base_url = clean_desktop_base_url(&provider, args.base_url.as_deref());
     media.insert(
         provider,
         DesktopMediaProviderSettings {
             api_key: encrypt_setting_secret(&app, api_key)?,
-            base_url: args
-                .base_url
-                .as_deref()
-                .map(str::trim)
-                .filter(|v| !v.is_empty())
-                .map(str::to_string),
+            base_url,
         },
     );
     settings.media_providers = Some(media);
     let json = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
-    fs::write(settings_path(&app)?, json).map_err(|e| e.to_string())
+    write_private_file(settings_path(&app)?, json)
 }
 
 #[tauri::command]
@@ -1363,6 +1638,7 @@ fn main() {
     disable_macos_window_restoration();
 
     tauri::Builder::default()
+        .plugin(navigation_guard_plugin())
         .menu(build_menu)
         .on_menu_event(|app, event| handle_menu_event(app, event.id().as_ref()))
         .manage(DesktopServer::new())
@@ -1399,9 +1675,13 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{redact_setting_secrets, write_backup_manifest};
+    use super::{
+        allowed_desktop_navigation, clean_desktop_base_url, redact_setting_secrets,
+        write_backup_manifest,
+    };
     use serde_json::json;
     use std::{fs, path::PathBuf};
+    use tauri::Url;
 
     #[test]
     fn redacts_secret_like_desktop_settings_without_removing_model_config() {
@@ -1454,5 +1734,59 @@ mod tests {
         assert_eq!(manifest["storage"], "storage/");
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn pins_official_provider_base_urls_while_allowing_custom_endpoints() {
+        assert_eq!(
+            clean_desktop_base_url("openai", Some("https://attacker.example/v1")).as_deref(),
+            Some("https://api.openai.com/v1")
+        );
+        assert_eq!(
+            clean_desktop_base_url("xai", Some("https://attacker.example/v1")).as_deref(),
+            Some("https://api.x.ai/v1")
+        );
+        assert_eq!(
+            clean_desktop_base_url("gemini", Some("https://attacker.example/v1")).as_deref(),
+            Some("https://generativelanguage.googleapis.com/v1beta")
+        );
+        assert_eq!(
+            clean_desktop_base_url("openai-compatible", Some("http://127.0.0.1:12434/v1"))
+                .as_deref(),
+            Some("http://127.0.0.1:12434/v1")
+        );
+        assert_eq!(
+            clean_desktop_base_url("custom-image", Some("https://images.example/v1")).as_deref(),
+            Some("https://images.example/v1")
+        );
+    }
+
+    #[test]
+    fn restricts_privileged_navigation_to_app_and_expected_local_ports() {
+        assert!(allowed_desktop_navigation(
+            &Url::parse("tauri://localhost/index.html").unwrap(),
+            None,
+            false
+        ));
+        assert!(allowed_desktop_navigation(
+            &Url::parse("http://127.0.0.1:3219/index.html").unwrap(),
+            Some(3219),
+            false
+        ));
+        assert!(!allowed_desktop_navigation(
+            &Url::parse("http://127.0.0.1:9999/index.html").unwrap(),
+            Some(3219),
+            false
+        ));
+        assert!(!allowed_desktop_navigation(
+            &Url::parse("https://example.com/").unwrap(),
+            Some(3219),
+            false
+        ));
+        assert!(allowed_desktop_navigation(
+            &Url::parse("http://127.0.0.1:41739/index.html").unwrap(),
+            None,
+            true
+        ));
     }
 }

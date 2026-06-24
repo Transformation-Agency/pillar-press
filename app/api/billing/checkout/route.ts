@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { toErrorResponse } from "@/lib/errors";
 import { safeRecordAuditEvent } from "@/lib/audit";
+import { isLocalFirstMode } from "@/lib/local/mode";
 import {
   appBaseUrl,
   BillingError,
@@ -22,6 +23,15 @@ const PORTAL_MANAGED_STATUSES = new Set(["active", "trialing", "past_due", "unpa
 
 export async function POST(req: Request) {
   try {
+    if (isLocalFirstMode()) {
+      await req.json().catch(() => ({}));
+      throw new BillingError(
+        409,
+        "billing_unavailable_local_desktop",
+        "Hosted Stripe checkout is not available in local desktop mode.",
+      );
+    }
+
     const user = await requireBillingUser();
     const body = CheckoutBody.parse(await req.json());
     const { plan, priceId } = await requireCheckoutPlan(body.planId);

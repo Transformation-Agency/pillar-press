@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireUser } from "@/lib/auth";
 import { requireByokProviderAccess } from "@/lib/billing/entitlements";
 import { toErrorResponse } from "@/lib/errors";
+import { readDesktopSettings } from "@/lib/desktopSettings";
 import { isLocalFirstMode } from "@/lib/local/mode";
 import { safeRecordAuditEvent } from "@/lib/audit";
 import {
@@ -30,11 +31,29 @@ const bodySchema = z.object({
   }),
 });
 
+function localDesktopMediaProviderSettings() {
+  const settings = readDesktopSettings();
+  const profiles = Object.entries(settings?.mediaProviders ?? {})
+    .filter(([, value]) => !!value?.apiKey)
+    .filter(([provider]) => mediaProviderSchema.safeParse(provider).success)
+    .map(([provider, value]) => ({
+      id: `desktop-${provider}`,
+      label: provider === "custom-image" ? "Custom image endpoint" : provider,
+      provider,
+      baseUrl: value.baseUrl,
+      hasApiKey: true,
+    }));
+  return {
+    profiles,
+    defaultProfileId: profiles[0]?.id ?? null,
+  };
+}
+
 export async function GET() {
   try {
     const user = await requireUser();
     if (isLocalFirstMode()) {
-      return NextResponse.json({ settings: { profiles: [], defaultProfileId: null } });
+      return NextResponse.json({ settings: localDesktopMediaProviderSettings() });
     }
     return NextResponse.json({ settings: await getHostedMediaProviderSettings(user) });
   } catch (err) {

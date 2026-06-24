@@ -31,9 +31,33 @@ function StatusPipeline({ piece, onSet }) {
   );
 }
 
+function categoryReviewLabel(piece) {
+  const cat = (piece && piece.category) || "article";
+  const ctx = (piece && piece.categoryContext) || {};
+  if (cat === "letter") return ctx.recipientName ? "Letter review for " + ctx.recipientName : "Letter review";
+  if (cat === "book") return "Book chapter review";
+  if (cat === "other") return "Communication review";
+  return "Article review";
+}
+
+function traceSummary(trace) {
+  if (!trace) return null;
+  const bits = [trace.categoryLabel || trace.category || "Article"];
+  if (trace.plan) bits.push(String(trace.plan).replace(/_/g, " "));
+  if (trace.chunks && trace.chunks > 1) bits.push(trace.chunks + " chunks");
+  if (trace.model) bits.push(trace.model);
+  return bits.join(" · ");
+}
+
 function GateRail({ gateStatus, packet, onJump }) {
+  const trace = packet && packet.__trace;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+      {trace && trace.plan === "chunked_reduce" && (
+        <div className="muted" style={{ fontSize: 12.5, padding: "0 2px 10px" }}>
+          Long draft reviewed in {trace.chunks} chunks and reduced.
+        </div>
+      )}
       {window.GATES.map((g, i) => {
         const st = gateStatus[g.id] || (packet && packet[g.id] ? "done" : "pending");
         const res = packet && packet[g.id];
@@ -81,7 +105,7 @@ function GateRail({ gateStatus, packet, onJump }) {
   );
 }
 
-function DraftTab({ piece, running, gateStatus, onRun, onChangeOriginal, onGoReview }) {
+function DraftTab({ piece, running, gateStatus, reviewError, onRun, onChangeOriginal, onGoReview }) {
   const [text, setText] = React.useState(piece.original || "");
   const fileRef = React.useRef(null);
   const [uploading, setUploading] = React.useState(false);
@@ -145,6 +169,11 @@ function DraftTab({ piece, running, gateStatus, onRun, onChangeOriginal, onGoRev
             )}
             {dirty && !running && <span className="eyebrow" style={{ color: "var(--accent-ink)" }}>unsaved edits</span>}
           </div>
+          {reviewError && !running && (
+            <p role="alert" style={{ marginTop: 12, color: "var(--sev-must)", fontSize: 14.5 }}>
+              {reviewError}
+            </p>
+          )}
         </div>
 
         {/* Gate rail column */}
@@ -153,6 +182,7 @@ function DraftTab({ piece, running, gateStatus, onRun, onChangeOriginal, onGoRev
             <div className="eyebrow">Seven Gates</div>
             {running && <span className="eyebrow" style={{ color: "var(--accent-ink)" }}>in session</span>}
           </div>
+          <div className="muted" style={{ fontSize: 12.5, marginBottom: 8 }}>{categoryReviewLabel(piece)}{piece.packet && piece.packet.__trace ? " · " + traceSummary(piece.packet.__trace) : ""}</div>
           <p className="muted" style={{ fontSize: 13.5, marginBottom: 8 }}>
             Each gate is a separate pass and fills in as it finishes.
           </p>

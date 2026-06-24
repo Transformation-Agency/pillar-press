@@ -28,8 +28,9 @@ Editorial Desk**.
 - The sidecar preparation step prunes hosted-only Google Drive SDK packages from
   the desktop resource bundle. Local exports remain available; hosted/web builds
   still use Google Drive support from normal `node_modules` when configured.
-- The browser shell is self-contained at startup. React, ReactDOM, and Babel are
-  vendored under `public/vendor/`, and typography uses system serif/mono stacks
+- The browser shell is self-contained at startup. React and ReactDOM are
+  vendored under `public/vendor/`, static JSX modules are precompiled to
+  `public/build/app.compiled.js`, and typography uses system serif/mono stacks
   instead of remote font downloads.
 - First-run setup opens with a skippable, audio-ready introduction. Microphone
   access is requested only after the user chooses voice setup. The first product
@@ -160,6 +161,10 @@ Supabase is replaced in local-first desktop mode by embedded local services:
 For local QA builds, run:
 
 ```bash
+npm audit --audit-level=moderate
+npm run typecheck
+npm test
+cargo test --manifest-path src-tauri/Cargo.toml
 npm run desktop:build
 npm run desktop:verify-release
 npm run desktop:verify-installed
@@ -194,7 +199,9 @@ npm run desktop:build:signed
 npm run desktop:verify-signed-release
 ```
 
-`desktop:build:signed` refuses to run unless it can use either
+`desktop:build:signed` first runs `npm run desktop:release-readiness`, so it
+refuses to sign or notarize while the canonical tracker has unwaived desktop
+release blockers. It also refuses to run unless it can use either
 `KINGS_PRESS_SIGNING_IDENTITY`, `APPLE_SIGNING_IDENTITY`, or
 `MACOS_SIGNING_IDENTITY`, or an importable `APPLE_CERTIFICATE` plus
 `APPLE_CERTIFICATE_PASSWORD`. It also requires notarization credentials through
@@ -209,3 +216,7 @@ signed with the V8/JIT entitlements in
 staples the DMG. The signed verifier additionally requires a non-ad-hoc
 Developer ID signature, a stapled app notarization ticket, and a passing
 Gatekeeper install assessment for the DMG.
+
+See `docs/PRODUCTION_READINESS.md` for the CI gate list, dependency audit
+posture, Tauri webview boundary, current manual-update posture, and
+dual-architecture release notes.

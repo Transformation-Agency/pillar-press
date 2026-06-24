@@ -4,5 +4,9 @@
 <dict>
   <key>NSQuitAlwaysKeepsWindows</key>
   <false/>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>King's Press uses the microphone only when you choose voice setup or dictation.</string>
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>King's Press uses speech recognition only when you choose voice setup or dictation.</string>
 </dict>
 </plist>

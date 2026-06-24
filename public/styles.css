@@ -149,20 +149,23 @@ a { color: var(--accent-ink); text-decoration: none; }
 .brand .sub { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-3); white-space: nowrap; }
 
 .topnav { display: flex; gap: 4px; margin-left: 6px; }
-.topnav button {
+.topnav > button,
+.topnav > div > button {
   font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.08em; text-transform: uppercase;
   color: var(--ink-3); background: none; border: none; cursor: pointer;
   padding: 8px 13px; border-radius: 999px; transition: all 0.15s;
 }
-.topnav button:hover { color: var(--ink); background: var(--paper-sunk); }
-.topnav button.active { color: var(--accent-ink); background: var(--accent-soft); }
+.topnav > button:hover,
+.topnav > div > button:hover { color: var(--ink); background: var(--paper-sunk); }
+.topnav > button.active,
+.topnav > div > button.active { color: var(--accent-ink); background: var(--accent-soft); }
 
 .topbar .spacer { flex: 1; }
 
 @media (max-width: 1120px) {
   .brand .sub { display: none; }
   .topbar { gap: 14px; padding: 0 18px; }
-  .topnav button { padding: 8px 10px; }
+  .topnav > button, .topnav > div > button { padding: 8px 10px; }
 }
 
 .icon-btn {
@@ -249,7 +252,7 @@ hr.rule { border: none; border-top: 1px solid var(--hair); margin: 0; }
     scrollbar-width: none; padding-bottom: 2px;
   }
   .topnav::-webkit-scrollbar { display: none; }
-  .topnav button { padding: 7px 11px; flex: 0 0 auto; }
+  .topnav > button, .topnav > div > button { padding: 7px 11px; flex: 0 0 auto; }
 
   /* Comfortable tap targets. */
   .btn { padding: 10px 15px; }

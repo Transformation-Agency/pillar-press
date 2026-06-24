@@ -200,3 +200,164 @@ describe("hosted Gather schedules", () => {
     }));
   });
 });
+
+describe("local-first Gather schedules", () => {
+  it("runs due local schedules and marks recurring schedules without disabling them", async () => {
+    const schedule = {
+      id: "local_schedule_1",
+      userId: "local_user",
+      campaignId: "campaign_1",
+      cadence: "daily",
+      runAt: null,
+      timeOfDay: "00:01",
+      dayOfWeek: null,
+      enabled: true,
+      lastRunAt: "2000-01-01T00:00:00.000Z",
+    };
+    const listEnabledLocalGatherSchedules = vi.fn(() => [schedule]);
+    const markLocalGatherScheduleRun = vi.fn();
+    const runGatherForCampaign = vi.fn(async () => ({ found: 4, saved: 3 }));
+    const gatherAI = { complete: vi.fn(), json: vi.fn() };
+    const reserveUsage = vi.fn(async () => ({ id: "usage_local_1", workspaceId: null, idempotencyKey: "local-k" }));
+    const completeUsageReservation = vi.fn();
+    const failUsageReservation = vi.fn();
+
+    vi.doMock("@/lib/auth", () => ({
+      requireUser: vi.fn(async () => ({ id: "local_user", workspaceId: null, role: "author" })),
+    }));
+    vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => true }));
+    vi.doMock("@/lib/local/database", () => ({
+      listEnabledLocalGatherSchedules,
+      markLocalGatherScheduleRun,
+    }));
+    vi.doMock("@/lib/db", () => ({ db: { select: vi.fn(), update: vi.fn() } }));
+    vi.doMock("@/lib/gather/runCampaign", () => ({ runGatherForCampaign }));
+    vi.doMock("@/lib/llm", () => ({
+      getAIForTaskForUser: vi.fn(async () => ({
+        ai: gatherAI,
+        providerSource: "local",
+        provider: "ollama",
+        model: "gemma3:latest",
+      })),
+    }));
+    vi.doMock("@/lib/billing/usage", () => ({
+      reserveUsage,
+      completeUsageReservation,
+      failUsageReservation,
+    }));
+
+    const { POST } = await import("../app/api/gather/schedules/run-due/route");
+    const res = await POST();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body).toEqual({
+      ran: 1,
+      results: [{ id: "local_schedule_1", campaignId: "campaign_1", status: "ok", found: 4, saved: 3 }],
+    });
+    expect(listEnabledLocalGatherSchedules).toHaveBeenCalledWith("local_user");
+    expect(runGatherForCampaign).toHaveBeenCalledWith("campaign_1", {
+      id: "local_user",
+      workspaceId: null,
+      role: "author",
+    }, gatherAI);
+    expect(reserveUsage).toHaveBeenCalledWith(expect.objectContaining({
+      task: "gather",
+      feature: "gather.schedule.run_due",
+      campaignId: "campaign_1",
+      providerSource: "local",
+      provider: "ollama",
+      model: "gemma3:latest",
+      metadata: {
+        scheduleId: "local_schedule_1",
+        providerSource: "local",
+      },
+    }));
+    expect(completeUsageReservation).toHaveBeenCalledWith(
+      { id: "usage_local_1", workspaceId: null, idempotencyKey: "local-k" },
+      {
+        actualCredits: 1,
+        metadata: {
+          scheduleId: "local_schedule_1",
+          providerSource: "local",
+          found: 4,
+          saved: 3,
+        },
+      },
+    );
+    expect(failUsageReservation).not.toHaveBeenCalled();
+    expect(markLocalGatherScheduleRun).toHaveBeenCalledWith("local_schedule_1", "ok", "local_user", false);
+  });
+
+  it("records local schedule failures with a readable status", async () => {
+    const schedule = {
+      id: "local_schedule_2",
+      userId: "local_user",
+      campaignId: "campaign_2",
+      cadence: "once",
+      runAt: "2000-01-01T00:00:00.000Z",
+      timeOfDay: null,
+      dayOfWeek: null,
+      enabled: true,
+      lastRunAt: null,
+    };
+    const listEnabledLocalGatherSchedules = vi.fn(() => [schedule]);
+    const markLocalGatherScheduleRun = vi.fn();
+    const err = new Error("Ollama is not reachable on localhost:11434");
+    const runGatherForCampaign = vi.fn(async () => {
+      throw err;
+    });
+    const gatherAI = { complete: vi.fn(), json: vi.fn() };
+    const reservation = { id: "usage_local_2", workspaceId: null, idempotencyKey: "local-k-2" };
+    const reserveUsage = vi.fn(async () => reservation);
+    const completeUsageReservation = vi.fn();
+    const failUsageReservation = vi.fn();
+
+    vi.doMock("@/lib/auth", () => ({
+      requireUser: vi.fn(async () => ({ id: "local_user", workspaceId: null, role: "author" })),
+    }));
+    vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => true }));
+    vi.doMock("@/lib/local/database", () => ({
+      listEnabledLocalGatherSchedules,
+      markLocalGatherScheduleRun,
+    }));
+    vi.doMock("@/lib/db", () => ({ db: { select: vi.fn(), update: vi.fn() } }));
+    vi.doMock("@/lib/gather/runCampaign", () => ({ runGatherForCampaign }));
+    vi.doMock("@/lib/llm", () => ({
+      getAIForTaskForUser: vi.fn(async () => ({
+        ai: gatherAI,
+        providerSource: "local",
+        provider: "ollama",
+        model: "gemma3:latest",
+      })),
+    }));
+    vi.doMock("@/lib/billing/usage", () => ({
+      reserveUsage,
+      completeUsageReservation,
+      failUsageReservation,
+    }));
+
+    const { POST } = await import("../app/api/gather/schedules/run-due/route");
+    const res = await POST();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body).toEqual({
+      ran: 1,
+      results: [{
+        id: "local_schedule_2",
+        campaignId: "campaign_2",
+        status: "failed",
+        error: "Ollama is not reachable on localhost:11434",
+      }],
+    });
+    expect(completeUsageReservation).not.toHaveBeenCalled();
+    expect(failUsageReservation).toHaveBeenCalledWith(reservation, err);
+    expect(markLocalGatherScheduleRun).toHaveBeenCalledWith(
+      "local_schedule_2",
+      "Ollama is not reachable on localhost:11434",
+      "local_user",
+      true,
+    );
+  });
+});

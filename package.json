@@ -1,6 +1,6 @@
 {
   "name": "kings-press-editorial-desk",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -11,6 +11,7 @@
     "web:prepare-standalone": "tsx scripts/prepare-hosted-standalone.ts",
     "web:start": "tsx scripts/run-hosted-web.ts start",
     "desktop:web": "tsx scripts/run-desktop-web.ts dev",
+    "desktop:build-static-shell": "tsx scripts/build-static-browser-shell.ts",
     "desktop:web:build": "tsx scripts/run-desktop-web.ts build",
     "desktop:prepare-sidecar": "tsx scripts/prepare-tauri-sidecar.ts",
     "desktop:sign-macos-resources": "tsx scripts/sign-macos-desktop-resources.ts",
@@ -21,6 +22,9 @@
     "desktop:verify-release": "tsx scripts/verify-desktop-release.ts",
     "desktop:verify-installed": "tsx scripts/verify-installed-app.ts",
     "desktop:verify-signed-release": "tsx scripts/verify-desktop-release.ts --require-developer-id --require-notarized",
+    "desktop:verify-live-providers": "tsx scripts/verify-live-provider-flows.ts",
+    "desktop:provider-inputs": "tsx scripts/check-live-provider-inputs.ts",
+    "desktop:release-readiness": "tsx scripts/check-release-readiness.ts",
     "onboarding:verify": "tsx scripts/verify-onboarding-activation.ts",
     "onboarding:verify:browser": "tsx scripts/verify-onboarding-browser-shell.ts",
     "build": "next build",
@@ -36,6 +40,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.100.0",
     "@supabase/supabase-js": "^2.45.0",
+    "@tauri-apps/api": "^2.11.1",
     "better-sqlite3": "^12.10.0",
     "cheerio": "^1.2.0",
     "drizzle-orm": "^0.45.2",
@@ -65,6 +70,7 @@
   },
   "overrides": {
     "esbuild": "^0.28.0",
-    "postcss": "^8.5.15"
+    "postcss": "^8.5.15",
+    "undici": "^7.28.0"
   }
 }

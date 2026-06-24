@@ -10,8 +10,15 @@ export interface DesktopMediaProviderSettings {
   baseUrl?: string;
 }
 
+export interface DesktopLLMProfileSettings {
+  provider?: string;
+  apiKey?: string;
+  baseUrl?: string;
+}
+
 export interface DesktopSettingsFile {
   mediaProviders?: Record<string, DesktopMediaProviderSettings>;
+  profiles?: DesktopLLMProfileSettings[];
 }
 
 function trim(value: string | undefined): string | undefined {
@@ -61,7 +68,22 @@ export function readDesktopSettings(env: Env = process.env): DesktopSettingsFile
             }),
         )
       : undefined;
-    return { mediaProviders };
+    const profiles = Array.isArray(parsed.profiles)
+      ? parsed.profiles
+          .map((profile): DesktopLLMProfileSettings | null => {
+            if (!profile || typeof profile !== "object") return null;
+            const raw = profile as Record<string, unknown>;
+            const provider = typeof raw.provider === "string" ? trim(raw.provider)?.toLowerCase() : undefined;
+            if (!provider) return null;
+            return {
+              provider,
+              apiKey: typeof raw.apiKey === "string" ? decryptDesktopSecret(raw.apiKey, env) : undefined,
+              baseUrl: typeof raw.baseUrl === "string" ? trim(raw.baseUrl) : undefined,
+            };
+          })
+          .filter((profile): profile is DesktopLLMProfileSettings => Boolean(profile))
+      : undefined;
+    return { mediaProviders, profiles };
   } catch {
     return null;
   }
@@ -69,5 +91,12 @@ export function readDesktopSettings(env: Env = process.env): DesktopSettingsFile
 
 export function desktopMediaProvider(provider: string, env: Env = process.env): DesktopMediaProviderSettings | null {
   const settings = readDesktopSettings(env);
-  return settings?.mediaProviders?.[provider] ?? null;
+  const saved = settings?.mediaProviders?.[provider];
+  if (saved?.apiKey || saved?.baseUrl) return saved;
+  const profile = settings?.profiles?.find((item) => item.provider === provider && item.apiKey);
+  if (!profile) return null;
+  return {
+    apiKey: profile.apiKey,
+    baseUrl: profile.baseUrl,
+  };
 }

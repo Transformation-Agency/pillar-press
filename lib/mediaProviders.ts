@@ -134,7 +134,7 @@ export function getMediaProviderStatus(env: NodeJS.ProcessEnv = process.env): Me
   const savedCustomImage = desktopMediaProvider("custom-image", env);
   const openaiModels = imageModels("openai", splitModels(env.MEDIA_OPENAI_IMAGE_MODELS, ["gpt-image-1"]));
   const openaiAudioModels = audioModels("openai", splitModels(env.MEDIA_OPENAI_AUDIO_MODELS, ["gpt-4o-mini-tts", "tts-1"]));
-  const xaiModels = imageModels("xai", splitModels(env.MEDIA_XAI_IMAGE_MODELS, ["grok-2-image"]));
+  const xaiModels = imageModels("xai", splitModels(env.MEDIA_XAI_IMAGE_MODELS, ["grok-imagine-image-quality"]));
   const customModels = imageModels("custom-image", splitModels(env.MEDIA_IMAGE_MODELS, ["custom-image-model"]));
 
   const hedra: MediaProviderInfo = {
@@ -203,9 +203,9 @@ export function getMediaProviderStatus(env: NodeJS.ProcessEnv = process.env): Me
       keyLabel: "xAI API key",
       summary: "Use xAI/Grok for OpenAI-compatible image generation.",
       helpUrl: "https://console.x.ai/",
-      defaultModel: xaiModels[0]?.id ?? "grok-2-image",
+      defaultModel: xaiModels[0]?.id ?? "grok-imagine-image-quality",
       defaultBaseUrl: "https://api.x.ai/v1",
-      modelPlaceholder: "grok-2-image",
+      modelPlaceholder: "grok-imagine-image-quality",
     },
   };
   const customImage: MediaProviderInfo = {
@@ -315,7 +315,7 @@ function addLlmProfileMediaModels(info: MediaProviderInfo, profile: HostedProvid
   const modelIds = info.models.map((model) => `${model.type}:${model.id}`);
   const defaults = mediaProvider === "openai"
     ? ["gpt-image-1", "gpt-4o-mini-tts"]
-    : ["grok-2-image"];
+    : ["grok-imagine-image-quality"];
   for (const id of defaults) {
     const type: MediaCapability = id.includes("tts") ? "audio" : "image";
     if (modelIds.includes(`${type}:${id}`)) {

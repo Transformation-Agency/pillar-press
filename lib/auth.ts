@@ -22,6 +22,7 @@ export type Role = (typeof import("@/db/schema").membershipRole)[number];
 // SaaS mode must fail safer: public deployments require real account auth
 // unless AUTH_DISABLED=true is deliberately set for a private-preview gate.
 const DEFAULT_USER_ID = process.env.DEFAULT_USER_ID ?? "dev-user";
+const localFirstUserId = () => process.env.KINGS_PRESS_LOCAL_USER_ID ?? LOCAL_USER_ID;
 export const isAuthDisabled = () => {
   const value = (process.env.AUTH_DISABLED ?? "").trim();
   if (isHostedWebMode()) return /^(1|true|yes)$/i.test(value);
@@ -98,7 +99,7 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
   // Desktop/local-first mode: a single local owner profile is resolved from the
   // embedded SQLite database. This path does not touch Supabase or Postgres.
   if (isLocalFirstMode()) {
-    const id = process.env.DEFAULT_USER_ID ?? LOCAL_USER_ID;
+    const id = localFirstUserId();
     const workspaceId = ensureLocalWorkspace(id);
     return { id, workspaceId, role: "author" };
   }

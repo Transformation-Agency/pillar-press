@@ -21,7 +21,7 @@ export const setupProfileSchema = z.object({
     toneWords: z.array(z.string().min(1).max(60)).default([]),
     avoid: z.array(z.string().min(1).max(160)).default([]),
     examplesPermission: z.enum(["not_asked", "approved", "declined"]).default("not_asked"),
-    memoryPermission: z.enum(["not_asked", "approved", "declined"]).default("not_asked"),
+    memoryPermission: z.enum(["not_asked", "approved", "declined"]).optional().transform(() => "not_asked" as const),
   }).default({}),
   publicationDefaults: z.object({
     defaultOutputTypes: z.array(z.enum([
@@ -45,7 +45,7 @@ export const setupProfileSchema = z.object({
       "background_only",
       "not_set",
     ]).default("not_set"),
-    humanReviewRequired: z.boolean().default(true),
+    humanReviewRequired: z.boolean().optional().transform(() => true),
   }).default({}),
   permissions: z.object({
     mayUseSavedMemory: z.boolean().optional().transform(() => false),

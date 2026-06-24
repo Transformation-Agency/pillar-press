@@ -19,6 +19,7 @@ export const mediaJobType = ["image", "video", "avatar_video", "audio"] as const
 
 export const membershipRole = ["author", "assistant"] as const;
 export const pieceStatus = ["Draft", "Reviewed", "Revised", "Approved", "Formatted"] as const;
+export const pieceCategory = ["article", "letter", "book", "other"] as const;
 export const subscriptionStatus = [
   "trialing",
   "active",
@@ -197,6 +198,8 @@ export const pieces = pgTable(
     title: text("title").notNull(),
     status: text("status", { enum: pieceStatus }).notNull().default("Draft"),
     original: text("original").notNull().default(""),
+    category: text("category", { enum: pieceCategory }).notNull().default("article"),
+    categoryContext: jsonb("category_context").notNull().default({}),
     // packet = gate results keyed by gate id (nullable)
     packet: jsonb("packet"),
     // revision = { text, changelog: [{change,finding,note}] } (nullable)
@@ -220,6 +223,69 @@ export const pieces = pgTable(
 
 export type Piece = typeof pieces.$inferSelect;
 export type NewPiece = typeof pieces.$inferInsert;
+
+export const letterRecipients = pgTable(
+  "letter_recipients",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: text("user_id").notNull(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    displayName: text("display_name").notNull(),
+    sortName: text("sort_name"),
+    organization: text("organization"),
+    role: text("role"),
+    relationship: text("relationship"),
+    defaultSalutation: text("default_salutation"),
+    defaultSignoff: text("default_signoff"),
+    defaultTone: text("default_tone"),
+    notes: text("notes"),
+    preferences: jsonb("preferences").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    byWorkspace: index("letter_recipients_workspace_idx").on(t.workspaceId, t.userId, t.displayName),
+  }),
+);
+
+export type LetterRecipient = typeof letterRecipients.$inferSelect;
+export type NewLetterRecipient = typeof letterRecipients.$inferInsert;
+
+export const letterWorkflows = pgTable(
+  "letter_workflows",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: text("user_id").notNull(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    campaignId: uuid("campaign_id")
+      .notNull()
+      .references(() => campaigns.id, { onDelete: "cascade" }),
+    pieceId: uuid("piece_id").references(() => pieces.id, { onDelete: "set null" }),
+    recipientId: uuid("recipient_id").references(() => letterRecipients.id, { onDelete: "set null" }),
+    recipientSnapshot: jsonb("recipient_snapshot").notNull().default({}),
+    purpose: text("purpose").notNull().default(""),
+    desiredOutcome: text("desired_outcome"),
+    occasion: text("occasion"),
+    tone: text("tone"),
+    constraints: text("constraints"),
+    sourceContext: text("source_context"),
+    uploads: jsonb("uploads").notNull().default([]),
+    dictationTranscript: text("dictation_transcript"),
+    status: text("status").notNull().default("draft"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    byCampaign: index("letter_workflows_campaign_idx").on(t.campaignId, t.userId, t.updatedAt),
+  }),
+);
+
+export type LetterWorkflow = typeof letterWorkflows.$inferSelect;
+export type NewLetterWorkflow = typeof letterWorkflows.$inferInsert;
 
 export const settings = pgTable(
   "settings",

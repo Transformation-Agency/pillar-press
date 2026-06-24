@@ -37,16 +37,6 @@ async function bookApi(method, path, body) {
   }
   return data;
 }
-/* tolerate raw objects or { piece } / { data } / { result } wrappers */
-function bookUnwrap(res, key) {
-  if (!res) return null;
-  if (res[key] != null) return res[key];
-  if (res.piece && res.piece[key] != null) return res.piece[key];
-  if (res.data && res.data[key] != null) return res.data[key];
-  if (res.result && res.result[key] != null) return res.result[key];
-  return null;
-}
-
 function bookHostedBilling() {
   const auth = window.KP_AUTH && window.KP_AUTH.snapshot ? window.KP_AUTH.snapshot() : null;
   if (!auth || !auth.hosted) return null;
@@ -109,6 +99,27 @@ function notesToSources(notes) {
 const BOOK_PLAT_AUD = { substack: "builders", facebook: "relational", instagram: "women-ai", x: "builders", threads: "general" };
 
 /* ---------- book selector: a book IS a campaign (its own library) ---------- */
+function BookCreateForm({ onCreate, compact }) {
+  const [name, setName] = React.useState("");
+  const clean = name.trim();
+  const commit = () => {
+    if (!clean) return;
+    onCreate(clean);
+    setName("");
+  };
+  return (
+    <div style={{ display: "flex", gap: compact ? 6 : 8, alignItems: "center", flexWrap: compact ? "nowrap" : "wrap" }}>
+      <input className="field" value={name} onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") commit(); }}
+        placeholder="Book title"
+        style={{ flex: 1, minWidth: compact ? 0 : 220, fontSize: compact ? 13 : 14, padding: compact ? "7px 8px" : "9px 10px" }} />
+      <button className={compact ? "btn sm" : "btn primary"} onClick={commit} disabled={!clean}>
+        <Icon name="plus" size={compact ? 13 : 15} /> New book
+      </button>
+    </div>
+  );
+}
+
 function BookPicker({ campaigns, bookId, onPick, onNew, role }) {
   const [open, setOpen] = React.useState(false);
   const ref = React.useRef(null);
@@ -132,6 +143,12 @@ function BookPicker({ campaigns, bookId, onPick, onNew, role }) {
       {open && (
         <div className="card" style={{ position: "absolute", top: 64, left: 0, right: 0, padding: 6, zIndex: 60, boxShadow: "var(--shadow-lg)", maxHeight: "60vh", overflowY: "auto" }}>
           <div className="eyebrow" style={{ padding: "6px 10px 4px" }}>Each book is its own campaign</div>
+          {role !== "assistant" && (
+            <div style={{ padding: "7px 8px 8px", borderBottom: "1px solid var(--hair)", marginBottom: 5 }}>
+              <div className="eyebrow" style={{ marginBottom: 6 }}>New book</div>
+              <BookCreateForm compact onCreate={(name) => { onNew(name); setOpen(false); }} />
+            </div>
+          )}
           {(campaigns || []).map((c) => {
             const on = c.id === bookId;
             return (
@@ -148,15 +165,6 @@ function BookPicker({ campaigns, bookId, onPick, onNew, role }) {
               </button>
             );
           })}
-          {role !== "assistant" && (
-            <>
-              <hr className="rule" style={{ margin: "5px 4px" }} />
-              <button onClick={() => { onNew(); setOpen(false); }} className="mono"
-                style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, border: "none", background: "transparent", cursor: "pointer", borderRadius: "var(--radius)", padding: "9px 10px", color: "var(--ink-3)", fontSize: 12, letterSpacing: "0.04em" }}>
-                <Icon name="plus" size={13} /> NEW BOOK
-              </button>
-            </>
-          )}
         </div>
       )}
     </div>
@@ -350,7 +358,7 @@ function Hint({ icon, text }) {
 }
 
 /* ---------- right: Source Pack (weave) ---------- */
-function SourcePack({ piece, refCtx, onDraft, busy, setBusy, setErr }) {
+function SourcePack({ piece, refCtx, campaignId, onDraft, busy, setBusy, setErr }) {
   const [notes, setNotes] = React.useState("");
   const [prog, setProg] = React.useState(null);
   const [uploading, setUploading] = React.useState(false);
@@ -375,7 +383,7 @@ function SourcePack({ piece, refCtx, onDraft, busy, setBusy, setErr }) {
     const sources = notesToSources(notes);
     setBusy("weave"); setErr(null); setProg(null);
     try {
-      const res = await window.WEAVE.runWeave(sources, refCtx, (p) => setProg(p));
+      const res = await window.WEAVE.runWeave(sources, refCtx, (p) => setProg(p), { campaignId: campaignId || piece.campaignId });
       window.Store.updatePiece(piece.id, { weave: res, original: res.draft, status: piece.status === "Draft" ? "Draft" : piece.status });
       onDraft(res.draft);
     } catch (e) { setErr(e.message || "Weave failed."); }
@@ -469,7 +477,7 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
   // Drop a stale book selection if the campaign no longer exists; load the
   // book's pieces/references on demand (without making it the active campaign).
   React.useEffect(() => {
-    if (bookId && !(campaigns || []).find((c) => c.id === bookId)) { setBookId(null); return; }
+    if (bookId && !window.BOOK.resolveBookSelection(campaigns, bookId)) { setBookId(null); return; }
     if (bookId) window.Store.loadCampaign(bookId);
   }, [bookId, (campaigns || []).map((c) => c.id).join(",")]);
 
@@ -481,13 +489,15 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
 
   const piece = selectedId ? window.Store.getPiece(selectedId) : null;
 
-  const pickBook = (id) => { setBookId(id); window.Store.setPref("bookCampaignId", id); setSelectedId(null); setErr(null); setNote(null); };
-  const newBook = () => {
-    const n = window.prompt("Name your book");
-    if (!n || !n.trim()) return;
-    const id = window.Store.addCampaign(n.trim(), { activate: false }); // don't hijack the active campaign
-    window.Store.loadCampaign(id);
-    pickBook(id);
+  const pickBook = (id) => {
+    const picked = window.BOOK.pickBookCampaign(id);
+    if (!picked) return;
+    setBookId(picked); setSelectedId(null); setErr(null); setNote(null);
+  };
+  const newBook = (name) => {
+    const id = window.BOOK.createBookCampaign(name);
+    if (!id) return;
+    setBookId(id); setSelectedId(null); setErr(null); setNote(null);
   };
 
   // keep a valid selection as chapters change
@@ -500,26 +510,33 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
   // clobber in-progress edits when an async result (packet/revision/outputs) returns
   React.useEffect(() => {
     const p = selectedId ? window.Store.getPiece(selectedId) : null;
-    setTitle(p ? p.title : ""); setDraft(p ? (p.original || "") : "");
+    const editor = window.BOOK.chapterEditorState(p);
+    setTitle(editor.title); setDraft(editor.draft);
     setErr(null); setNote(null);
   }, [selectedId]);
 
-  const dirty = piece && (title !== piece.title || draft !== (piece.original || ""));
-  const saveNow = () => { if (piece && dirty) window.Store.updatePiece(piece.id, { title: title.trim() || piece.title, original: draft }); };
+  const dirty = window.BOOK.isChapterDirty(piece, title, draft);
+  const saveNow = () => {
+    if (piece && dirty) window.BOOK.saveChapterDraft(piece.id, window.BOOK.chapterPatch(piece, title, draft));
+  };
 
   // Awaited save so server-side AI passes (review/revision/outputs) and the
   // export route read the latest draft. Updates the cache optimistically too.
   const persistChapter = async () => {
     const p = window.Store.getPiece(selectedId); if (!p) return;
-    const fields = { title: title.trim() || p.title, original: draft };
-    window.Store.updatePiece(p.id, fields);
+    const fields = window.BOOK.chapterPatch(p, title, draft);
+    window.BOOK.saveChapterDraft(p.id, fields);
     await bookApi("PATCH", "/api/pieces/" + p.id, fields);
   };
 
   const flash = (m) => { setNote(m); setTimeout(() => setNote(null), 2200); };
 
   const selectChapter = (id) => { saveNow(); setSelectedId(id); setMobilePane("editor"); };
-  const addChapter = (t) => { if (!bookId) return; const p = window.Store.createPiece(t, bookId); setSelectedId(p.id); setPanel("sources"); setMobilePane("editor"); };
+  const addChapter = (t) => {
+    if (!bookId) return;
+    const p = window.BOOK.createBookChapter(bookId, bookCampaign, t, chapters.length);
+    setSelectedId(p.id); setPanel("sources"); setMobilePane("editor");
+  };
 
   // Load a chapter draft from an uploaded file (PDF, image, .docx, or text).
   const uploadDraft = async (e) => {
@@ -529,9 +546,9 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
     setUploadingDraft(true); setErr(null);
     try {
       const text = await window.extractFileText(f);
-      const merged = draft.trim() ? draft.trimEnd() + "\n\n" + text : text;
+      const merged = window.BOOK.mergeUploadedDraft(draft, text);
       setDraft(merged);
-      window.Store.updatePiece(piece.id, { original: merged });
+      window.BOOK.saveChapterDraft(piece.id, { original: merged });
     } catch (err) { setErr((err && err.message) || ("Couldn't read " + f.name + ".")); }
     setUploadingDraft(false);
   };
@@ -560,9 +577,7 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
       const pollP = poll();
       const res = await bookApi("POST", "/api/pieces/" + selectedId + "/review");
       polling = false; await pollP;
-      const packet = bookUnwrap(res, "packet");
-      const status = (res && res.status) || (res && res.piece && res.piece.status) || "Reviewed";
-      window.Store.updatePiece(selectedId, { packet, status });
+      window.Store.updatePiece(selectedId, window.BOOK.reviewPatchFromResult(res));
       flash("Review packet ready");
     } catch (e) { polling = false; setErr(e.message || "Review failed."); }
     setBusy(null); setProg(null);
@@ -574,16 +589,33 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
     if (!p.packet) { setErr("Run Review before Revise."); setPanel("review"); return; }
     setBusy("revise"); setErr(null); setPanel("revision");
     setProg({ label: fullRevise ? "Restructuring, then revising…" : "Writing the revision…" });
+    let polling = true;
+    const poll = async () => {
+      while (polling) {
+        await new Promise((r) => setTimeout(r, 900));
+        if (!polling) break;
+        try {
+          const r = await fetch("/api/pieces/" + selectedId + "/revision/status", { headers: { Accept: "application/json" } });
+          if (!r.ok) continue;
+          const st = await r.json();
+          const trace = st.trace;
+          const running = trace && (trace.stages || []).find((s) => s.status === "running");
+          if (running) setProg({ label: running.label });
+          else if (trace && trace.chunks > 1) setProg({ label: "Revising " + trace.chunks + " chunks…" });
+          if (st.done && !st.running) break;
+        } catch (e) {}
+      }
+    };
     try {
       await persistChapter();
+      const pollP = poll();
       const res = await window.GEN.generateRevision(window.Store.getPiece(selectedId), refCtx,
         (done, total) => setProg({ label: `Revising passage ${done}/${total}…` }),
         { mode: fullRevise ? "full" : "light" });
-      const patch = { revision: { text: res.revision, changelog: res.changelog } };
-      if (p.status === "Reviewed") patch.status = "Revised";
-      window.Store.updatePiece(p.id, patch);
+      polling = false; await pollP;
+      window.Store.updatePiece(p.id, window.BOOK.revisionPatchFromResult(p, res));
       flash("Proposed revision ready");
-    } catch (e) { setErr(e.message || "Revision failed."); }
+    } catch (e) { polling = false; setErr(e.message || "Revision failed."); }
     setBusy(null); setProg(null);
   };
 
@@ -593,9 +625,9 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
     const active = window.GEN.PLATFORMS.map((pl) => pl.id);
     try {
       await persistChapter();
-      const { outputs, order } = await window.GEN.generateOutputs(window.Store.getPiece(selectedId), active, BOOK_PLAT_AUD, refCtx,
+      const result = await window.GEN.generateOutputs(window.Store.getPiece(selectedId), active, BOOK_PLAT_AUD, refCtx,
         (pid, status) => setProg({ label: `Generating ${pid}…` }));
-      window.Store.updatePiece(selectedId, { outputs, outputOrder: order });
+      window.Store.updatePiece(selectedId, window.BOOK.outputsPatchFromResult(result));
       flash("Platform outputs ready");
     } catch (e) { setErr(e.message || "Output generation failed."); }
     setBusy(null); setProg(null);
@@ -604,7 +636,9 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
   const acceptRevision = () => {
     const p = window.Store.getPiece(selectedId);
     if (!p || !p.revision) return;
-    window.Store.updatePiece(p.id, { original: p.revision.text, status: "Revised" });
+    const patch = window.BOOK.acceptRevisionPatch(p);
+    if (!patch) return;
+    window.Store.updatePiece(p.id, patch);
     setDraft(p.revision.text);
     flash("Revision accepted into the draft");
   };
@@ -679,7 +713,7 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
               <div className="eyebrow" style={{ marginBottom: 10 }}>Book Writer</div>
               <h2 style={{ fontSize: 28, marginBottom: 10 }}>Pick a book, or start a new one</h2>
               <p className="muted" style={{ fontSize: 15.5, marginBottom: 18 }}>A book is its own campaign with its own library of chapters — separate from your article campaigns. Choose an existing book from the list, or create a new one.</p>
-              {role !== "assistant" && <button className="btn primary" onClick={newBook}><Icon name="plus" size={15} /> New book</button>}
+              {role !== "assistant" && <BookCreateForm onCreate={newBook} />}
             </div>
           </div>
         ) : !piece ? (
@@ -760,7 +794,7 @@ function BookWriter({ campaigns, allPieces, role, onOpenPiece, onActivateCampaig
             })}
           </div>
           <div className="scroll-y" style={{ flex: 1, padding: "18px 20px" }}>
-            {panel === "sources" && <SourcePack piece={piece} refCtx={refCtx} onDraft={(d) => setDraft(d)} busy={busy} setBusy={setBusy} setErr={setErr} />}
+            {panel === "sources" && <SourcePack piece={piece} refCtx={refCtx} campaignId={bookCampaign && bookCampaign.id} onDraft={(d) => setDraft(d)} busy={busy} setBusy={setBusy} setErr={setErr} />}
             {panel === "review" && <PacketView piece={piece} />}
             {panel === "revision" && <RevisionView piece={piece} onAccept={acceptRevision} accepting={false} />}
             {panel === "outputs" && <OutputsView piece={piece} />}

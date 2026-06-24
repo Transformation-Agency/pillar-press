@@ -7,7 +7,7 @@
    ============================================================ */
 (function () {
 
-  async function runWeave(sources, refCtx, onProgress) {
+  async function runWeave(sources, refCtx, onProgress, options) {
     const all = sources || [];
     const usable = all.filter((s) => (s.text || "").trim().length > 20);
     if (usable.length < 2) throw new Error("Add at least two sources with content to weave.");
@@ -21,7 +21,10 @@
     const res = await fetch("/api/weave", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sources: usable.map((s) => ({ name: s.name, text: s.text })) }),
+      body: JSON.stringify(Object.assign(
+        { sources: usable.map((s) => ({ name: s.name, text: s.text })) },
+        options && options.campaignId ? { campaignId: options.campaignId } : {},
+      )),
     });
     if (!res.ok) {
       let msg = "Weave failed.";
@@ -41,5 +44,29 @@
     };
   }
 
-  window.WEAVE = { runWeave };
+  function briefToText(result) {
+    const b = result.brief, m = result.mapping;
+    return [
+      `WEAVE BRIEF — ${b.workingTitle}`,
+      `\nCore message: ${b.coreMessage}`,
+      `\nConcept: ${b.concept}`,
+      `\nConnective thread: ${b.thread}`,
+      (b.tensions || []).length ? `\nTensions:\n` + b.tensions.map((t) => "• " + t).join("\n") : "",
+      `\nThroughlines: ` + (m.mapped || []).map((x) => `${x.tag} (${x.how})`).join("; "),
+      m.nearestAngle ? `Nearest angle: ${m.nearestAngle}` : "",
+      `Audience: ${m.audience || "—"}  ·  Register: ${m.register || "—"}`,
+      `\nStructure:\n` + b.structure.map((s, i) => `${i + 1}. ${s.section} — ${s.purpose}`).join("\n"),
+    ].filter(Boolean).join("\n");
+  }
+
+  function sendResultToLibrary(result, onOpenPiece) {
+    if (!result || !result.brief) throw new Error("Run Weave before sending a draft to Library.");
+    const p = window.Store.createPiece(result.brief.workingTitle, null, {
+      original: result.draft || "",
+    });
+    if (onOpenPiece && p && p.id) onOpenPiece(p.id);
+    return p;
+  }
+
+  window.WEAVE = { runWeave, briefToText, sendResultToLibrary };
 })();

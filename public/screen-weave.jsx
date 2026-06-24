@@ -111,22 +111,7 @@ function BriefRow({ label, text }) {
   );
 }
 
-function briefToText(result) {
-  const b = result.brief, m = result.mapping;
-  return [
-    `WEAVE BRIEF — ${b.workingTitle}`,
-    `\nCore message: ${b.coreMessage}`,
-    `\nConcept: ${b.concept}`,
-    `\nConnective thread: ${b.thread}`,
-    (b.tensions || []).length ? `\nTensions:\n` + b.tensions.map((t) => "• " + t).join("\n") : "",
-    `\nThroughlines: ` + (m.mapped || []).map((x) => `${x.tag} (${x.how})`).join("; "),
-    m.nearestAngle ? `Nearest angle: ${m.nearestAngle}` : "",
-    `Audience: ${m.audience || "—"}  ·  Register: ${m.register || "—"}`,
-    `\nStructure:\n` + b.structure.map((s, i) => `${i + 1}. ${s.section} — ${s.purpose}`).join("\n"),
-  ].filter(Boolean).join("\n");
-}
-
-function Weave({ weave, refCtx, onOpenPiece }) {
+function Weave({ weave, refCtx, campaignId, onOpenPiece }) {
   const sources = weave.sources || [];
   const result = weave.result;
   const [expanded, setExpanded] = React.useState({});
@@ -165,7 +150,7 @@ function Weave({ weave, refCtx, onOpenPiece }) {
   const run = async () => {
     setRunning(true); setErr(null); setProgress(null); setView("intake");
     try {
-      const res = await window.WEAVE.runWeave(sources, refCtx, (p) => setProgress(p));
+      const res = await window.WEAVE.runWeave(sources, refCtx, (p) => setProgress(p), { campaignId });
       window.Store.setWeaveResult(res);
       setView("result");
     } catch (e) { setErr(e.message || "Weave failed."); }
@@ -173,9 +158,7 @@ function Weave({ weave, refCtx, onOpenPiece }) {
   };
 
   const sendToLibrary = () => {
-    const p = window.Store.createPiece(result.brief.workingTitle);
-    window.Store.updatePiece(p.id, { original: result.draft });
-    onOpenPiece(p.id);
+    window.WEAVE.sendResultToLibrary(result, onOpenPiece);
   };
 
   return (
@@ -207,7 +190,10 @@ function Weave({ weave, refCtx, onOpenPiece }) {
                 <div style={{ display: "flex", gap: 8 }}>
                   <input ref={fileRef} type="file" accept={window.UPLOAD_ACCEPT} multiple style={{ display: "none" }} onChange={upload} />
                   <button className="btn ghost sm" onClick={() => fileRef.current.click()} disabled={uploading} title="PDF, images, .docx, or text files">{uploading ? <><Spinner size={13} /> Reading…</> : <><Icon name="doc" size={14} /> Upload files</>}</button>
-                  <button className="btn ghost sm" onClick={() => { window.Store.addWeaveSource("New source", ""); setExpanded((x) => ({ ...x })); }}><Icon name="plus" size={14} /> Add</button>
+                  <button className="btn ghost sm" onClick={() => {
+                    const src = window.Store.addWeaveSource("New source", "");
+                    setExpanded((x) => ({ ...x, [src.id]: true }));
+                  }}><Icon name="plus" size={14} /> Add</button>
                 </div>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -243,7 +229,7 @@ function Weave({ weave, refCtx, onOpenPiece }) {
           </div>
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0,1fr) minmax(0,1fr)", gap: isMobile ? 18 : 28, alignItems: "start", marginTop: isMobile ? 18 : 28 }}>
-            <BriefView result={result} onCopyBrief={() => briefToText(result)} />
+            <BriefView result={result} onCopyBrief={() => window.WEAVE.briefToText(result)} />
             <div className="card" style={{ padding: "30px 34px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
                 <div className="eyebrow">Unified draft</div>

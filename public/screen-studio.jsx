@@ -1,6 +1,6 @@
 /* Studio — provider-backed media generation surface. */
 
-function MediaProvidersDialog({ status, onClose }) {
+function MediaProvidersDialog({ status, onClose, onProviderSaved }) {
   const providers = (status && status.providers) || [];
   const [settings, setSettings] = React.useState({ profiles: [], defaultProfileId: null });
   const [provider, setProvider] = React.useState("openai");
@@ -30,13 +30,15 @@ function MediaProvidersDialog({ status, onClose }) {
   const defaultModels = {
     openai: "gpt-4o-mini-tts",
     elevenlabs: "eleven-tts-multilingual-v2",
-    xai: "grok-2-image",
+    xai: "grok-imagine-image-quality",
     "custom-image": "custom-image-model",
     hedra: "",
   };
   const currentProvider = providerMeta[provider] || null;
   const currentSetup = (currentProvider && currentProvider.setup) || {};
   const providerLabel = (id) => (providerMeta[id] && providerMeta[id].label) || providerLabels[id] || id;
+  const desktop = window.KINGS_DESKTOP;
+  const isDesktop = !!(desktop && desktop.isDesktop && desktop.isDesktop() && desktop.saveMediaProviderKey);
   const providerDefaultModel = (id) => {
     const setup = providerMeta[id] && providerMeta[id].setup;
     return (setup && setup.defaultModel) || defaultModels[id] || "";
@@ -86,13 +88,24 @@ function MediaProvidersDialog({ status, onClose }) {
     setMessage("Saving provider.");
     try {
       const profile = {
-        id: profileIdFor({ provider, baseUrl, model }),
+        id: isDesktop ? "desktop-" + provider : profileIdFor({ provider, baseUrl, model }),
         label: label.trim() || providerLabel(provider),
         provider,
         model: model.trim() || undefined,
         baseUrl: baseUrl.trim() || undefined,
         apiKey: key,
       };
+      if (isDesktop) {
+        await desktop.saveMediaProviderKey(provider, key, { baseUrl: profile.baseUrl });
+        setApiKey("");
+        setMessage("Provider saved encrypted on this Mac. Studio can use it now.");
+        if (onProviderSaved) await onProviderSaved();
+        const refreshed = await fetch("/api/media/provider-settings", { headers: { Accept: "application/json" } })
+          .then((response) => response.ok ? response.json() : null)
+          .catch(() => null);
+        if (refreshed && refreshed.settings) setSettings(refreshed.settings);
+        return;
+      }
       const existing = Array.isArray(settings.profiles) ? settings.profiles : [];
       const profiles = existing.filter((item) => item.id !== profile.id).concat(profile);
       const response = await fetch("/api/media/provider-settings", {
@@ -166,7 +179,9 @@ function MediaProvidersDialog({ status, onClose }) {
         <div className="eyebrow" style={{ marginBottom: 6 }}>Media providers</div>
         <h2 style={{ fontSize: 24, marginBottom: 10 }}>Optional cloud media</h2>
         <p className="muted" style={{ fontSize: 13.5, marginBottom: 18 }}>
-          Studio can use hosted BYOK media profiles or managed server providers. Keys are saved encrypted server-side and never returned to the browser after save.
+          {isDesktop
+            ? "Studio can use optional cloud media keys for image, video, avatar, and voice generation. Keys are saved encrypted in this Mac's desktop settings and are never returned after save."
+            : "Studio can use hosted BYOK media profiles or managed server providers. Keys are saved encrypted server-side and never returned to the browser after save."}
         </p>
         <div style={{ display: "grid", gap: 8, marginBottom: 18 }}>
           {providers.map((p) => (
@@ -183,7 +198,7 @@ function MediaProvidersDialog({ status, onClose }) {
           ))}
         </div>
         <div className="card" style={{ padding: 14, marginBottom: 16, background: "var(--paper-sunk)" }}>
-          <div className="eyebrow" style={{ marginBottom: 8 }}>Add or replace a hosted media key</div>
+          <div className="eyebrow" style={{ marginBottom: 8 }}>{isDesktop ? "Add or replace a desktop media key" : "Add or replace a hosted media key"}</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
             <label>
               <span className="eyebrow">Provider</span>
@@ -230,7 +245,7 @@ function MediaProvidersDialog({ status, onClose }) {
         </div>
         {Array.isArray(settings.profiles) && settings.profiles.length > 0 && (
           <div className="card" style={{ padding: 14, marginBottom: 16 }}>
-            <div className="eyebrow" style={{ marginBottom: 8 }}>Saved hosted media profiles</div>
+            <div className="eyebrow" style={{ marginBottom: 8 }}>{isDesktop ? "Saved desktop media profiles" : "Saved hosted media profiles"}</div>
             <div style={{ display: "grid", gap: 8 }}>
               {settings.profiles.map((profile) => (
                 <div key={profile.id} style={{
@@ -259,14 +274,16 @@ function MediaProvidersDialog({ status, onClose }) {
                     >
                       {busy === "test-" + profile.id ? <Spinner size={14} /> : "Test"}
                     </button>
-                    <button
-                      className="btn ghost"
-                      onClick={() => deleteProvider(profile)}
-                      disabled={!!busy}
-                      title="Remove this hosted media profile"
-                    >
-                      {busy === "delete-" + profile.id ? <Spinner size={14} /> : "Remove"}
-                    </button>
+                    {!isDesktop && (
+                      <button
+                        className="btn ghost"
+                        onClick={() => deleteProvider(profile)}
+                        disabled={!!busy}
+                        title="Remove this hosted media profile"
+                      >
+                        {busy === "delete-" + profile.id ? <Spinner size={14} /> : "Remove"}
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -274,7 +291,9 @@ function MediaProvidersDialog({ status, onClose }) {
           </div>
         )}
         <p className="muted" style={{ fontSize: 12.5, lineHeight: 1.5, marginBottom: 18 }}>
-          Desktop/local-first can still use native encrypted settings or server env vars. Hosted web users should use this encrypted profile path.
+          {isDesktop
+            ? "Desktop keys stay local to this Mac. Add the same key again to replace it."
+            : "Desktop/local-first can still use native encrypted settings or server env vars. Hosted web users should use this encrypted profile path."}
         </p>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
           <button className="btn primary" onClick={onClose}>Done</button>
@@ -409,12 +428,19 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
   // the composer once each lands (the STUDIO getters read from cache).
   const [catalogVersion, setCatalogVersion] = React.useState(0);
   const [providerStatus, setProviderStatus] = React.useState(null);
+  const refreshProviderStatus = React.useCallback(async () => {
+    const response = await fetch("/api/media/providers", { headers: { Accept: "application/json" } });
+    if (!response.ok) return null;
+    const next = await response.json();
+    setProviderStatus(next);
+    setCatalogVersion((v) => v + 1);
+    return next;
+  }, []);
   React.useEffect(() => {
     let alive = true;
     const bump = () => { if (alive) setCatalogVersion((v) => v + 1); };
-    fetch("/api/media/providers", { headers: { Accept: "application/json" } })
-      .then((r) => r.ok ? r.json() : null)
-      .then((s) => { if (alive && s) setProviderStatus(s); })
+    refreshProviderStatus()
+      .then(() => {})
       .catch(() => {});
     Promise.resolve(window.STUDIO.refreshModels()).then(bump);
     Promise.resolve(window.STUDIO.refreshVoices()).then(bump);
@@ -761,7 +787,7 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
               onTuneStyle={(m) => { setStyleSeedJob(m.id); setStyleOpen(true); }} />
           </div>
         </div>
-        {keysOpen && <MediaProvidersDialog status={providerStatus} onClose={() => setKeysOpen(false)} />}
+        {keysOpen && <MediaProvidersDialog status={providerStatus} onClose={() => setKeysOpen(false)} onProviderSaved={refreshProviderStatus} />}
         {styleOpen && <StyleSurveyModal campaignId={campaignId} profile={style} mediaJobId={styleSeedJob}
           onClose={() => setStyleOpen(false)} onSaved={(p) => { setStyle(p); setStyleOpen(false); }} />}
       </div>

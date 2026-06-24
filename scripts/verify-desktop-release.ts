@@ -1,11 +1,29 @@
+import { readFileSync } from "node:fs";
 import { lstat, mkdtemp, readdir, readFile, readlink, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 
 const root = process.cwd();
-const appPath = join(root, "src-tauri", "target", "release", "bundle", "macos", "King's Press Editorial Desk.app");
-const dmgPath = join(root, "src-tauri", "target", "release", "bundle", "dmg", "King's Press Editorial Desk_0.1.0_aarch64.dmg");
+const appVersion = JSON.parse(readFileSync(join(root, "src-tauri", "tauri.conf.json"), "utf8")).version;
+
+function optionalArg(name: string) {
+  const index = process.argv.indexOf(name);
+  return index >= 0 ? process.argv[index + 1]?.trim() || null : null;
+}
+
+function optionalEnv(name: string) {
+  const value = process.env[name]?.trim();
+  return value ? value : null;
+}
+
+const verifyTarget = optionalArg("--target") || optionalEnv("KINGS_PRESS_VERIFY_TARGET");
+const targetRoot = verifyTarget
+  ? join(root, "src-tauri", "target", verifyTarget, "release")
+  : join(root, "src-tauri", "target", "release");
+const artifactArch = verifyTarget === "x86_64-apple-darwin" ? "x64" : "aarch64";
+const appPath = join(targetRoot, "bundle", "macos", "King's Press Editorial Desk.app");
+const dmgPath = join(targetRoot, "bundle", "dmg", `King's Press Editorial Desk_${appVersion}_${artifactArch}.dmg`);
 const appResources = join(appPath, "Contents", "Resources");
 const requireDeveloperId =
   process.argv.includes("--require-developer-id") || process.env.KINGS_PRESS_REQUIRE_DEVELOPER_ID === "true";
@@ -66,6 +84,22 @@ async function runCapture(command: string, args: string[], label: string) {
   });
 }
 
+async function runRetryingResourceBusy(command: string, args: string[], label: string, attempts = 8) {
+  let lastError: Error | null = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      await run(command, args, label);
+      return;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      if (!/Resource busy/i.test(lastError.message) || attempt === attempts) throw lastError;
+      console.log(`retry ${label}: resource busy (${attempt}/${attempts})`);
+      await new Promise((resolve) => setTimeout(resolve, 1_500 * attempt));
+    }
+  }
+  throw lastError ?? new Error(`${label} failed`);
+}
+
 async function findEnvFiles(dir: string): Promise<string[]> {
   const out: string[] = [];
   for (const entry of await readdir(dir, { withFileTypes: true })) {
@@ -101,7 +135,7 @@ async function verifyAppBundleMetadata(bundlePath: string) {
     assertPlistValue(plist, "CFBundleDisplayName", "King's Press Editorial Desk"),
     assertPlistValue(plist, "CFBundleName", "King's Press Editorial Desk"),
     assertPlistValue(plist, "CFBundleIdentifier", "com.kingspress.editorialdesk"),
-    assertPlistValue(plist, "CFBundleShortVersionString", "0.1.0"),
+    assertPlistValue(plist, "CFBundleShortVersionString", appVersion),
     assertPlistValue(plist, "CFBundleIconFile", "icon.icns"),
     assertPlistBool(plist, "NSQuitAlwaysKeepsWindows", false),
   ]);
@@ -112,7 +146,7 @@ async function verifyDmgPayload() {
   const mountDir = await mkdtemp(join(tmpdir(), "kings-press-dmg-mount-"));
   let attached = false;
   try {
-    await run("hdiutil", ["attach", "-readonly", "-nobrowse", "-mountpoint", mountDir, dmgPath], "DMG mount");
+    await runRetryingResourceBusy("hdiutil", ["attach", "-readonly", "-nobrowse", "-mountpoint", mountDir, dmgPath], "DMG mount");
     attached = true;
     const mountedApp = join(mountDir, "King's Press Editorial Desk.app");
     const applicationsLink = join(mountDir, "Applications");
@@ -164,8 +198,11 @@ async function verifyOfflineBrowserRuntime(bundledServerRoot: string) {
   await Promise.all([
     assertExists(join(bundledServerRoot, "public", "vendor", "react.production.min.js"), "local React browser runtime"),
     assertExists(join(bundledServerRoot, "public", "vendor", "react-dom.production.min.js"), "local ReactDOM browser runtime"),
-    assertExists(join(bundledServerRoot, "public", "vendor", "babel.min.js"), "local Babel browser runtime"),
+    assertExists(join(bundledServerRoot, "public", "build", "app.compiled.js"), "compiled static browser shell"),
   ]);
+  if (index.includes("vendor/babel.min.js") || index.includes('type="text/babel"') || index.includes("'unsafe-eval'")) {
+    throw new Error("Packaged browser shell still uses runtime Babel or unsafe eval.");
+  }
   console.log("ok offline browser runtime");
 }
 

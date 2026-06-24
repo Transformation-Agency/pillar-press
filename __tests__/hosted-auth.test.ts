@@ -169,6 +169,7 @@ describe("hosted auth API contract", () => {
   });
 
   it("requireUser bootstraps a workspace for authenticated hosted users before normal API routes run", async () => {
+    vi.stubEnv("NODE_ENV", "test");
     vi.doUnmock("@/lib/auth");
     const seedWorkspace = vi.fn(async () => undefined);
     const membershipSelectWhere = vi.fn(async () => []);

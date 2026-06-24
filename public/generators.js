@@ -11,9 +11,10 @@
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: body == null ? undefined : JSON.stringify(body),
     });
-    if (!r.ok) throw new Error(method + " " + path + " -> " + r.status);
     const ct = r.headers.get("content-type") || "";
-    return ct.indexOf("application/json") >= 0 ? r.json() : null;
+    const json = ct.indexOf("application/json") >= 0 ? await r.json().catch(() => null) : null;
+    if (!r.ok) throw new Error((json && (json.error || json.message)) || (method + " " + path + " -> " + r.status));
+    return json;
   }
 
   /* ---------- Proposed Revision ----------
@@ -86,6 +87,8 @@
     return {
       revision: rev.text || "",
       changelog: Array.isArray(rev.changelog) ? rev.changelog : [],
+      trace: rev.trace || null,
+      status: rev.status || "complete",
     };
   }
 

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   bookMarkdown,
   chapterLeadingNumber,
@@ -99,5 +99,54 @@ describe("bookMarkdown", () => {
       chapters: [{ title: "Only", original: "", revision: { text: "from revision" } }],
     });
     expect(md).toBe(["# B", "", "## Only", "", "from revision", ""].join("\n"));
+  });
+});
+
+describe("book export route", () => {
+  it("assembles a local-first campaign into ordered book markdown without hosted export gating", async () => {
+    vi.resetModules();
+    const requireExportEnabled = vi.fn();
+
+    vi.doMock("@/lib/auth", () => ({
+      requireUser: vi.fn(async () => ({ id: "local-owner", workspaceId: "local-workspace", role: "author" })),
+      getOrCreateWorkspace: vi.fn(),
+    }));
+    vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => true }));
+    vi.doMock("@/lib/billing/entitlements", () => ({ requireExportEnabled }));
+    vi.doMock("@/lib/local/database", () => ({
+      getLocalCampaign: vi.fn(() => ({ id: "book_1", name: "Local Book" })),
+      listLocalPieces: vi.fn(() => [
+        { title: "Chapter 2: Later", original: "Second.", revision: null, createdAt: "2026-01-02T00:00:00.000Z" },
+        { title: "Chapter 1: First", original: "", revision: { text: "First fallback." }, createdAt: "2026-01-01T00:00:00.000Z" },
+      ]),
+    }));
+
+    const { GET } = await import("../app/api/campaigns/[id]/book/export/route");
+    const res = await GET(new Request("http://test.local/api/campaigns/book_1/book/export"), {
+      params: Promise.resolve({ id: "book_1" }),
+    });
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(requireExportEnabled).not.toHaveBeenCalled();
+    expect(body).toEqual({
+      campaignId: "book_1",
+      title: "Local Book",
+      markdown: [
+        "# Local Book",
+        "",
+        "## Chapter 1: First",
+        "",
+        "First fallback.",
+        "",
+        "",
+        "---",
+        "",
+        "## Chapter 2: Later",
+        "",
+        "Second.",
+        "",
+      ].join("\n"),
+    });
   });
 });

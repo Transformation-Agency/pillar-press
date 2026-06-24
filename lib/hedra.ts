@@ -202,6 +202,14 @@ export function uploadAsset(assetId: string, file: Blob, filename: string, opts?
 // re-submitting is safe (no duplicate/extra credit charge).
 const TRANSIENT_STATUSES = new Set([408, 409, 422, 425, 429, 500, 502, 503, 504]);
 
+function retryDelay(attempt: number): number {
+  if (process.env.HEDRA_RETRY_DELAY_MS != null) {
+    const override = Number(process.env.HEDRA_RETRY_DELAY_MS);
+    if (Number.isFinite(override) && override >= 0) return override;
+  }
+  return 500 * 2 ** attempt + Math.floor(Math.random() * 300);
+}
+
 async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
   let lastErr: unknown;
   for (let i = 0; i < attempts; i++) {
@@ -211,7 +219,7 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
       lastErr = e;
       const status = e instanceof HedraError ? e.status : 0;
       if (i === attempts - 1 || !TRANSIENT_STATUSES.has(status)) throw e;
-      const delay = 500 * 2 ** i + Math.floor(Math.random() * 300);
+      const delay = retryDelay(i);
       console.warn(`[hedra] transient ${status} on submit; retry ${i + 1}/${attempts - 1} in ${delay}ms`);
       await new Promise((r) => setTimeout(r, delay));
     }

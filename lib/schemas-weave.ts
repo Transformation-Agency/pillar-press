@@ -25,6 +25,6 @@ const weaveSourceSchema = z.object({
  */
 export const weaveBodySchema = z.object({
   sources: z.array(weaveSourceSchema).min(2, "Add at least two sources with content to weave."),
-  campaignId: z.string().uuid().optional(),
+  campaignId: z.string().trim().min(1).max(200).optional(),
 });
 export type WeaveBodyInput = z.infer<typeof weaveBodySchema>;

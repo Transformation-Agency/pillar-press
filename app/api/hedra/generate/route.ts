@@ -31,6 +31,8 @@ import {
 } from "@/lib/mediaProviders";
 import { generateOpenAICompatibleImage } from "@/lib/mediaImage";
 import { generateOpenAICompatibleSpeech, synthesizeOpenAICompatibleSpeech } from "@/lib/mediaAudio";
+import { synthesizeLocalSystemSpeech } from "@/lib/local/systemAudio";
+import { writeLocalPublicFile } from "@/lib/local/storage";
 import { campaignInWorkspace, tenantNotFound } from "@/lib/tenant";
 import { completeUsageReservation, failUsageReservation, reserveUsage, type UsageReservation } from "@/lib/billing/usage";
 import { requireByokProviderAccess, requireConcurrentJobCapacity, requireManagedProviderAccess } from "@/lib/billing/entitlements";
@@ -124,6 +126,41 @@ export async function POST(req: Request) {
 
       const audioProvider = await getAudioProviderForUser(body.provider, user, process.env, body.mediaProfileId);
       const elevenProvider = audioProvider ? null : await getElevenLabsProviderForUser(user, process.env, body.mediaProfileId);
+      if (isLocalFirstMode() && !audioProvider && !elevenProvider) {
+        const result = await synthesizeLocalSystemSpeech({
+          text: script,
+          voice: body.voiceId,
+        });
+        const audioUrl = writeLocalPublicFile(
+          result.bytes,
+          `voiceover-${Date.now()}.${result.extension}`,
+          result.contentType,
+          "voice",
+        );
+        const job = createLocalMediaJob({
+          userId: user.id,
+          workspaceId: user.workspaceId ?? null,
+          campaignId: body.campaignId,
+          sourceContentId: body.pieceId,
+          type: "audio",
+          prompt: script.slice(0, 2000),
+          modelId: "macos-system-voice",
+          modelName: "macOS System Voice",
+          voiceId: result.voice,
+          status: "completed",
+          progress: 100,
+          outputUrl: audioUrl,
+          downloadUrl: audioUrl,
+          completedAt: new Date().toISOString(),
+          meta: {
+            provider: "local-system",
+            providerSource: "local",
+            contentType: result.contentType,
+            extension: result.extension,
+          },
+        });
+        return NextResponse.json({ job }, { status: 201 });
+      }
       const usageSource = audioProvider?.providerSource ?? elevenProvider?.providerSource ?? "managed";
       const usageProfileId = audioProvider?.profileId ?? elevenProvider?.profileId;
       reservation = await reserveUsage({
@@ -291,6 +328,21 @@ export async function POST(req: Request) {
     const voiceoverProvider = needsVoiceover && !voiceoverAudioProvider
       ? await getElevenLabsProviderForUser(user, process.env, body.audioMediaProfileId)
       : null;
+    if (!hedraProvider) {
+      const hint = body.type === "image"
+        ? "Connect Hedra in Studio Providers, or choose a configured OpenAI, xAI, or custom image provider."
+        : "Connect Hedra in Studio Providers before generating video or avatar media.";
+      return NextResponse.json({
+        error: hint,
+        code: "media_provider_required",
+      }, { status: 409 });
+    }
+    if (needsVoiceover && !voiceoverAudioProvider && !voiceoverProvider) {
+      return NextResponse.json({
+        error: "Connect OpenAI media or ElevenLabs in Studio Providers before generating synced voiceover video.",
+        code: "media_provider_required",
+      }, { status: 409 });
+    }
     const providerSource = combinedSource(hedraProvider, voiceoverAudioProvider ?? voiceoverProvider);
     await requireMediaProviderAccessForSource(user, providerSource);
     const models = await listModels([wanted], { apiKey: hedraProvider?.apiKey });

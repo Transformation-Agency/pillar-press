@@ -22,7 +22,7 @@ export class ElevenError extends Error {
 
 function apiKey(override?: string): string {
   const k = override || process.env.ELEVENLABS_API_KEY || desktopMediaProvider("elevenlabs")?.apiKey;
-  if (!k) throw new ElevenError(500, "config", "Missing ELEVENLABS_API_KEY in server environment.");
+  if (!k) throw new ElevenError(500, "config", "Add an ElevenLabs API key in media provider settings before listing voices or generating speech.");
   return k;
 }
 

@@ -56,8 +56,9 @@ Hosted override logic is in `lib/local/mode.ts`. `KINGS_PRESS_RUNTIME=hosted`,
 
 ## 2. Browser To API Information Flow
 
-The frontend is a static React/Babel app under `public/`. It does not talk to
-LLM providers directly. It calls same-origin King's Press API routes.
+The frontend is a static React app under `public/`. JSX sources are compiled
+into `public/build/app.compiled.js` for desktop startup. It does not talk to LLM
+providers directly. It calls same-origin King's Press API routes.
 
 ```mermaid
 flowchart LR
