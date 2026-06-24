@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync, spawn } from "node:child_process";
 import { createServer } from "node:net";
+import { pathToFileURL } from "node:url";
 
 type Check = {
   name: string;
@@ -154,7 +155,7 @@ function desktopSettingsKeyFromKeychain(): string | undefined {
   }
 }
 
-function mergeSavedProviderSettings(base: Record<string, unknown>, saved: Record<string, unknown>) {
+export function mergeSavedProviderSettings(base: Record<string, unknown>, saved: Record<string, unknown>) {
   const profiles = Array.isArray(saved.profiles) ? saved.profiles.filter((profile) => profile && typeof profile === "object") : [];
   const savedMediaProviders = saved.mediaProviders && typeof saved.mediaProviders === "object"
     ? saved.mediaProviders as Record<string, unknown>
@@ -522,7 +523,9 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(redact(error instanceof Error ? error.message : String(error)));
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    console.error(redact(error instanceof Error ? error.message : String(error)));
+    process.exit(1);
+  });
+}
