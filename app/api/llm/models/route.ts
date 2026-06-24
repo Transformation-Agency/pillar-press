@@ -58,14 +58,15 @@ function sortModels(models: string[]): string[] {
 
 function openAIModelPreference(model: string): number {
   const id = model.toLowerCase();
-  if (/^ft:(gpt-5|o5|gpt-4\.5|gpt-4\.1|gpt-4o|gpt-4|o[1345])/.test(id)) return 20;
-  if (/^(gpt-5|o5)(?:[-.]|$)/.test(id)) return 0;
-  if (/^gpt-4\.5(?:-|$)/.test(id)) return 1;
-  if (/^gpt-4\.1(?:-|$)/.test(id)) return 1;
+  if (/^gpt-4o-mini(?:-|$)/.test(id)) return 0;
+  if (/^gpt-4\.1-mini(?:-|$)/.test(id)) return 1;
   if (/^gpt-4o(?:-|$)/.test(id)) return 2;
-  if (/^gpt-4(?:[-.]|$)/.test(id)) return 3;
-  if (/^o[1345](?:-|$)/.test(id)) return 4;
-  if (/^chatgpt(?:-|$)/.test(id)) return 5;
+  if (/^gpt-4\.1(?:-|$)/.test(id)) return 3;
+  if (/^gpt-4\.5(?:-|$)/.test(id)) return 4;
+  if (/^gpt-4(?:[-.]|$)/.test(id)) return 5;
+  if (/^o[1345](?:-|$)/.test(id)) return 6;
+  if (/^(gpt-5|o5)(?:[-.]|$)/.test(id)) return 7;
+  if (/^chatgpt(?:-|$)/.test(id)) return 8;
   if (/^gpt-3\.5(?:-|$)/.test(id)) return 8;
   if (/^ft:/.test(id)) return 9;
   return 10;

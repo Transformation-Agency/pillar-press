@@ -1,6 +1,7 @@
 import { uploadPublicFile, persistRemoteImage } from "@/lib/storage";
 import type { ImageProviderConfig } from "@/lib/mediaProviders";
 import type { SessionUser } from "@/lib/auth";
+import { LLMError, providerMessage, safeProviderDetail } from "@/lib/llm/errors";
 
 type ImageGenerationResult = {
   outputUrl: string;
@@ -63,7 +64,14 @@ export async function generateOpenAICompatibleImage(input: {
 
   const text = await res.text();
   if (!res.ok) {
-    throw new Error(`Image provider request failed (${res.status}).`);
+    const errorProvider = input.config.provider === "custom-image" ? "openai-compatible" : input.config.provider;
+    throw new LLMError(
+      res.status,
+      "media_provider",
+      providerMessage(errorProvider, res.status, text),
+      errorProvider,
+      safeProviderDetail(text),
+    );
   }
 
   const json = JSON.parse(text || "{}") as {

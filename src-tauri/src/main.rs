@@ -1311,33 +1311,47 @@ fn save_llm_settings(app: AppHandle, settings: DesktopSettings) -> Result<(), St
             .and_then(|saved| saved.api_key.clone())
             .filter(|v| !v.trim().is_empty())
     });
-    let openai_profile = profiles.iter().find(|p| {
-        p.provider.eq_ignore_ascii_case("openai")
+    let openai_compatible_media_profile = profiles.iter().find(|p| {
+        (p.provider.eq_ignore_ascii_case("openai") || p.provider.eq_ignore_ascii_case("xai"))
             && p.api_key
                 .as_deref()
                 .map(str::trim)
                 .is_some_and(|v| !v.is_empty())
     });
-    if let Some(profile) = openai_profile {
+    if let Some(profile) = openai_compatible_media_profile {
+        let media_provider = if profile.provider.eq_ignore_ascii_case("xai") {
+            "xai"
+        } else {
+            "openai"
+        };
         media_providers.insert(
-            "openai".into(),
+            media_provider.into(),
             DesktopMediaProviderSettings {
                 api_key: profile.api_key.clone(),
                 base_url: profile
                     .base_url
                     .clone()
                     .filter(|v| !v.trim().is_empty())
-                    .or_else(|| Some("https://api.openai.com/v1".into())),
+                    .or_else(|| Some(if media_provider == "xai" {
+                        "https://api.x.ai/v1".into()
+                    } else {
+                        "https://api.openai.com/v1".into()
+                    })),
             },
         );
-    } else if provider.eq_ignore_ascii_case("openai")
+    } else if (provider.eq_ignore_ascii_case("openai") || provider.eq_ignore_ascii_case("xai"))
         && encrypted_api_key
             .as_deref()
             .map(str::trim)
             .is_some_and(|v| !v.is_empty())
     {
+        let media_provider = if provider.eq_ignore_ascii_case("xai") {
+            "xai"
+        } else {
+            "openai"
+        };
         media_providers.insert(
-            "openai".into(),
+            media_provider.into(),
             DesktopMediaProviderSettings {
                 api_key: encrypted_api_key.clone(),
                 base_url: settings
@@ -1346,7 +1360,11 @@ fn save_llm_settings(app: AppHandle, settings: DesktopSettings) -> Result<(), St
                     .map(str::trim)
                     .filter(|v| !v.is_empty())
                     .map(str::to_string)
-                    .or_else(|| Some("https://api.openai.com/v1".into())),
+                    .or_else(|| Some(if media_provider == "xai" {
+                        "https://api.x.ai/v1".into()
+                    } else {
+                        "https://api.openai.com/v1".into()
+                    })),
             },
         );
     }

@@ -42,7 +42,7 @@ describe("hosted LLM provider utility routes", () => {
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(body.models).toEqual(["gpt-5-mini", "gpt-4.1", "gpt-4o-mini", "o3-mini"]);
+    expect(body.models).toEqual(["gpt-4o-mini", "gpt-4.1", "o3-mini", "gpt-5-mini"]);
     expect(body.models).not.toContain("babbage-2");
     expect(body.models).not.toContain("text-embedding-3-large");
     expect(body.totalModels).toBe(7);

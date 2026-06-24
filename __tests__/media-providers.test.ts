@@ -179,6 +179,34 @@ describe("media provider status", () => {
     }
   });
 
+  it("reuses encrypted desktop xAI LLM profile keys for local media provider status", () => {
+    const dir = mkdtempSync(join(tmpdir(), "kings-press-media-xai-profile-"));
+    const settingsPath = join(dir, "desktop-settings.json");
+    const secret = encryptDesktopSecret("xai-profile-secret");
+    writeFileSync(settingsPath, JSON.stringify({
+      profiles: [{
+        id: "xai-grok",
+        provider: "xai",
+        model: "grok-4.3",
+        apiKey: secret.encrypted,
+        baseUrl: "https://api.x.ai/v1",
+      }],
+    }));
+    try {
+      const status = getMediaProviderStatus({
+        NODE_ENV: "test",
+        KINGS_PRESS_LLM_SETTINGS_PATH: settingsPath,
+        KINGS_PRESS_DESKTOP_SETTINGS_KEY: secret.keyText,
+      });
+      expect(status.xai.configured).toBe(true);
+      expect(status.xai.setup.defaultModel).toBe("grok-imagine-image-quality");
+      expect(JSON.stringify(status)).not.toContain("xai-profile-secret");
+      expect(JSON.stringify(status)).not.toContain(secret.encrypted);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("returns local-first desktop media provider settings without secrets", async () => {
     vi.resetModules();
     const dir = mkdtempSync(join(tmpdir(), "kings-press-media-settings-"));

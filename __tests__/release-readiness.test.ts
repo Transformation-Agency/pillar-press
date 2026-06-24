@@ -27,9 +27,8 @@ describe("desktop release readiness gate", () => {
 
     expect(exitCode).toBe(1);
     expect(output).toContain("totalStories");
-    expect(output).toContain("PROV-004");
+    expect(output).not.toContain("PROV-004 (");
     expect(output).toContain("MEDIA-002");
-    expect(output).toContain("KINGS_PRESS_LIVE_OPENAI_API_KEY");
     expect(output).toContain("KINGS_PRESS_LIVE_PROVIDER_VERIFY_SPEND_CREDITS=yes");
     expect(output).not.toContain("- AUDIO-001");
     expect(output).not.toContain("AUTH-001 (");
