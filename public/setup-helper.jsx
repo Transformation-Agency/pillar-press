@@ -462,7 +462,7 @@ function kpMediaProviderBaseUrl(provider) {
 function kpMediaProviderModel(provider, fallback) {
   if (fallback) return fallback;
   if (provider === "openai") return "gpt-4o-mini-tts";
-  if (provider === "xai") return "grok-2-image";
+  if (provider === "xai") return "grok-imagine-image-quality";
   if (provider === "elevenlabs") return "eleven-tts-multilingual-v2";
   return undefined;
 }

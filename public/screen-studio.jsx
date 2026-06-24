@@ -30,7 +30,7 @@ function MediaProvidersDialog({ status, onClose, onProviderSaved }) {
   const defaultModels = {
     openai: "gpt-4o-mini-tts",
     elevenlabs: "eleven-tts-multilingual-v2",
-    xai: "grok-2-image",
+    xai: "grok-imagine-image-quality",
     "custom-image": "custom-image-model",
     hedra: "",
   };

@@ -24,7 +24,7 @@ const xaiBaseUrl = (process.env.KINGS_PRESS_LIVE_XAI_BASE_URL || "https://api.x.
 const openaiChatModel = process.env.KINGS_PRESS_LIVE_OPENAI_CHAT_MODEL?.trim();
 const xaiChatModel = process.env.KINGS_PRESS_LIVE_XAI_CHAT_MODEL?.trim() || "grok-4.3";
 const openaiImageModel = process.env.KINGS_PRESS_LIVE_OPENAI_IMAGE_MODEL?.trim() || "gpt-image-1";
-const xaiImageModel = process.env.KINGS_PRESS_LIVE_XAI_IMAGE_MODEL?.trim() || "grok-2-image";
+const xaiImageModel = process.env.KINGS_PRESS_LIVE_XAI_IMAGE_MODEL?.trim() || "grok-imagine-image-quality";
 const openaiAudioModel = process.env.KINGS_PRESS_LIVE_OPENAI_AUDIO_MODEL?.trim() || "gpt-4o-mini-tts";
 const ollamaBaseUrl = (process.env.KINGS_PRESS_LIVE_OLLAMA_BASE_URL || "http://127.0.0.1:11434").replace(/\/+$/, "");
 const ollamaModel = process.env.KINGS_PRESS_LIVE_OLLAMA_MODEL?.trim() || "gemma4:26b-mlx";
@@ -398,37 +398,44 @@ async function main() {
     }
 
     const xaiMediaConfigured = providerConfigured(providers, "xai");
-    if (xaiKey) {
+    const xaiCredentialSource = xaiKey ? "env" : xaiMediaConfigured ? "desktop-settings" : null;
+    if (xaiCredentialSource) {
+      let xaiListedRequestedModel = false;
       await runCheck(checks, "PROV-006 xAI/Grok model listing", async () => {
         const modelsPayload = await requestJson(baseUrl, "/api/llm/models", {
           method: "POST",
-          body: JSON.stringify({ provider: "xai", apiKey: xaiKey, baseUrl: xaiBaseUrl }),
+          body: JSON.stringify({ provider: "xai", apiKey: xaiKey || undefined, baseUrl: xaiBaseUrl }),
         });
         const models = modelIds(modelsPayload);
         if (!models.length) throw new Error("xAI listed no usable models.");
         if (!models.includes(xaiChatModel)) throw new Error(`xAI did not list ${xaiChatModel}. Listed: ${models.join(", ")}`);
-        return { modelCount: models.length, requestedModel: xaiChatModel };
+        xaiListedRequestedModel = true;
+        return { modelCount: models.length, requestedModel: xaiChatModel, source: xaiCredentialSource };
       });
-      await runCheck(checks, "PROV-006 xAI/Grok text test", async () => {
-        const body = await requestJson(baseUrl, "/api/llm/test", {
-          method: "POST",
-          body: JSON.stringify({
-            provider: "xai",
-            apiKey: xaiKey,
-            baseUrl: xaiBaseUrl,
-            model: xaiChatModel,
-          }),
+      if (xaiListedRequestedModel) {
+        await runCheck(checks, "PROV-006 xAI/Grok text test", async () => {
+          const body = await requestJson(baseUrl, "/api/llm/test", {
+            method: "POST",
+            body: JSON.stringify({
+              provider: "xai",
+              apiKey: xaiKey || undefined,
+              baseUrl: xaiBaseUrl,
+              model: xaiChatModel,
+            }),
+          });
+          if ((body as { sample?: string }).sample?.trim() !== "OK") throw new Error(`Unexpected xAI sample: ${JSON.stringify(body)}`);
+          return { model: xaiChatModel, source: xaiCredentialSource };
         });
-        if ((body as { sample?: string }).sample?.trim() !== "OK") throw new Error(`Unexpected xAI sample: ${JSON.stringify(body)}`);
-        return { model: xaiChatModel };
-      });
+      } else {
+        skip(checks, "PROV-006 xAI/Grok text test", "xAI model listing did not pass");
+      }
     } else {
-      skip(checks, "PROV-006 xAI/Grok live checks", "KINGS_PRESS_LIVE_XAI_API_KEY or KINGS_PRESS_LIVE_GROK_API_KEY not set");
+      skip(checks, "PROV-006 xAI/Grok live checks", "KINGS_PRESS_LIVE_XAI_API_KEY or KINGS_PRESS_LIVE_GROK_API_KEY not set and no saved desktop xAI key was available");
     }
     if (xaiMediaConfigured || xaiKey) {
       await runCheck(checks, "MEDIA-002 xAI image provider configured", async () => {
         if (!providerConfigured(providers, "xai")) throw new Error("xAI media provider was not configured in packaged local server.");
-        return { imageModel: xaiImageModel, source: xaiKey ? "env" : "desktop-settings" };
+        return { imageModel: xaiImageModel, source: xaiCredentialSource || "desktop-settings" };
       });
       if (spendCredits) {
         await runCheck(checks, "MEDIA-002 xAI image generation", async () => {

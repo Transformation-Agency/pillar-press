@@ -58,7 +58,7 @@ describe("media provider status", () => {
         capabilities: ["image"],
         envVars: ["MEDIA_XAI_API_KEY", "XAI_API_KEY"],
         models: [],
-        setup: { keyLabel: "xAI API key", summary: "Use xAI.", helpUrl: "https://console.x.ai/", modelPlaceholder: "grok-2-image" },
+        setup: { keyLabel: "xAI API key", summary: "Use xAI.", helpUrl: "https://console.x.ai/", modelPlaceholder: "grok-imagine-image-quality" },
       },
       customImage: {
         id: "custom-image",
@@ -115,7 +115,7 @@ describe("media provider status", () => {
       defaultBaseUrl: "https://api.openai.com/v1",
     });
     expect(status.xai.setup).toMatchObject({
-      defaultModel: "grok-2-image",
+      defaultModel: "grok-imagine-image-quality",
       defaultBaseUrl: "https://api.x.ai/v1",
     });
     expect(status.customImage.setup).toMatchObject({

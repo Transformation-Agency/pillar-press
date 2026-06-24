@@ -96,7 +96,7 @@ describe("hosted media BYOK resolver", () => {
     expect(status.openai.models.some((model) => model.id === "gpt-4o-mini-tts" && model.profileId === "openai-main")).toBe(true);
     expect(status.xai.configured).toBe(true);
     expect(status.xai.profileIds).toContain("xai-main");
-    expect(status.xai.models.some((model) => model.id === "grok-2-image" && model.profileId === "xai-main")).toBe(true);
+    expect(status.xai.models.some((model) => model.id === "grok-imagine-image-quality" && model.profileId === "xai-main")).toBe(true);
     expect(JSON.stringify(status)).not.toContain("secret");
     expect(JSON.stringify(status)).not.toContain("sk-");
   });
