@@ -1287,6 +1287,58 @@ fn save_llm_settings(app: AppHandle, settings: DesktopSettings) -> Result<(), St
         .filter(|v| !v.is_empty())
         .map(str::to_string)
         .or_else(|| profiles.first().map(|p| p.id.clone()));
+    let encrypted_api_key = encrypt_setting_secret(
+        &app,
+        settings
+            .api_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_string),
+    )?;
+    let mut media_providers = read_desktop_settings(&app)
+        .ok()
+        .and_then(|s| s.media_providers)
+        .unwrap_or_default();
+    let openai_profile = profiles.iter().find(|p| {
+        p.provider.eq_ignore_ascii_case("openai")
+            && p.api_key
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|v| !v.is_empty())
+    });
+    if let Some(profile) = openai_profile {
+        media_providers.insert(
+            "openai".into(),
+            DesktopMediaProviderSettings {
+                api_key: profile.api_key.clone(),
+                base_url: profile
+                    .base_url
+                    .clone()
+                    .filter(|v| !v.trim().is_empty())
+                    .or_else(|| Some("https://api.openai.com/v1".into())),
+            },
+        );
+    } else if provider.eq_ignore_ascii_case("openai")
+        && encrypted_api_key
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|v| !v.is_empty())
+    {
+        media_providers.insert(
+            "openai".into(),
+            DesktopMediaProviderSettings {
+                api_key: encrypted_api_key.clone(),
+                base_url: settings
+                    .base_url
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                    .map(str::to_string)
+                    .or_else(|| Some("https://api.openai.com/v1".into())),
+            },
+        );
+    }
     let cleaned = DesktopSettings {
         provider: Some(provider.into()),
         model: if model.is_empty() {
@@ -1300,15 +1352,7 @@ fn save_llm_settings(app: AppHandle, settings: DesktopSettings) -> Result<(), St
             .map(str::trim)
             .filter(|v| !v.is_empty())
             .map(str::to_string),
-        api_key: encrypt_setting_secret(
-            &app,
-            settings
-                .api_key
-                .as_deref()
-                .map(str::trim)
-                .filter(|v| !v.is_empty())
-                .map(str::to_string),
-        )?,
+        api_key: encrypted_api_key,
         profiles: if profiles.is_empty() {
             None
         } else {
@@ -1329,9 +1373,11 @@ fn save_llm_settings(app: AppHandle, settings: DesktopSettings) -> Result<(), St
                 })
                 .collect()
         }),
-        media_providers: read_desktop_settings(&app)
-            .ok()
-            .and_then(|s| s.media_providers),
+        media_providers: if media_providers.is_empty() {
+            None
+        } else {
+            Some(media_providers)
+        },
     };
     let json = serde_json::to_string_pretty(&cleaned).map_err(|e| e.to_string())?;
     fs::write(settings_path(&app)?, json).map_err(|e| e.to_string())
