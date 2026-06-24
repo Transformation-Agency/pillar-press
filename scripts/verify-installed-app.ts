@@ -3,8 +3,8 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
-import puppeteer from "puppeteer";
 import { driveOnboardingUiProof } from "./onboarding-ui-proof";
+import { launchProofBrowser } from "./puppeteer-launch";
 
 const root = process.cwd();
 const appVersion = JSON.parse(readFileSync(join(root, "src-tauri", "tauri.conf.json"), "utf8")).version;
@@ -232,11 +232,7 @@ try {
   if (!Array.isArray(runtime.providers) || runtime.providers.length < 5) {
     throw new Error(`Expected installed app media provider status, got ${JSON.stringify(runtime)}`);
   }
-  const browser = await puppeteer.launch({
-    headless: true,
-    protocolTimeout: 120000,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
-  });
+  const browser = await launchProofBrowser();
   try {
     const page = await browser.newPage();
     const pageErrors: string[] = [];

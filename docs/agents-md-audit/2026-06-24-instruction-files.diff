@@ -1,0 +1,775 @@
+diff --git a/AGENTS.md b/AGENTS.md
+new file mode 100644
+index 0000000..b61d9a6
+--- /dev/null
++++ b/AGENTS.md
+@@ -0,0 +1,232 @@
++# Instructions for Codex
++
++<!-- sphere-agents-standard:start -->
++
++## Project Purpose
++
++You are working on **King's Press Editorial Desk**, a local-first desktop
++editorial operations app. The normal product is a Tauri desktop app that runs a
++packaged Next.js server locally, stores app data in SQLite, keeps generated
++files in local app-data storage, and uses local models by default.
++
++Hosted web compatibility can remain, but it must not become the default desktop
++path. Desktop builds must not require Supabase, Postgres, Docker, Vercel, or
++cloud model keys for normal operation.
++
++## Repository Map
++
++- `app/`: Next.js App Router pages and API routes.
++- `public/`: static browser modules for the editorial UI and onboarding runtime.
++- `lib/`: shared TypeScript domain, local-first, provider, media, and LLM code.
++- `lib/llm/`: provider-neutral model access; feature code must route model calls
++  through this layer.
++- `db/local-sqlite-schema.sql`: desktop SQLite schema.
++- `db/migrations/`: hosted/Postgres compatibility migrations.
++- `src-tauri/`: Tauri desktop shell, native commands, bundled resources, signing
++  and permissions metadata.
++- `scripts/`: build, verification, release-readiness, and migration utilities.
++- `docs/`: architecture, local development, API, data model, release, and audit
++  documentation.
++- `constitution/Metacanon_Constitution_v3.0.md`: local reference copy of the
++  Metacanon Constitution Third Edition. Verify against
++  `constitution/CONSTITUTION.lock` before relying on it as a boundary source.
++
++## Authority And Source Order
++
++Follow this order when instructions conflict:
++
++1. Direct Human Request in the current session.
++2. System/developer/tool safety instructions.
++3. `constitution/Metacanon_Constitution_v3.0.md` for AI Contact boundaries, only
++   as a source to quote or cite; do not reinterpret ambiguous language.
++4. This `AGENTS.md`.
++5. More specific nested `AGENTS.md` files.
++6. Repository documentation and code evidence.
++
++Codex reads project instructions at run start. Changes to `AGENTS.md` govern
++future runs, not the already-running session.
++
++## AI Contact Constitutional Boundary
++
++Every model-driven agent is an AI Contact. An AI Contact is non-sovereign,
++non-voting, and does not make human decisions.
++
++An AI Contact must not:
++
++- approve, ratify, accept risk, close a gate, merge, release, or declare human
++  acceptance;
++- exercise Individual Action;
++- vote or simulate a binding vote;
++- interpret ambiguous constitutional, policy, Governance, or human language;
++- modify the Constitution or human Governance records;
++- expand its own authority, Contact Lens, tool scope, data scope, or work scope;
++- bypass Material Impact review, a Human Request, Ratchet, or emergency
++  suspension.
++
++When constitutional, policy, Governance, or human-language ambiguity appears,
++report the ambiguity and defer to an authorized human. Do not fabricate missing
++Governance records, approvals, AI Contact Lenses, Prism Holders, Accountability
++Members, participant identities, or Constitution interpretations.
++
++If project Governance records require an active AI Contact Lens, human Prism
++Holder, or human Accountability Member and those records are missing, stale,
++revoked, or suspended, stop affected AI work and ask for human direction.
++
++Potential Material Impact must be flagged and must not be crossed without the
++required human determination or approval. External communications, GitHub
++mutations, releases, deployments, and destructive operations require exact human
++approval.
++
++Use **Work Cell** for a temporary project team or agent working group. Reserve
++**Sub-Sphere** for a legally anchored Sphere created through human Governance
++and Fractaling.
++
++## Common Commands
++
++Use commands only when they are supported by repository evidence.
++
++From `package.json`, `README.md`, `docs/DESKTOP_LOCAL_FIRST.md`, and
++`.github/workflows/desktop-ci.yml`:
++
++```bash
++npm run typecheck
++npm test
++npm audit --audit-level=moderate
++npm run onboarding:verify
++npm run onboarding:verify:browser
++npm run desktop:web:build
++npm run desktop:release-readiness
++npm run desktop:build
++npm run desktop:verify-release
++npm run desktop:verify-installed
++npm run desktop:build:signed
++npm run desktop:verify-signed-release
++```
++
++From `src-tauri/Cargo.toml`, `README.md`, and CI:
++
++```bash
++cargo test --manifest-path src-tauri/Cargo.toml
++```
++
++Use the narrowest check that proves a change. For desktop packaging, signing,
++notarization, permissions, or bundled resources, run the relevant desktop
++verifier before reporting AI-complete.
++
++Do not run signing, notarization, release upload, deployment, GitHub issue/PR
++mutation, or hosted database commands unless the Human Request explicitly asks
++for that exact external effect.
++
++## Local-First Product Rules
++
++- Preserve the packaged Next standalone server and bundled Node runtime path.
++- Keep Tauri launcher resource lookup compatible with packaged app layouts.
++- Keep desktop app data in local SQLite and local app-data storage by default.
++- Keep first-run setup usable for Ollama, Docker Model Runner, and optional
++  hosted API keys.
++- Keep local backups secret-redacted.
++- Keep Gather scheduling durable in SQLite and due jobs running from the
++  desktop background scheduler.
++- Preserve editorial behavior unless the product owner explicitly asks to
++  change it: gate prompts, platform generation order, Weave map-reduce,
++  revision rules, delimiters, JSON schemas, and parser repair behavior.
++- Use `lib/llm` for model access. Do not add direct provider calls in feature
++  code.
++- Keep secrets server-side or native-side. Do not expose provider keys, OAuth
++  secrets, tokens, or app-specific passwords through browser globals, client
++  bundles, logs, route responses, docs, backups, or commits.
++
++## Git And Worktree Safety
++
++- Use `git -C <path>` when inspecting other worktrees.
++- Do not prune, unlock, repair, delete, rename, or alter worktree metadata
++  unless the Human Request explicitly asks for that action.
++- Work on a feature branch unless explicitly told otherwise.
++- Do not commit or push unless explicitly asked.
++- Never run `git reset --hard` or destructive checkout/clean commands unless the
++  Human Request explicitly names that operation.
++- Do not revert changes you did not make. If they affect the task, work with
++  them or stop for human direction.
++- Before writing, identify the intended read set, write set, protected paths,
++  and any branch/base-commit assumptions.
++- Stop on stale context, conflicting uncommitted AGENTS changes, ambiguous
++  ownership, overlapping write risk, or a detached/unknown worktree state.
++
++Protected paths include:
++
++- `constitution/` and all Constitution source/lock files;
++- human Governance records and authority workbooks, if added later;
++- `.git/`, worktree metadata, secrets, `.env*`, keychains, credentials, release
++  passwords, and provider keys;
++- unrelated Work Cell paths;
++- generated release artifacts unless the Human Request specifically asks for
++  release work.
++
++## Human-In-The-Loop Stop Conditions
++
++Stop and ask for human direction when any of these appear:
++
++- missing, expired, or ambiguous Human Request;
++- missing, suspended, revoked, or stale AI Contact Lens where Governance records
++  require one;
++- missing Prism Holder or Accountability Member where required;
++- ambiguous constitutional, Governance, policy, product, or human language;
++- scope expansion, new dependency, new tool, new command, new path, interface
++  change, migration, privacy/transmission-policy change, or budget/time-limit
++  breach not covered by the request;
++- potential Material Impact without required human determination;
++- external communication, GitHub mutation, merge, release, deployment, or
++  destructive/irreversible operation not exactly approved;
++- repeated repair failure;
++- Ratchet or emergency suspension.
++
++## Evidence And Completion
++
++Record evidence for nontrivial work:
++
++- files inspected and changed;
++- commands or methods, working directory, result, and exit code;
++- evidence/report paths;
++- hashes where practical;
++- limitations, skipped checks, unresolved questions, and requested human next
++  action.
++
++AI-complete means the requested local work has been implemented and verified as
++far as the Human Request authorized. It does not mean accepted, approved,
++ratified, merged, released, deployed, or closed by a human.
++
++Final reports should distinguish:
++
++- facts directly observed from files/commands;
++- non-binding Assessment;
++- blocked or not-run checks;
++- human decisions still required.
++
++<!-- sphere-agents-standard:end -->
++
++## Project-Specific Notes
++
++Read these before architecture changes:
++
++1. `docs/DESKTOP_LOCAL_FIRST.md`
++2. `docs/LOCAL_DEV.md`
++3. `docs/BUILD_BRIEF.md`
++4. `docs/API_SPEC.md`
++5. `docs/DATA_MODEL.md`
++
++Definition of done for desktop product work:
++
++- The app is branded **King's Press Editorial Desk** in UI, bundle metadata,
++  installer artifacts, menus, docs, and normal-user onboarding.
++- `npm run desktop:build` produces a Tauri `.app` and DMG.
++- The packaged `.app` starts its local server, initializes SQLite, starts with
++  no default campaigns, and serves the UI without a developer server.
++- First-run model setup supports Ollama, existing Ollama installs, Docker Model
++  Runner, optional hosted API keys, multiple provider profiles, and per-task LLM
++  defaults.
++- `npm run desktop:verify-release` passes for local QA builds.
++- Developer ID signing/notarization remains supported by
++  `npm run desktop:build:signed`; signed artifacts must pass
++  `npm run desktop:verify-signed-release`.
++*** End Patch
++ 
+diff --git a/src-tauri/AGENTS.md b/src-tauri/AGENTS.md
+new file mode 100644
+index 0000000..b9d7c7f
+--- /dev/null
++++ b/src-tauri/AGENTS.md
+@@ -0,0 +1,60 @@
++# Instructions for Codex in `src-tauri/`
++
++<!-- sphere-agents-standard:start -->
++
++## Scope
++
++This directory owns the Tauri desktop shell, native commands, macOS permissions,
++bundled resource lookup, signing metadata, icons, and release bundle behavior.
++Inherit the repository root `AGENTS.md`; this file adds native-desktop rules
++only.
++
++## Permitted Activities
++
++- Modify Tauri Rust code, capability files, permissions, icons, and Tauri config
++  when the Human Request covers desktop behavior.
++- Preserve the packaged Next server and bundled Node runtime lookup contract.
++- Keep local-first startup behavior intact: private localhost server, SQLite app
++  data, local storage, and no required hosted auth.
++- Run local verification commands that are already evidenced by the repo.
++
++## Commands
++
++Supported commands from repository manifests and docs:
++
++```bash
++cargo test --manifest-path src-tauri/Cargo.toml
++npm run desktop:build
++npm run desktop:verify-release
++npm run desktop:verify-installed
++npm run desktop:build:signed
++npm run desktop:verify-signed-release
++```
++
++Run signed/notarized commands only when the Human Request explicitly authorizes
++signing/notarization/release work. Do not expose Apple credentials or
++app-specific passwords in files, logs, commits, or reports.
++
++## Protected Paths And Stop Conditions
++
++- Do not modify `src-tauri/target/` artifacts as source.
++- Do not change bundle identifier, app-data identity, signing entitlements, or
++  release channel without exact human approval.
++- Stop before changing Tauri permissions/capabilities in a way that expands
++  filesystem, shell, network, microphone, or external-open authority unless the
++  Human Request explicitly covers that expansion.
++- Stop if packaged app behavior diverges from local-first desktop mode or if a
++  change would require Supabase/Postgres/cloud keys for normal desktop use.
++
++## Evidence
++
++For native changes, report:
++
++- files changed;
++- exact build or verifier command and exit code;
++- app/DMG paths when built;
++- signing/notarization status only when that work was explicitly requested;
++- limitations such as not launching the packaged app or not running Gatekeeper.
++
++<!-- sphere-agents-standard:end -->
++
+diff --git a/lib/llm/AGENTS.md b/lib/llm/AGENTS.md
+new file mode 100644
+index 0000000..95ae3d2
+--- /dev/null
++++ b/lib/llm/AGENTS.md
+@@ -0,0 +1,46 @@
++# Instructions for Codex in `lib/llm/`
++
++<!-- sphere-agents-standard:start -->
++
++## Scope
++
++This directory owns provider-neutral LLM access. Inherit the repository root
++`AGENTS.md`; this file adds LLM-provider rules only.
++
++## Required Boundaries
++
++- Keep model access provider-neutral. Feature code should not call OpenAI,
++  Anthropic, Gemini, xAI/Grok, Ollama, Docker Model Runner, or OpenAI-compatible
++  endpoints directly.
++- Keep secrets server-side or native-side. Do not return raw keys from routes,
++  write keys to browser-visible state, log credentials, or include credentials
++  in fixtures, docs, backups, or audit reports.
++- Preserve readable provider errors while redacting credentials and sensitive
++  headers.
++- Keep local-first providers first-class. Ollama and Docker Model Runner must
++  remain usable without hosted auth or cloud keys.
++- Do not change editorial prompt contracts from this layer unless the Human
++  Request explicitly asks for product behavior changes.
++
++## Verification
++
++Use the narrowest relevant checks, commonly:
++
++```bash
++npm run typecheck
++npm test
++npm run desktop:verify-live-providers
++```
++
++Only run live-provider checks when the Human Request permits use of configured
++keys or local providers. Record provider, model, command, and result without
++leaking credentials.
++
++## Stop Conditions
++
++Stop before adding a new provider, new egress path, new key storage location,
++new browser-visible setting, or changed privacy/transmission policy unless it is
++inside the Human Request.
++
++<!-- sphere-agents-standard:end -->
++
+diff --git a/db/AGENTS.md b/db/AGENTS.md
+new file mode 100644
+index 0000000..c5a9144
+--- /dev/null
++++ b/db/AGENTS.md
+@@ -0,0 +1,45 @@
++# Instructions for Codex in `db/`
++
++<!-- sphere-agents-standard:start -->
++
++## Scope
++
++This directory owns local SQLite schema and hosted/Postgres compatibility
++migrations. Inherit the repository root `AGENTS.md`; this file adds database
++rules only.
++
++## Required Boundaries
++
++- `db/local-sqlite-schema.sql` is the desktop local-first schema.
++- `db/migrations/` is for hosted/Postgres compatibility.
++- Keep SQLite/local storage first-class for desktop routes and packaged app
++  behavior.
++- Use migrations and schema updates intentionally. Do not silently change data
++  shape without updating the relevant local-first code paths and documentation
++  evidence.
++- Do not run hosted database push/migrate/generate commands against production
++  or user databases unless the Human Request explicitly authorizes that exact
++  external mutation.
++
++## Commands
++
++Supported commands from `package.json`:
++
++```bash
++npm run local:db:schema
++npm run db:generate
++npm run db:migrate
++npm run db:push
++```
++
++The `db:*` commands are hosted/Drizzle-oriented. Treat them as mutation-capable
++and stop unless the Human Request explicitly covers their use. `local:db:schema`
++prints local schema information and is appropriate for local inspection.
++
++## Evidence
++
++For schema work, report affected tables/columns, migration/local schema files,
++commands run, and whether local-first SQLite behavior was verified.
++
++<!-- sphere-agents-standard:end -->
++
+diff --git a/public/AGENTS.md b/public/AGENTS.md
+new file mode 100644
+index 0000000..1f6f499
+--- /dev/null
++++ b/public/AGENTS.md
+@@ -0,0 +1,45 @@
++# Instructions for Codex in `public/`
++
++<!-- sphere-agents-standard:start -->
++
++## Scope
++
++This directory owns the static React/Babel frontend modules, onboarding runtime,
++and vendored browser startup assets. Inherit the repository root `AGENTS.md`;
++this file adds browser-runtime rules only.
++
++## Required Boundaries
++
++- Do not expose provider keys, OAuth secrets, tokens, or desktop settings
++  secrets through browser globals, localStorage, bundled modules, screenshots,
++  logs, or route responses.
++- Keep startup browser assets local. React, ReactDOM, Babel, and startup fonts
++  must not require CDN access in the packaged desktop app.
++- Preserve the conversational onboarding goal: clean, non-redundant setup that
++  saves model/provider choices only through approved server/native paths.
++- Browser state may mirror setup status for convenience, but durable desktop
++  setup completion comes from native app-data settings.
++
++## Verification
++
++Use focused frontend checks when possible:
++
++```bash
++npm run typecheck
++npm test
++npm run onboarding:verify
++npm run onboarding:verify:browser
++npm run desktop:verify-release
++```
++
++For UI changes, verify in the desktop/webview path when the Human Request
++requires installed-app behavior.
++
++## Stop Conditions
++
++Stop before adding new browser egress, new persistent browser storage of
++credentials, CDN dependencies for startup, microphone permission changes, or
++external-provider behavior not covered by the Human Request.
++
++<!-- sphere-agents-standard:end -->
++
+diff --git a/constitution/CONSTITUTION.lock b/constitution/CONSTITUTION.lock
+new file mode 100644
+index 0000000..2b5db93
+--- /dev/null
++++ b/constitution/CONSTITUTION.lock
+@@ -0,0 +1,11 @@
++# Metacanon Constitution lock
++
++canonical_file = "Metacanon_Constitution_v3.0.md"
++canonical_sha256 = "ecf3b151a8b9bc1f296060b6d82c4af0d2d5929536f4eca7bf0683884ba1dc89"
++source_path = "/Users/paul/prism-pillar-law/governance/bundles/dev/constitution.md"
++source_manifest = "/Users/paul/prism-pillar-law/governance/source-manifest.json"
++source_manifest_sha256 = "7c004cb974ac0845b9467c0843c4f716ebd088603cc99b93f7993d874bc39c62"
++bundle_manifest = "/Users/paul/prism-pillar-law/governance/bundles/dev/manifest.json"
++bundle_manifest_sha256 = "91e763050fd6d90940b259ee6f6905239addd4c19d4527e7e31267f0c44e46bf"
++authority_note = "Copied verbatim for local instruction-boundary reference. Do not modify or interpret by agent action."
++added_by_request = "Human request in Codex session on 2026-06-24: add the constitution file."
+diff --git a/docs/agents-md-audit/2026-06-24-instruction-hierarchy-audit.md b/docs/agents-md-audit/2026-06-24-instruction-hierarchy-audit.md
+new file mode 100644
+index 0000000..2b360e0
+--- /dev/null
++++ b/docs/agents-md-audit/2026-06-24-instruction-hierarchy-audit.md
+@@ -0,0 +1,294 @@
++# AGENTS.md Instruction Hierarchy Audit
++
++Date: 2026-06-24  
++Repository: `/Users/paul/pillar-press`  
++Branch: `codex/fix-kings-press-port-isolation`  
++HEAD at audit: `7495b907911dfa3286c2fb83b85521d0ce0c9ba9`
++
++## Executive Assessment
++
++Applied safe local instruction-file changes. The repository now has a layered
++Codex instruction hierarchy with:
++
++- root project instructions in `AGENTS.md`;
++- scoped component instructions in `src-tauri/`, `lib/llm/`, `db/`, and
++  `public/`;
++- a local reference copy of the Metacanon Constitution Third Edition at
++  `constitution/Metacanon_Constitution_v3.0.md`;
++- a lock/provenance file at `constitution/CONSTITUTION.lock`.
++
++No application source code, tests, manifests, CI, product docs outside this
++audit report, GitHub state, release state, deployment state, or Git metadata was
++modified.
++
++## Constitution Discovery
++
++Initial repository search found no constitution file in King's Press. After the
++human follow-up request, "add the constitution file", a canonical source was
++located outside this repository:
++
++- source: `/Users/paul/prism-pillar-law/governance/bundles/dev/constitution.md`
++- source SHA-256:
++  `ecf3b151a8b9bc1f296060b6d82c4af0d2d5929536f4eca7bf0683884ba1dc89`
++- supporting manifest:
++  `/Users/paul/prism-pillar-law/governance/source-manifest.json`
++- source manifest SHA-256:
++  `7c004cb974ac0845b9467c0843c4f716ebd088603cc99b93f7993d874bc39c62`
++- bundle manifest:
++  `/Users/paul/prism-pillar-law/governance/bundles/dev/manifest.json`
++- bundle manifest SHA-256:
++  `91e763050fd6d90940b259ee6f6905239addd4c19d4527e7e31267f0c44e46bf`
++
++The copied repository file verifies to the same canonical hash:
++
++```text
++ecf3b151a8b9bc1f296060b6d82c4af0d2d5929536f4eca7bf0683884ba1dc89  constitution/Metacanon_Constitution_v3.0.md
++```
++
++The constitution file is intentionally not inlined into `AGENTS.md`; it is about
++88 KiB and would exceed the normal Codex project instruction budget.
++
++## Codex Discovery Configuration
++
++Readable global Codex config:
++
++- `/Users/paul/.codex/config.toml`
++- `sandbox_mode = "danger-full-access"`
++- `approval_policy = "on-request"`
++- trusted project entry for `/Users/paul/pillar-press`
++
++Readable global instruction file:
++
++- `/Users/paul/.codex/AGENTS.md`
++- byte count: `0`
++
++No `AGENTS.override.md` was found at global or project scope. No
++`project_doc_fallback_filenames` or `project_doc_max_bytes` setting was found in
++the readable Codex configuration, so the default behavior applies:
++
++- active project instruction filename: `AGENTS.md`;
++- same-directory `AGENTS.override.md` would shadow `AGENTS.md` if present;
++- default effective project instruction budget is treated as 32 KiB, with a 28
++  KiB target used for this audit.
++
++## Worktree Inventory
++
++`git worktree list --porcelain` returned one linked worktree.
++
++| Path | Branch / HEAD | Exists | Writable | Locked | Prunable | Bare | Status | Assessment |
++| --- | --- | --- | --- | --- | --- | --- | --- | --- |
++| `/Users/paul/pillar-press` | `codex/fix-kings-press-port-isolation` / `7495b907911dfa3286c2fb83b85521d0ce0c9ba9` | yes | yes | no | no | no | dirty from untracked local files | active primary checkout |
++
++Likely Work Cell ID: none declared in repository metadata.  
++Likely Work Item IDs: not declared in repository metadata.  
++Likely agent role: general implementation/audit agent under direct Human
++Request.  
++Likely component: King's Press desktop/local-first app.
++
++Pre-existing untracked files before this audit included:
++
++- `AGENTS.md`
++- `docs/cowork-audit-2026-06-22.md`
++- `release-artifacts/Kings-Press-Editorial-Desk_0.1.0_aarch64.dmg`
++- `release-artifacts/Kings-Press-Editorial-Desk_0.1.0_x64.dmg`
++
++The pre-existing untracked `AGENTS.md` was intentionally updated because it was
++the active root project instruction file requested by this audit.
++
++## Instruction File Inventory
++
++Project instruction files after migration:
++
++| File | Type | Tracked status | SHA-256 | Bytes | Effective role |
++| --- | --- | --- | --- | ---: | --- |
++| `AGENTS.md` | active root project instructions | untracked | `20e880106e21911518a07951c8d16f8629abb4333191d881861305df52318bca` | 9536 | universal project and AI Contact boundary |
++| `src-tauri/AGENTS.md` | active nested instructions | untracked | `bdeec1225560337585c4ed2e72447f95124cb19ebce918e91a1b876a0f15473d` | 2187 | Tauri/native desktop scope |
++| `lib/llm/AGENTS.md` | active nested instructions | untracked | `666b7bffd685065545cc17244d6033062d278f0c828407ad6d336f4a135491bd` | 1541 | provider-neutral LLM scope |
++| `db/AGENTS.md` | active nested instructions | untracked | `307fb2c226bda29ae2feda48783d016f9f66bb489d9f6f9cf015990f259413df` | 1411 | local SQLite/hosted migration scope |
++| `public/AGENTS.md` | active nested instructions | untracked | `b744bd1e4785e062289ab28d2cb8a398520d5f892acc04debc299d5772fed659` | 1490 | static browser/onboarding scope |
++
++Other instruction-like files:
++
++- `CLAUDE.md`: not recognized by Codex config; inactive for Codex.
++- `docs/CLAUDE.md`: not recognized by Codex config; inactive for Codex.
++- `node_modules/@supabase/*/AGENTS.md`: vendored dependency instruction files.
++  They were not migrated. They are outside the project source instruction
++  hierarchy for normal King's Press work and should not be treated as project
++  policy.
++
++No project `AGENTS.override.md` files were found or created.
++
++## Effective Chain Sizes
++
++The largest active project chain remains below the 28 KiB audit target:
++
++| Directory | Effective files | Combined bytes |
++| --- | --- | ---: |
++| repository root | `AGENTS.md` | 9536 |
++| `src-tauri/` | root + `src-tauri/AGENTS.md` | 11723 |
++| `lib/llm/` | root + `lib/llm/AGENTS.md` | 11077 |
++| `db/` | root + `db/AGENTS.md` | 10947 |
++| `public/` | root + `public/AGENTS.md` | 11026 |
++
++`constitution/Metacanon_Constitution_v3.0.md` is a reference file, not part of
++the active Codex instruction chain.
++
++## Command Evidence
++
++Commands placed in `AGENTS.md` were supported by repository evidence:
++
++- `package.json`
++- `README.md`
++- `docs/DESKTOP_LOCAL_FIRST.md`
++- `docs/LOCAL_DEV.md`
++- `.github/workflows/desktop-ci.yml`
++- `src-tauri/Cargo.toml`
++
++Supported commands include:
++
++```bash
++npm run typecheck
++npm test
++npm audit --audit-level=moderate
++npm run onboarding:verify
++npm run onboarding:verify:browser
++npm run desktop:web:build
++npm run desktop:release-readiness
++npm run desktop:build
++npm run desktop:verify-release
++npm run desktop:verify-installed
++npm run desktop:build:signed
++npm run desktop:verify-signed-release
++cargo test --manifest-path src-tauri/Cargo.toml
++```
++
++Database commands from `package.json` were documented only in `db/AGENTS.md`
++with mutation warnings:
++
++```bash
++npm run local:db:schema
++npm run db:generate
++npm run db:migrate
++npm run db:push
++```
++
++## Changes Applied
++
++Root `AGENTS.md` was replaced with layered instructions covering:
++
++- project purpose and repository map;
++- authority/source hierarchy;
++- AI Contact constitutional boundary;
++- Work Cell versus Sub-Sphere terminology;
++- common command set with evidence;
++- local-first desktop product rules;
++- Git/worktree safety;
++- protected paths;
++- Human Request and approval boundaries;
++- evidence and AI-complete versus human-accepted distinction.
++
++Nested instruction files were added only where directory-specific rules are
++useful:
++
++- `src-tauri/AGENTS.md`: native/Tauri/signing/permission boundaries.
++- `lib/llm/AGENTS.md`: provider-neutral model and secret handling boundaries.
++- `db/AGENTS.md`: SQLite versus hosted migration boundaries.
++- `public/AGENTS.md`: browser/onboarding/local asset boundaries.
++
++Constitution reference files added:
++
++- `constitution/Metacanon_Constitution_v3.0.md`
++- `constitution/CONSTITUTION.lock`
++
++## Audit Criteria Assessment
++
++### A. Discovery Correctness
++
++Pass. Active Codex filenames use `AGENTS.md`. No unexpected project override was
++found. No configured fallback filenames were found. Effective chain sizes remain
++below the 28 KiB target.
++
++### B. Constitutional Correctness
++
++Pass with one caveat. New instructions explicitly prohibit AI Contacts from
++voting, approving, ratifying, deciding for humans, accepting risk, interpreting
++constitutional ambiguity, changing Governance, exercising Individual Action,
++expanding authority, bypassing Material Impact review, bypassing a Human
++Request, or bypassing Ratchet/suspension.
++
++Caveat: no King's Press-specific Governance activation record, AI Contact Lens,
++Prism Holder, or Accountability Member record was found in this repository. The
++root instructions require stopping where such records are required but missing.
++
++### C. Terminology Correctness
++
++Pass. New instructions use "Work Cell" for temporary project teams and reserve
++"Sub-Sphere" for legally anchored constitutional structures.
++
++### D. Role Clarity
++
++Pass for current repository state. No role-specific Work Cell directories were
++found. Root instructions define generic AI Contact boundaries and completion
++limits. No planner/implementer/auditor/verifier role files were fabricated.
++
++### E. Worktree Safety
++
++Pass. Root instructions include worktree discovery, branch awareness, protected
++paths, no-prune/no-delete/no-revert rules, stale-context stop conditions, and
++prohibition on altering other worktrees.
++
++### F. Human-In-The-Loop Boundaries
++
++Pass. Root and component files identify stop conditions for missing Human
++Request, missing Governance authority artifacts where required, ambiguity, scope
++expansion, new commands/tools/paths, Material Impact, external communication,
++GitHub mutation, merge, release, deployment, destructive operations, repeated
++repair failure, Ratchet, or emergency suspension.
++
++### G. Evidence And Completion
++
++Pass. Root instructions require inspected/changed file lists, commands/methods,
++working directories, results, evidence paths, hashes where practical,
++limitations, unresolved questions, and requested human next action. The
++instructions distinguish AI-complete from human acceptance.
++
++### H. Repository-Specific Accuracy
++
++Pass. Commands and paths were derived from repository files. The root and nested
++files preserve King’s Press local-first desktop behavior, `lib/llm` provider
++neutrality, secret handling, SQLite/local storage, Tauri build verification, and
++editorial prompt stability.
++
++## Validation Performed
++
++Commands run:
++
++```bash
++git rev-parse --show-toplevel
++git rev-parse --git-common-dir
++git worktree list --porcelain
++find /Users/paul/pillar-press ... AGENTS candidates ...
++sed -n ... /Users/paul/.codex/config.toml
++sed -n ... package.json README.md docs/DESKTOP_LOCAL_FIRST.md docs/LOCAL_DEV.md docs/BUILD_BRIEF.md
++sed -n ... .github/workflows/desktop-ci.yml src-tauri/Cargo.toml vitest.config.ts
++shasum -a 256 constitution/Metacanon_Constitution_v3.0.md
++wc -c AGENTS.md src-tauri/AGENTS.md lib/llm/AGENTS.md db/AGENTS.md public/AGENTS.md
++shasum -a 256 AGENTS.md src-tauri/AGENTS.md lib/llm/AGENTS.md db/AGENTS.md public/AGENTS.md
++git status --short --branch --untracked-files=all
++```
++
++No build/test suite was run because this task intentionally modified only local
++instruction files and audit documentation, not application behavior.
++
++## Remaining Human Review Items
++
++1. Decide whether these untracked instruction and constitution files should be
++   committed.
++2. Decide whether King's Press needs formal Governance activation records,
++   project-specific AI Contact Lens records, Prism Holder records, or
++   Accountability Member records.
++3. Decide whether to migrate inactive `CLAUDE.md` content into Codex
++   instructions or keep it as tool-specific documentation.
++4. Decide whether `node_modules/@supabase/*/AGENTS.md` should be ignored in
++   future audits as vendored dependency content.
++
