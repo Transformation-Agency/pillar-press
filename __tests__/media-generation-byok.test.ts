@@ -428,3 +428,132 @@ describe("hosted media BYOK generation", () => {
     });
   });
 });
+
+describe("local-first audio generation", () => {
+  it("saves audio with the macOS system voice when no cloud audio provider is configured", async () => {
+    const createLocalMediaJob = vi.fn((input) => ({
+      id: "local_audio_1",
+      ...input,
+      meta: input.meta,
+    }));
+    const synthesizeLocalSystemSpeech = vi.fn(async () => ({
+      bytes: Buffer.from("aiff-bytes"),
+      contentType: "audio/aiff",
+      extension: "aiff",
+      voice: "system-default",
+    }));
+    const writeLocalPublicFile = vi.fn(() => "/api/local-files/voice/audio.aiff?contentType=audio%2Faiff");
+
+    vi.doMock("@/lib/auth", () => ({
+      requireUser: vi.fn(async () => ({ id: "local-owner", workspaceId: "local-workspace", role: "author" })),
+    }));
+    vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => true }));
+    vi.doMock("@/lib/tenant", () => ({
+      campaignInWorkspace: vi.fn(async () => true),
+      tenantNotFound: vi.fn(() => new Response(JSON.stringify({ error: "Not found.", code: "not_found" }), { status: 404 })),
+    }));
+    vi.doMock("@/lib/local/database", () => ({
+      createLocalMediaJob,
+      getLocalMediaJob: vi.fn(),
+      getLocalPiece: vi.fn(),
+      getLocalReferences: vi.fn(),
+      getLocalStyleProfile: vi.fn(),
+    }));
+    vi.doMock("@/lib/mediaProviders", () => ({
+      getAudioProviderForUser: vi.fn(async () => null),
+      getElevenLabsProviderForUser: vi.fn(async () => null),
+      getHedraProviderForUser: vi.fn(async () => null),
+      getImageProviderForUser: vi.fn(async () => null),
+    }));
+    vi.doMock("@/lib/local/systemAudio", () => ({ synthesizeLocalSystemSpeech }));
+    vi.doMock("@/lib/local/storage", () => ({ writeLocalPublicFile }));
+    vi.doMock("@/lib/billing/entitlements", () => ({
+      requireConcurrentJobCapacity: vi.fn(),
+      requireByokProviderAccess: vi.fn(),
+      requireManagedProviderAccess: vi.fn(),
+    }));
+    vi.doMock("@/lib/billing/usage", () => ({
+      reserveUsage: vi.fn(),
+      completeUsageReservation: vi.fn(),
+      failUsageReservation: vi.fn(),
+    }));
+    vi.doMock("@/lib/db", async () => {
+      const actual = await vi.importActual<any>("@/lib/db");
+      return {
+        ...actual,
+        db: {
+          query: {
+            pieces: { findFirst: vi.fn() },
+            references: { findFirst: vi.fn() },
+            styleProfiles: { findFirst: vi.fn() },
+            mediaJobs: { findFirst: vi.fn() },
+          },
+        },
+      };
+    });
+    vi.doMock("@/db/style-schema", () => ({ styleProfiles: { campaignId: "style_profiles.campaign_id" } }));
+    vi.doMock("@/lib/storage", () => ({
+      uploadPublicAudio: vi.fn(),
+      uploadPublicFile: vi.fn(),
+      persistRemoteImage: vi.fn(),
+      persistRemoteVideo: vi.fn(),
+    }));
+    vi.doMock("@/lib/ai/imagePrompt", () => ({ craftImagePrompt: vi.fn() }));
+    vi.doMock("@/lib/llm", () => ({ getAIForTaskForUser: vi.fn() }));
+    vi.doMock("@/lib/refContext", () => ({ buildRefContext: vi.fn(() => "") }));
+    vi.doMock("@/lib/mediaImage", () => ({ generateOpenAICompatibleImage: vi.fn() }));
+    vi.doMock("@/lib/mediaAudio", () => ({
+      generateOpenAICompatibleSpeech: vi.fn(),
+      synthesizeOpenAICompatibleSpeech: vi.fn(),
+    }));
+    vi.doMock("@/lib/hedra", () => ({
+      listModels: vi.fn(),
+      generateAsset: vi.fn(),
+      createAsset: vi.fn(),
+      uploadAsset: vi.fn(),
+    }));
+    vi.doMock("@/lib/elevenlabs", () => ({ textToSpeechLong: vi.fn() }));
+
+    const { POST } = await import("../app/api/hedra/generate/route");
+    const res = await POST(new Request("http://test.local/api/hedra/generate", {
+      method: "POST",
+      body: JSON.stringify({
+        type: "audio",
+        provider: "local-system",
+        modelId: "macos-system-voice",
+        prompt: "Read this local audio sample.",
+        script: "Read this local audio sample.",
+        voiceId: "system-default",
+      }),
+    }));
+    const body = await res.json();
+
+    expect(res.status).toBe(201);
+    expect(synthesizeLocalSystemSpeech).toHaveBeenCalledWith({
+      text: "Read this local audio sample.",
+      voice: "system-default",
+    });
+    expect(writeLocalPublicFile).toHaveBeenCalledWith(
+      Buffer.from("aiff-bytes"),
+      expect.stringMatching(/^voiceover-\d+\.aiff$/),
+      "audio/aiff",
+      "voice",
+    );
+    expect(createLocalMediaJob).toHaveBeenCalledWith(expect.objectContaining({
+      userId: "local-owner",
+      type: "audio",
+      modelId: "macos-system-voice",
+      modelName: "macOS System Voice",
+      outputUrl: "/api/local-files/voice/audio.aiff?contentType=audio%2Faiff",
+      downloadUrl: "/api/local-files/voice/audio.aiff?contentType=audio%2Faiff",
+      meta: expect.objectContaining({
+        provider: "local-system",
+        providerSource: "local",
+        contentType: "audio/aiff",
+        extension: "aiff",
+      }),
+    }));
+    expect(body.job.meta.provider).toBe("local-system");
+    expect(JSON.stringify(body)).not.toContain("sk-");
+  });
+});

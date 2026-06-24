@@ -73,26 +73,40 @@ function AudioActions({ text, label = "text", filename = "audio.mp3", pieceId = 
         };
         voiceName = "OpenAI";
       } else {
-        const voiceRes = await fetch("/api/eleven/voices", { headers: { Accept: "application/json" } });
-        const voiceJson = await voiceRes.json().catch(() => null);
-        if (!voiceRes.ok) throw new Error((voiceJson && voiceJson.error) || "Connect OpenAI media or ElevenLabs to save audio.");
-        const voices = voiceJson && (voiceJson.voices || voiceJson);
-        const voice = Array.isArray(voices) && voices[0];
-        const voiceId = voice && (voice.id || voice.voice_id || voice.voiceId);
-        if (!voiceId) throw new Error("No saved audio voices were found.");
         const eleven = providers.find((p) => p && p.id === "elevenlabs" && p.configured);
-        requestBody = {
-          type: "audio",
-          provider: "elevenlabs",
-          mediaProfileId: eleven && Array.isArray(eleven.profileIds) ? eleven.profileIds[0] : undefined,
-          modelId: "eleven_multilingual_v2",
-          script: body,
-          prompt: body.slice(0, 2000),
-          voiceId,
-          pieceId,
-          campaignId: campaignId || (activeCampaign && activeCampaign.id) || undefined,
-        };
-        voiceName = voice.name || "ElevenLabs";
+        if (eleven) {
+          const voiceRes = await fetch("/api/eleven/voices", { headers: { Accept: "application/json" } });
+          const voiceJson = await voiceRes.json().catch(() => null);
+          if (!voiceRes.ok) throw new Error((voiceJson && voiceJson.error) || "Connect OpenAI media or ElevenLabs to save audio.");
+          const voices = voiceJson && (voiceJson.voices || voiceJson);
+          const voice = Array.isArray(voices) && voices[0];
+          const voiceId = voice && (voice.id || voice.voice_id || voice.voiceId);
+          if (!voiceId) throw new Error("No saved audio voices were found.");
+          requestBody = {
+            type: "audio",
+            provider: "elevenlabs",
+            mediaProfileId: eleven && Array.isArray(eleven.profileIds) ? eleven.profileIds[0] : undefined,
+            modelId: "eleven_multilingual_v2",
+            script: body,
+            prompt: body.slice(0, 2000),
+            voiceId,
+            pieceId,
+            campaignId: campaignId || (activeCampaign && activeCampaign.id) || undefined,
+          };
+          voiceName = voice.name || "ElevenLabs";
+        } else {
+          requestBody = {
+            type: "audio",
+            provider: "local-system",
+            modelId: "macos-system-voice",
+            script: body,
+            prompt: body.slice(0, 2000),
+            voiceId: "system-default",
+            pieceId,
+            campaignId: campaignId || (activeCampaign && activeCampaign.id) || undefined,
+          };
+          voiceName = "Mac";
+        }
       }
       const res = await fetch("/api/hedra/generate", {
         method: "POST",
@@ -107,7 +121,7 @@ function AudioActions({ text, label = "text", filename = "audio.mp3", pieceId = 
       if (outputUrl) {
         const a = document.createElement("a");
         a.href = outputUrl;
-        a.download = filename;
+        a.download = job && job.meta && job.meta.extension === "aiff" ? filename.replace(/\.[^.]+$/, ".aiff") : filename;
         a.rel = "noopener";
         document.body.appendChild(a);
         a.click();

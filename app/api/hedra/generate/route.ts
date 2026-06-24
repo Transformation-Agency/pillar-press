@@ -31,6 +31,8 @@ import {
 } from "@/lib/mediaProviders";
 import { generateOpenAICompatibleImage } from "@/lib/mediaImage";
 import { generateOpenAICompatibleSpeech, synthesizeOpenAICompatibleSpeech } from "@/lib/mediaAudio";
+import { synthesizeLocalSystemSpeech } from "@/lib/local/systemAudio";
+import { writeLocalPublicFile } from "@/lib/local/storage";
 import { campaignInWorkspace, tenantNotFound } from "@/lib/tenant";
 import { completeUsageReservation, failUsageReservation, reserveUsage, type UsageReservation } from "@/lib/billing/usage";
 import { requireByokProviderAccess, requireConcurrentJobCapacity, requireManagedProviderAccess } from "@/lib/billing/entitlements";
@@ -124,6 +126,41 @@ export async function POST(req: Request) {
 
       const audioProvider = await getAudioProviderForUser(body.provider, user, process.env, body.mediaProfileId);
       const elevenProvider = audioProvider ? null : await getElevenLabsProviderForUser(user, process.env, body.mediaProfileId);
+      if (isLocalFirstMode() && !audioProvider && !elevenProvider) {
+        const result = await synthesizeLocalSystemSpeech({
+          text: script,
+          voice: body.voiceId,
+        });
+        const audioUrl = writeLocalPublicFile(
+          result.bytes,
+          `voiceover-${Date.now()}.${result.extension}`,
+          result.contentType,
+          "voice",
+        );
+        const job = createLocalMediaJob({
+          userId: user.id,
+          workspaceId: user.workspaceId ?? null,
+          campaignId: body.campaignId,
+          sourceContentId: body.pieceId,
+          type: "audio",
+          prompt: script.slice(0, 2000),
+          modelId: "macos-system-voice",
+          modelName: "macOS System Voice",
+          voiceId: result.voice,
+          status: "completed",
+          progress: 100,
+          outputUrl: audioUrl,
+          downloadUrl: audioUrl,
+          completedAt: new Date().toISOString(),
+          meta: {
+            provider: "local-system",
+            providerSource: "local",
+            contentType: result.contentType,
+            extension: result.extension,
+          },
+        });
+        return NextResponse.json({ job }, { status: 201 });
+      }
       const usageSource = audioProvider?.providerSource ?? elevenProvider?.providerSource ?? "managed";
       const usageProfileId = audioProvider?.profileId ?? elevenProvider?.profileId;
       reservation = await reserveUsage({

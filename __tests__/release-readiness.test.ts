@@ -22,7 +22,7 @@ describe("desktop release readiness gate", () => {
     expect(output).toContain("totalStories");
     expect(output).toContain("PROV-004");
     expect(output).toContain("MEDIA-002");
-    expect(output).toContain("AUDIO-001");
+    expect(output).not.toContain("- AUDIO-001");
     expect(output).not.toContain("AUTH-001 (");
   });
 

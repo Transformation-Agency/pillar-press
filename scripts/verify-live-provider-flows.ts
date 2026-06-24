@@ -299,7 +299,7 @@ async function main() {
           assertNoSecrets(job, "OpenAI image job");
           return { status: job.status, hasOutputUrl: true, meta: job.meta };
         });
-        await runCheck(checks, "AUDIO-001 OpenAI saved TTS generation", async () => {
+        await runCheck(checks, "MEDIA-002 OpenAI saved TTS generation", async () => {
           const body = await requestJson(baseUrl, "/api/hedra/generate", {
             method: "POST",
             body: JSON.stringify({
@@ -318,7 +318,7 @@ async function main() {
         });
       } else {
         skip(checks, "MEDIA-002 OpenAI image generation", "set KINGS_PRESS_LIVE_PROVIDER_VERIFY_SPEND_CREDITS=yes to spend provider credits");
-        skip(checks, "AUDIO-001 OpenAI saved TTS generation", "set KINGS_PRESS_LIVE_PROVIDER_VERIFY_SPEND_CREDITS=yes to spend provider credits");
+        skip(checks, "MEDIA-002 OpenAI saved TTS generation", "set KINGS_PRESS_LIVE_PROVIDER_VERIFY_SPEND_CREDITS=yes to spend provider credits");
       }
     } else {
       skip(checks, "PROV-004 OpenAI live checks", "KINGS_PRESS_LIVE_OPENAI_API_KEY not set");
@@ -326,7 +326,7 @@ async function main() {
 
     if (elevenKey) {
       let voiceId = process.env.KINGS_PRESS_LIVE_ELEVENLABS_VOICE_ID?.trim();
-      await runCheck(checks, "AUDIO-001 ElevenLabs voice listing", async () => {
+      await runCheck(checks, "MEDIA-002 ElevenLabs voice listing", async () => {
         const body = await requestJson(baseUrl, "/api/eleven/voices");
         const voices = (body as { voices?: Array<{ id?: string; name?: string }> }).voices || [];
         voiceId ||= voices[0]?.id;
@@ -334,7 +334,7 @@ async function main() {
         return { voiceCount: voices.length, chosenVoiceId: voiceId };
       });
       if (spendCredits && voiceId) {
-        await runCheck(checks, "AUDIO-001 ElevenLabs saved TTS generation", async () => {
+        await runCheck(checks, "MEDIA-002 ElevenLabs saved TTS generation", async () => {
           const body = await requestJson(baseUrl, "/api/hedra/generate", {
             method: "POST",
             body: JSON.stringify({
@@ -352,10 +352,10 @@ async function main() {
           return { status: job.status, hasOutputUrl: true, meta: job.meta };
         });
       } else if (voiceId) {
-        skip(checks, "AUDIO-001 ElevenLabs saved TTS generation", "set KINGS_PRESS_LIVE_PROVIDER_VERIFY_SPEND_CREDITS=yes to spend provider credits");
+        skip(checks, "MEDIA-002 ElevenLabs saved TTS generation", "set KINGS_PRESS_LIVE_PROVIDER_VERIFY_SPEND_CREDITS=yes to spend provider credits");
       }
     } else {
-      skip(checks, "AUDIO-001 ElevenLabs live checks", "KINGS_PRESS_LIVE_ELEVENLABS_API_KEY not set");
+      skip(checks, "MEDIA-002 ElevenLabs live checks", "KINGS_PRESS_LIVE_ELEVENLABS_API_KEY not set");
     }
 
     if (hedraKey) {

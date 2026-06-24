@@ -5,7 +5,12 @@ This runbook covers the remaining release-blocker rows in
 
 - `PROV-004` OpenAI key can seed voice defaults
 - `MEDIA-002` Studio image/video/avatar/audio generation
-- `AUDIO-001` Text-to-speech actions
+
+`AUDIO-001` local-first text-to-speech actions are covered separately by the
+macOS system TTS fallback: when no OpenAI or ElevenLabs voice provider is
+configured, desktop Save audio uses `/usr/bin/say`, stores an AIFF under local
+app-data media storage, and returns a completed local media job. Provider-backed
+OpenAI/ElevenLabs audio generation still remains part of `MEDIA-002`.
 
 The verifier starts the packaged King’s Press desktop server in an isolated temp
 app-data directory. It does not read or modify the user’s installed desktop
@@ -90,7 +95,8 @@ Multiple providers can be checked in one run by setting multiple env vars.
 
 ## Credit-Spending Verification
 
-This is the release-gate proof for provider-backed media/TTS:
+This is the release-gate proof for provider-backed media/TTS that still remains
+under `MEDIA-002`:
 
 ```sh
 KINGS_PRESS_LIVE_PROVIDER_VERIFY_SPEND_CREDITS=yes \
@@ -126,8 +132,8 @@ After a successful run:
    - `PROV-004` when OpenAI model listing and `/api/llm/test` pass.
    - `MEDIA-002` when image/video/avatar/audio requirements are verified or
      explicitly waived.
-   - `AUDIO-001` when saved provider-backed TTS generation passes or is
-     explicitly waived.
+   - Provider-backed audio under `MEDIA-002` when saved OpenAI/ElevenLabs TTS
+     generation passes or is explicitly waived.
 3. Run:
 
 ```sh
