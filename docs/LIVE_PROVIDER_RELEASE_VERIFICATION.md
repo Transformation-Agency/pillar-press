@@ -100,6 +100,21 @@ KINGS_PRESS_LIVE_XAI_API_KEY="..." \
 npm run desktop:verify-live-providers
 ```
 
+If the provider key is already saved in the desktop app, the verifier can copy
+that encrypted settings file into its isolated temp app-data directory and use
+the desktop settings key from Keychain:
+
+```sh
+KINGS_PRESS_LIVE_DESKTOP_SETTINGS_PATH="$HOME/Library/Application Support/com.kingspress.editorialdesk/desktop-settings.json" \
+npm run desktop:verify-live-providers
+```
+
+This path does not print or write raw keys. It is useful for provider catalog and
+media-generation checks that can read encrypted desktop media provider settings.
+Provider model-listing checks such as xAI/Grok `/models` still require the live
+API key as a one-command environment variable because the model-listing route
+tests a submitted provider connection directly.
+
 Optional Grok model overrides:
 
 ```sh
@@ -116,6 +131,7 @@ under `MEDIA-002`:
 
 ```sh
 KINGS_PRESS_LIVE_PROVIDER_VERIFY_SPEND_CREDITS=yes \
+KINGS_PRESS_LIVE_DESKTOP_SETTINGS_PATH="$HOME/Library/Application Support/com.kingspress.editorialdesk/desktop-settings.json" \
 KINGS_PRESS_LIVE_OPENAI_API_KEY="..." \
 KINGS_PRESS_LIVE_XAI_API_KEY="..." \
 KINGS_PRESS_LIVE_ELEVENLABS_API_KEY="..." \

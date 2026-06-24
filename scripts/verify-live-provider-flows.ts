@@ -1,7 +1,7 @@
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createServer } from "node:net";
 
 type Check = {
@@ -27,6 +27,7 @@ const xaiImageModel = process.env.KINGS_PRESS_LIVE_XAI_IMAGE_MODEL?.trim() || "g
 const openaiAudioModel = process.env.KINGS_PRESS_LIVE_OPENAI_AUDIO_MODEL?.trim() || "gpt-4o-mini-tts";
 const ollamaBaseUrl = (process.env.KINGS_PRESS_LIVE_OLLAMA_BASE_URL || "http://127.0.0.1:11434").replace(/\/+$/, "");
 const ollamaModel = process.env.KINGS_PRESS_LIVE_OLLAMA_MODEL?.trim() || "gemma4:26b-mlx";
+const savedDesktopSettingsPath = process.env.KINGS_PRESS_LIVE_DESKTOP_SETTINGS_PATH?.trim();
 const llmTasks = ["gather", "weave", "draft", "review", "revision", "outputs", "utility", "mediaPrompt", "file"] as const;
 const secretValues = [openaiKey, xaiKey, elevenKey, hedraKey].filter((value): value is string => Boolean(value && value.length >= 6));
 const nodePath = join(root, "src-tauri", "resources", "node", "bin", "node");
@@ -132,6 +133,55 @@ function providerConfigured(payload: unknown, provider: string): boolean {
   return Boolean(body[provider]?.configured);
 }
 
+function desktopSettingsKeyFromKeychain(): string | undefined {
+  if (process.platform !== "darwin") return undefined;
+  try {
+    const keychain = execFileSync("security", ["default-keychain", "-d", "user"], { encoding: "utf8" })
+      .trim()
+      .replace(/^"|"$/g, "");
+    const secret = execFileSync("security", [
+      "find-generic-password",
+      "-w",
+      "-s",
+      "Kings Press Desktop Settings",
+      "-a",
+      "llm-settings",
+      keychain,
+    ], { encoding: "utf8" }).trim();
+    return Buffer.from(secret, "base64").length === 32 ? secret : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function mergeSavedProviderSettings(base: Record<string, unknown>, saved: Record<string, unknown>) {
+  const profiles = Array.isArray(saved.profiles) ? saved.profiles.filter((profile) => profile && typeof profile === "object") : [];
+  const savedMediaProviders = saved.mediaProviders && typeof saved.mediaProviders === "object"
+    ? saved.mediaProviders as Record<string, unknown>
+    : {};
+  const mediaProviders = {
+    ...(base.mediaProviders && typeof base.mediaProviders === "object" ? base.mediaProviders as Record<string, unknown> : {}),
+    ...savedMediaProviders,
+  };
+
+  for (const profile of profiles) {
+    const raw = profile as Record<string, unknown>;
+    const provider = typeof raw.provider === "string" ? raw.provider.trim().toLowerCase() : "";
+    const apiKey = typeof raw.apiKey === "string" ? raw.apiKey.trim() : "";
+    if (!apiKey || !["openai", "xai"].includes(provider)) continue;
+    const existing = mediaProviders[provider] && typeof mediaProviders[provider] === "object"
+      ? mediaProviders[provider] as Record<string, unknown>
+      : {};
+    mediaProviders[provider] = {
+      ...existing,
+      apiKey: existing.apiKey || apiKey,
+      baseUrl: existing.baseUrl || raw.baseUrl || (provider === "xai" ? xaiBaseUrl : openaiBaseUrl),
+    };
+  }
+
+  base.mediaProviders = mediaProviders;
+}
+
 async function main() {
   if (!(await exists(nodePath)) || !(await exists(serverPath))) {
     throw new Error("Missing packaged desktop server resources. Run `npm run desktop:web:build` or `npm run desktop:build` first.");
@@ -140,7 +190,7 @@ async function main() {
   const dataDir = await mkdtemp(join(tmpdir(), "kings-press-live-provider-"));
   const settingsPath = join(dataDir, "desktop-settings.json");
   const taskDefaults = Object.fromEntries(llmTasks.map((task) => [task, "ollama-local"]));
-  await writeFile(settingsPath, JSON.stringify({
+  const verifierSettings: Record<string, unknown> = {
     provider: "ollama",
     model: ollamaModel,
     baseUrl: ollamaBaseUrl,
@@ -153,7 +203,16 @@ async function main() {
     }],
     defaultProfileId: "ollama-local",
     taskDefaults,
-  }, null, 2));
+  };
+  if (savedDesktopSettingsPath) {
+    const savedSettingsCopy = join(dataDir, "saved-desktop-settings.json");
+    await copyFile(savedDesktopSettingsPath, savedSettingsCopy);
+    const saved = JSON.parse(await readFile(savedSettingsCopy, "utf8")) as Record<string, unknown>;
+    mergeSavedProviderSettings(verifierSettings, saved);
+  }
+  await writeFile(settingsPath, JSON.stringify(verifierSettings, null, 2));
+  const desktopSettingsKey = process.env.KINGS_PRESS_DESKTOP_SETTINGS_KEY?.trim()
+    || (savedDesktopSettingsPath ? desktopSettingsKeyFromKeychain() : undefined);
   const port = await freePort();
   const baseUrl = `http://127.0.0.1:${port}`;
   const child = spawn(nodePath, [serverPath], {
@@ -172,6 +231,7 @@ async function main() {
       KINGS_PRESS_STORAGE: "local",
       KINGS_PRESS_DATA_DIR: dataDir,
       KINGS_PRESS_LLM_SETTINGS_PATH: settingsPath,
+      KINGS_PRESS_DESKTOP_SETTINGS_KEY: desktopSettingsKey || "",
       OPENAI_API_KEY: openaiKey || "",
       MEDIA_OPENAI_API_KEY: openaiKey || "",
       MEDIA_OPENAI_BASE_URL: openaiBaseUrl,
@@ -334,6 +394,7 @@ async function main() {
       skip(checks, "PROV-004 OpenAI live checks", "KINGS_PRESS_LIVE_OPENAI_API_KEY not set");
     }
 
+    const xaiMediaConfigured = providerConfigured(providers, "xai");
     if (xaiKey) {
       await runCheck(checks, "PROV-006 xAI/Grok model listing", async () => {
         const modelsPayload = await requestJson(baseUrl, "/api/llm/models", {
@@ -358,9 +419,13 @@ async function main() {
         if ((body as { sample?: string }).sample?.trim() !== "OK") throw new Error(`Unexpected xAI sample: ${JSON.stringify(body)}`);
         return { model: xaiChatModel };
       });
+    } else {
+      skip(checks, "PROV-006 xAI/Grok live checks", "KINGS_PRESS_LIVE_XAI_API_KEY or KINGS_PRESS_LIVE_GROK_API_KEY not set");
+    }
+    if (xaiMediaConfigured || xaiKey) {
       await runCheck(checks, "MEDIA-002 xAI image provider configured", async () => {
         if (!providerConfigured(providers, "xai")) throw new Error("xAI media provider was not configured in packaged local server.");
-        return { imageModel: xaiImageModel };
+        return { imageModel: xaiImageModel, source: xaiKey ? "env" : "desktop-settings" };
       });
       if (spendCredits) {
         await runCheck(checks, "MEDIA-002 xAI image generation", async () => {
@@ -385,8 +450,6 @@ async function main() {
       } else {
         skip(checks, "MEDIA-002 xAI image generation", "set KINGS_PRESS_LIVE_PROVIDER_VERIFY_SPEND_CREDITS=yes to spend provider credits");
       }
-    } else {
-      skip(checks, "PROV-006 xAI/Grok live checks", "KINGS_PRESS_LIVE_XAI_API_KEY or KINGS_PRESS_LIVE_GROK_API_KEY not set");
     }
 
     if (elevenKey) {
