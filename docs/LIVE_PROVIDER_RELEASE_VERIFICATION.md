@@ -46,6 +46,23 @@ npm run desktop:build
 
 ## No-Credit Provider Readiness
 
+Before running live checks, inspect which inputs are available without printing
+any secrets:
+
+```sh
+npm run desktop:provider-inputs
+```
+
+If the keys are saved in a non-default desktop settings file, pass the path:
+
+```sh
+KINGS_PRESS_LIVE_DESKTOP_SETTINGS_PATH="$HOME/Library/Application Support/com.kingspress.editorialdesk/desktop-settings.json" \
+npm run desktop:provider-inputs
+```
+
+The preflight reports booleans, provider names, and whether saved settings are
+`ready`, `saved-only`, or `missing`; it does not print raw or encrypted keys.
+
 Local Ollama/Gemma readiness runs by default and does not require cloud keys:
 
 ```sh
