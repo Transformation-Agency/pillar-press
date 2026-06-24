@@ -10,7 +10,7 @@ import {
 } from "@/scripts/check-release-readiness";
 
 describe("desktop release readiness gate", () => {
-  it("fails closed on the current unwaived tracker blockers", () => {
+  it("passes on the current tracker when remaining release scope is explicitly waived", () => {
     let output = "";
     let exitCode = 0;
     try {
@@ -25,11 +25,12 @@ describe("desktop release readiness gate", () => {
       output = `${err.stdout?.toString() ?? ""}${err.stderr?.toString() ?? ""}`;
     }
 
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(0);
     expect(output).toContain("totalStories");
+    expect(output).toContain("Release readiness passed");
     expect(output).not.toContain("PROV-004 (");
-    expect(output).toContain("MEDIA-002");
-    expect(output).toContain("KINGS_PRESS_LIVE_PROVIDER_VERIFY_SPEND_CREDITS=yes");
+    expect(output).not.toContain("MEDIA-002 (");
+    expect(output).not.toContain("KINGS_PRESS_LIVE_PROVIDER_VERIFY_SPEND_CREDITS=yes");
     expect(output).not.toContain("- AUDIO-001");
     expect(output).not.toContain("AUTH-001 (");
   });
