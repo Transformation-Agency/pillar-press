@@ -1,9 +1,11 @@
+import { readFileSync } from "node:fs";
 import { lstat, mkdtemp, readdir, readFile, readlink, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 
 const root = process.cwd();
+const appVersion = JSON.parse(readFileSync(join(root, "src-tauri", "tauri.conf.json"), "utf8")).version;
 
 function optionalArg(name: string) {
   const index = process.argv.indexOf(name);
@@ -21,7 +23,7 @@ const targetRoot = verifyTarget
   : join(root, "src-tauri", "target", "release");
 const artifactArch = verifyTarget === "x86_64-apple-darwin" ? "x64" : "aarch64";
 const appPath = join(targetRoot, "bundle", "macos", "King's Press Editorial Desk.app");
-const dmgPath = join(targetRoot, "bundle", "dmg", `King's Press Editorial Desk_0.1.0_${artifactArch}.dmg`);
+const dmgPath = join(targetRoot, "bundle", "dmg", `King's Press Editorial Desk_${appVersion}_${artifactArch}.dmg`);
 const appResources = join(appPath, "Contents", "Resources");
 const requireDeveloperId =
   process.argv.includes("--require-developer-id") || process.env.KINGS_PRESS_REQUIRE_DEVELOPER_ID === "true";
@@ -133,7 +135,7 @@ async function verifyAppBundleMetadata(bundlePath: string) {
     assertPlistValue(plist, "CFBundleDisplayName", "King's Press Editorial Desk"),
     assertPlistValue(plist, "CFBundleName", "King's Press Editorial Desk"),
     assertPlistValue(plist, "CFBundleIdentifier", "com.kingspress.editorialdesk"),
-    assertPlistValue(plist, "CFBundleShortVersionString", "0.1.0"),
+    assertPlistValue(plist, "CFBundleShortVersionString", appVersion),
     assertPlistValue(plist, "CFBundleIconFile", "icon.icns"),
     assertPlistBool(plist, "NSQuitAlwaysKeepsWindows", false),
   ]);

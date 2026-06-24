@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,7 +7,8 @@ import puppeteer from "puppeteer";
 import { driveOnboardingUiProof } from "./onboarding-ui-proof";
 
 const root = process.cwd();
-const dmgPath = join(root, "src-tauri", "target", "release", "bundle", "dmg", "King's Press Editorial Desk_0.1.0_aarch64.dmg");
+const appVersion = JSON.parse(readFileSync(join(root, "src-tauri", "tauri.conf.json"), "utf8")).version;
+const dmgPath = join(root, "src-tauri", "target", "release", "bundle", "dmg", `King's Press Editorial Desk_${appVersion}_aarch64.dmg`);
 const appName = "King's Press Editorial Desk.app";
 const executableName = "kings-press-editorial-desk";
 

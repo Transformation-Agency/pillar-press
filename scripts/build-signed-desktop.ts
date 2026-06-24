@@ -1,9 +1,11 @@
+import { readFileSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 
 const root = process.cwd();
+const appVersion = JSON.parse(readFileSync(join(root, "src-tauri", "tauri.conf.json"), "utf8")).version;
 
 function optionalArg(name: string) {
   const index = process.argv.indexOf(name);
@@ -21,7 +23,7 @@ const targetRoot = buildTarget
   : join(root, "src-tauri", "target", "release");
 const artifactArch = buildTarget === "x86_64-apple-darwin" ? "x64" : "aarch64";
 const appPath = join(targetRoot, "bundle", "macos", "King's Press Editorial Desk.app");
-const dmgPath = join(targetRoot, "bundle", "dmg", `King's Press Editorial Desk_0.1.0_${artifactArch}.dmg`);
+const dmgPath = join(targetRoot, "bundle", "dmg", `King's Press Editorial Desk_${appVersion}_${artifactArch}.dmg`);
 
 function hasApiKeyNotaryCredentials() {
   return Boolean(required("APPLE_API_KEY") && required("APPLE_API_ISSUER") && required("APPLE_API_KEY_PATH"));
