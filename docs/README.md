@@ -11,11 +11,13 @@ storage, and uses local models by default.
    Supabase replacement, Gather scheduling, and release QA.
 2. `LOCAL_DEV.md` - browser dev, desktop dev, desktop build, and LLM
    configuration examples.
-3. `CONVERSATIONAL_BOOTSTRAP_RUNTIME.md` - reusable first-run conversation
+3. `PRODUCTION_READINESS.md` - release gates, dependency audits, Tauri webview
+   boundaries, update posture, and dual-architecture release notes.
+4. `CONVERSATIONAL_BOOTSTRAP_RUNTIME.md` - reusable first-run conversation
    runtime, manifest model, activation gates, and next implementation slices.
-4. `BUILD_BRIEF.md` - feature scope and acceptance criteria.
-5. `API_SPEC.md` - route contracts.
-6. `DATA_MODEL.md` - entity relationships and hosted compatibility notes.
+5. `BUILD_BRIEF.md` - feature scope and acceptance criteria.
+6. `API_SPEC.md` - route contracts.
+7. `DATA_MODEL.md` - entity relationships and hosted compatibility notes.
 
 ## Runtime Shape
 
@@ -78,3 +80,6 @@ npm run desktop:verify-signed-release
 
 `desktop:build:signed` runs the canonical tracker release-readiness gate before
 signing or notarizing, and will stop if unwaived desktop release blockers remain.
+
+See `PRODUCTION_READINESS.md` for the full local QA checklist, CI gate list,
+dependency audit expectations, and current manual-update posture.

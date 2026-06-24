@@ -160,6 +160,10 @@ Supabase is replaced in local-first desktop mode by embedded local services:
 For local QA builds, run:
 
 ```bash
+npm audit --audit-level=moderate
+npm run typecheck
+npm test
+cargo test --manifest-path src-tauri/Cargo.toml
 npm run desktop:build
 npm run desktop:verify-release
 npm run desktop:verify-installed
@@ -211,3 +215,7 @@ signed with the V8/JIT entitlements in
 staples the DMG. The signed verifier additionally requires a non-ad-hoc
 Developer ID signature, a stapled app notarization ticket, and a passing
 Gatekeeper install assessment for the DMG.
+
+See `docs/PRODUCTION_READINESS.md` for the CI gate list, dependency audit
+posture, Tauri webview boundary, current manual-update posture, and
+dual-architecture release notes.

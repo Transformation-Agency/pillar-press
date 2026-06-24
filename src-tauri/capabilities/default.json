@@ -4,7 +4,7 @@
   "description": "Allows the main King’s Press desktop webview to use local-first setup commands.",
   "windows": ["main"],
   "remote": {
-    "urls": ["http://127.0.0.1:*", "http://localhost:*"]
+    "urls": ["http://127.0.0.1:*"]
   },
   "permissions": ["core:default", "desktop-setup"]
 }
