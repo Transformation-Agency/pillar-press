@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
-import { checkReleaseReadiness, isNonBlockingRow, WAIVED_STATUS, type TrackerRow } from "@/scripts/check-release-readiness";
+import { checkReleaseReadiness, hasExplicitWaiverNote, isNonBlockingRow, WAIVED_STATUS, type TrackerRow } from "@/scripts/check-release-readiness";
 
 describe("desktop release readiness gate", () => {
   it("fails closed on the current unwaived tracker blockers", () => {
@@ -35,8 +35,19 @@ describe("desktop release readiness gate", () => {
 
     expect(isNonBlockingRow({
       testStatus: WAIVED_STATUS,
-      testEvidence: "WAIVER: Paul approved shipping without live provider-credit generation on 2026-06-23.",
+      testEvidence: "WAIVER: Paul approved release on 2026-06-23 for the exact scope of shipping without live provider-credit generation.",
       errorsFound: "Provider-key QA skipped.",
+    })).toBe(true);
+  });
+
+  it("rejects vague waiver notes without owner date and release scope", () => {
+    expect(hasExplicitWaiverNote({
+      testEvidence: "WAIVER: explicit owner waiver.",
+      errorsFound: "",
+    })).toBe(false);
+    expect(hasExplicitWaiverNote({
+      testEvidence: "WAIVER: Paul approved release on 2026-06-23 for the exact scope of MEDIA-002 live Hedra video generation.",
+      errorsFound: "",
     })).toBe(true);
   });
 
@@ -53,7 +64,7 @@ describe("desktop release readiness gate", () => {
     const result = checkReleaseReadiness([
       { ...base, testStatus: "Retest passed", testEvidence: "" },
       { ...base, row: 3, storyId: "AUDIO-001", testStatus: WAIVED_STATUS, testEvidence: "" },
-      { ...base, row: 4, storyId: "PROV-004", testStatus: WAIVED_STATUS, testEvidence: "WAIVER: explicit owner waiver." },
+      { ...base, row: 4, storyId: "PROV-004", testStatus: WAIVED_STATUS, testEvidence: "WAIVER: Paul approved release on 2026-06-23 for the exact scope of OpenAI live model verification." },
     ] satisfies TrackerRow[]);
 
     expect(result.blocking.map((row) => row.storyId)).toEqual(["AUDIO-001"]);

@@ -75,10 +75,21 @@ export type TrackerRow = {
   errorsFound: string;
 };
 
+export function hasExplicitWaiverNote(row: Pick<TrackerRow, "testEvidence" | "errorsFound">): boolean {
+  const text = `${row.testEvidence}\n${row.errorsFound}`;
+  const notes = Array.from(text.matchAll(/\bWAIVER:\s*([^\n]+)/gi)).map((match) => match[1].trim());
+  return notes.some((note) => {
+    const hasDate = /\b20\d{2}-\d{2}-\d{2}\b/.test(note);
+    const hasOwner = /\b(owner|approved by|paul)\b/i.test(note);
+    const hasScope = /\b(scope|ship|shipping|release|provider|media|openai|hedra|elevenlabs|live)\b/i.test(note);
+    return note.length >= 40 && hasDate && hasOwner && hasScope;
+  });
+}
+
 export function isNonBlockingRow(row: Pick<TrackerRow, "testStatus" | "testEvidence" | "errorsFound">): boolean {
   if (nonBlockingStatuses.has(row.testStatus)) return true;
   if (row.testStatus !== WAIVED_STATUS) return false;
-  return /\bWAIVER:\s+\S/i.test(`${row.testEvidence}\n${row.errorsFound}`);
+  return hasExplicitWaiverNote(row);
 }
 
 export function trackerRows(): TrackerRow[] {
@@ -124,6 +135,9 @@ function main() {
     for (const row of result.blocking) {
       console.error(`- ${row.storyId} (${row.priority}) ${row.featureArea} / ${row.feature}: ${row.testStatus}`);
       if (row.errorsFound) console.error(`  ${row.errorsFound}`);
+      if (row.testStatus === WAIVED_STATUS && !hasExplicitWaiverNote(row)) {
+        console.error("  Waived rows must include a WAIVER: note with owner, YYYY-MM-DD date, and exact release scope.");
+      }
     }
     console.error("\nDo not build/notarize/upload final release DMGs until these rows pass or are explicitly waived in the tracker.");
     process.exit(1);
