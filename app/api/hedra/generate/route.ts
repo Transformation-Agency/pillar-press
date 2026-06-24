@@ -328,6 +328,21 @@ export async function POST(req: Request) {
     const voiceoverProvider = needsVoiceover && !voiceoverAudioProvider
       ? await getElevenLabsProviderForUser(user, process.env, body.audioMediaProfileId)
       : null;
+    if (!hedraProvider) {
+      const hint = body.type === "image"
+        ? "Connect Hedra in Studio Providers, or choose a configured OpenAI, xAI, or custom image provider."
+        : "Connect Hedra in Studio Providers before generating video or avatar media.";
+      return NextResponse.json({
+        error: hint,
+        code: "media_provider_required",
+      }, { status: 409 });
+    }
+    if (needsVoiceover && !voiceoverAudioProvider && !voiceoverProvider) {
+      return NextResponse.json({
+        error: "Connect OpenAI media or ElevenLabs in Studio Providers before generating synced voiceover video.",
+        code: "media_provider_required",
+      }, { status: 409 });
+    }
     const providerSource = combinedSource(hedraProvider, voiceoverAudioProvider ?? voiceoverProvider);
     await requireMediaProviderAccessForSource(user, providerSource);
     const models = await listModels([wanted], { apiKey: hedraProvider?.apiKey });

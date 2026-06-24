@@ -103,6 +103,192 @@ describe("hosted media BYOK resolver", () => {
 });
 
 describe("POST /api/hedra/generate hosted media BYOK", () => {
+  it("returns a setup action instead of calling Hedra when no video provider is configured", async () => {
+    const listModels = vi.fn();
+    const requireManagedProviderAccess = vi.fn();
+
+    vi.doMock("@/lib/auth", () => ({
+      requireUser: vi.fn(async () => ({ id: "user_1", workspaceId: "workspace_1", role: "author" })),
+    }));
+    vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => true }));
+    vi.doMock("@/lib/tenant", () => ({
+      campaignInWorkspace: vi.fn(async () => true),
+      tenantNotFound: vi.fn(() => new Response(JSON.stringify({ code: "not_found" }), { status: 404 })),
+    }));
+    vi.doMock("@/lib/db", async () => {
+      const actual = await vi.importActual<any>("@/lib/db");
+      return {
+        ...actual,
+        db: {
+          query: {
+            pieces: { findFirst: vi.fn() },
+            references: { findFirst: vi.fn() },
+            styleProfiles: { findFirst: vi.fn() },
+            mediaJobs: { findFirst: vi.fn() },
+          },
+        },
+      };
+    });
+    vi.doMock("@/db/style-schema", () => ({ styleProfiles: { campaignId: "style_profiles.campaign_id" } }));
+    vi.doMock("@/lib/local/database", () => ({
+      createLocalMediaJob: vi.fn(),
+      getLocalMediaJob: vi.fn(),
+      getLocalPiece: vi.fn(),
+      getLocalReferences: vi.fn(),
+      getLocalStyleProfile: vi.fn(),
+    }));
+    vi.doMock("@/lib/mediaProviders", () => ({
+      getImageProviderForUser: vi.fn(async () => null),
+      getAudioProviderForUser: vi.fn(async () => null),
+      getElevenLabsProviderForUser: vi.fn(async () => null),
+      getHedraProviderForUser: vi.fn(async () => null),
+    }));
+    vi.doMock("@/lib/mediaImage", () => ({ generateOpenAICompatibleImage: vi.fn() }));
+    vi.doMock("@/lib/mediaAudio", () => ({
+      generateOpenAICompatibleSpeech: vi.fn(),
+      synthesizeOpenAICompatibleSpeech: vi.fn(),
+    }));
+    vi.doMock("@/lib/hedra", () => ({
+      listModels,
+      generateAsset: vi.fn(),
+      createAsset: vi.fn(),
+      uploadAsset: vi.fn(),
+    }));
+    vi.doMock("@/lib/elevenlabs", () => ({ textToSpeechLong: vi.fn() }));
+    vi.doMock("@/lib/storage", () => ({ uploadPublicAudio: vi.fn() }));
+    vi.doMock("@/lib/ai/imagePrompt", () => ({ craftImagePrompt: vi.fn() }));
+    vi.doMock("@/lib/llm", () => ({ getAIForTaskForUser: vi.fn() }));
+    vi.doMock("@/lib/refContext", () => ({ buildRefContext: vi.fn(() => "") }));
+    vi.doMock("@/lib/billing/usage", () => ({
+      reserveUsage: vi.fn(),
+      completeUsageReservation: vi.fn(),
+      failUsageReservation: vi.fn(),
+    }));
+    vi.doMock("@/lib/billing/entitlements", () => ({
+      requireConcurrentJobCapacity: vi.fn(async () => ({ current: 0, limit: 1 })),
+      requireByokProviderAccess: vi.fn(),
+      requireManagedProviderAccess,
+    }));
+
+    const { POST } = await import("../app/api/hedra/generate/route");
+    const res = await POST(new Request("http://test.local/api/hedra/generate", {
+      method: "POST",
+      body: JSON.stringify({
+        type: "avatar_video",
+        provider: "hedra",
+        modelId: "hedra-avatar",
+        prompt: "A speaking editorial portrait.",
+        startAssetId: "asset_1",
+      }),
+    }));
+    const body = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(body).toEqual({
+      error: "Connect Hedra in Studio Providers before generating video or avatar media.",
+      code: "media_provider_required",
+    });
+    expect(listModels).not.toHaveBeenCalled();
+    expect(requireManagedProviderAccess).not.toHaveBeenCalled();
+    expect(JSON.stringify(body)).not.toContain("HEDRA_API_KEY");
+    expect(JSON.stringify(body)).not.toContain("sk-");
+  });
+
+  it("returns a setup action before synced video voiceover when no voice provider is configured", async () => {
+    const listModels = vi.fn();
+
+    vi.doMock("@/lib/auth", () => ({
+      requireUser: vi.fn(async () => ({ id: "user_1", workspaceId: "workspace_1", role: "author" })),
+    }));
+    vi.doMock("@/lib/local/mode", () => ({ isLocalFirstMode: () => false }));
+    vi.doMock("@/lib/tenant", () => ({
+      campaignInWorkspace: vi.fn(async () => true),
+      tenantNotFound: vi.fn(() => new Response(JSON.stringify({ code: "not_found" }), { status: 404 })),
+    }));
+    vi.doMock("@/lib/db", async () => {
+      const actual = await vi.importActual<any>("@/lib/db");
+      return {
+        ...actual,
+        db: {
+          query: {
+            pieces: { findFirst: vi.fn() },
+            references: { findFirst: vi.fn() },
+            styleProfiles: { findFirst: vi.fn() },
+            mediaJobs: { findFirst: vi.fn() },
+          },
+        },
+      };
+    });
+    vi.doMock("@/db/style-schema", () => ({ styleProfiles: { campaignId: "style_profiles.campaign_id" } }));
+    vi.doMock("@/lib/local/database", () => ({
+      createLocalMediaJob: vi.fn(),
+      getLocalMediaJob: vi.fn(),
+      getLocalPiece: vi.fn(),
+      getLocalReferences: vi.fn(),
+      getLocalStyleProfile: vi.fn(),
+    }));
+    vi.doMock("@/lib/mediaProviders", () => ({
+      getImageProviderForUser: vi.fn(async () => null),
+      getAudioProviderForUser: vi.fn(async () => null),
+      getElevenLabsProviderForUser: vi.fn(async () => null),
+      getHedraProviderForUser: vi.fn(async () => ({
+        provider: "hedra",
+        apiKey: "user-hedra-secret",
+        providerSource: "byok",
+        profileId: "hedra-main",
+      })),
+    }));
+    vi.doMock("@/lib/mediaImage", () => ({ generateOpenAICompatibleImage: vi.fn() }));
+    vi.doMock("@/lib/mediaAudio", () => ({
+      generateOpenAICompatibleSpeech: vi.fn(),
+      synthesizeOpenAICompatibleSpeech: vi.fn(),
+    }));
+    vi.doMock("@/lib/hedra", () => ({
+      listModels,
+      generateAsset: vi.fn(),
+      createAsset: vi.fn(),
+      uploadAsset: vi.fn(),
+    }));
+    vi.doMock("@/lib/elevenlabs", () => ({ textToSpeechLong: vi.fn() }));
+    vi.doMock("@/lib/storage", () => ({ uploadPublicAudio: vi.fn() }));
+    vi.doMock("@/lib/ai/imagePrompt", () => ({ craftImagePrompt: vi.fn() }));
+    vi.doMock("@/lib/llm", () => ({ getAIForTaskForUser: vi.fn() }));
+    vi.doMock("@/lib/refContext", () => ({ buildRefContext: vi.fn(() => "") }));
+    vi.doMock("@/lib/billing/usage", () => ({
+      reserveUsage: vi.fn(),
+      completeUsageReservation: vi.fn(),
+      failUsageReservation: vi.fn(),
+    }));
+    vi.doMock("@/lib/billing/entitlements", () => ({
+      requireConcurrentJobCapacity: vi.fn(async () => ({ current: 0, limit: 1 })),
+      requireByokProviderAccess: vi.fn(),
+      requireManagedProviderAccess: vi.fn(),
+    }));
+
+    const { POST } = await import("../app/api/hedra/generate/route");
+    const res = await POST(new Request("http://test.local/api/hedra/generate", {
+      method: "POST",
+      body: JSON.stringify({
+        type: "video",
+        provider: "hedra",
+        modelId: "hedra-video",
+        prompt: "Animate this image.",
+        script: "Read this as a synced voiceover.",
+        startAssetId: "asset_1",
+      }),
+    }));
+    const body = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(body).toEqual({
+      error: "Connect OpenAI media or ElevenLabs in Studio Providers before generating synced voiceover video.",
+      code: "media_provider_required",
+    });
+    expect(listModels).not.toHaveBeenCalled();
+    expect(JSON.stringify(body)).not.toContain("ELEVENLABS_API_KEY");
+    expect(JSON.stringify(body)).not.toContain("user-hedra-secret");
+  });
+
   it("uses an exact saved OpenAI media profile for audio generation", async () => {
     const reservation = { id: "usage_audio", workspaceId: "workspace_1", idempotencyKey: "k" };
     const reserveUsage = vi.fn(async () => reservation);
