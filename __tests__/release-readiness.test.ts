@@ -1,6 +1,13 @@
 import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
-import { checkReleaseReadiness, hasExplicitWaiverNote, isNonBlockingRow, WAIVED_STATUS, type TrackerRow } from "@/scripts/check-release-readiness";
+import {
+  checkReleaseReadiness,
+  hasExplicitWaiverNote,
+  isNonBlockingRow,
+  releaseVerificationGuidance,
+  WAIVED_STATUS,
+  type TrackerRow,
+} from "@/scripts/check-release-readiness";
 
 describe("desktop release readiness gate", () => {
   it("fails closed on the current unwaived tracker blockers", () => {
@@ -22,8 +29,18 @@ describe("desktop release readiness gate", () => {
     expect(output).toContain("totalStories");
     expect(output).toContain("PROV-004");
     expect(output).toContain("MEDIA-002");
+    expect(output).toContain("KINGS_PRESS_LIVE_OPENAI_API_KEY");
+    expect(output).toContain("KINGS_PRESS_LIVE_PROVIDER_VERIFY_SPEND_CREDITS=yes");
     expect(output).not.toContain("- AUDIO-001");
     expect(output).not.toContain("AUTH-001 (");
+  });
+
+  it("prints specific live-provider verification guidance for release blockers", () => {
+    expect(releaseVerificationGuidance({ storyId: "PROV-004" }).join("\n")).toContain("KINGS_PRESS_LIVE_OPENAI_API_KEY");
+    expect(releaseVerificationGuidance({ storyId: "MEDIA-002" }).join("\n")).toContain("KINGS_PRESS_LIVE_PROVIDER_VERIFY_SPEND_CREDITS=yes");
+    expect(releaseVerificationGuidance({ storyId: "MEDIA-002" }).join("\n")).toContain("KINGS_PRESS_LIVE_XAI_API_KEY");
+    expect(releaseVerificationGuidance({ storyId: "MEDIA-002" }).join("\n")).toContain("KINGS_PRESS_LIVE_HEDRA_API_KEY");
+    expect(releaseVerificationGuidance({ storyId: "AUDIO-001" })).toEqual([]);
   });
 
   it("requires explicit WAIVER evidence before a waived row can unblock release", () => {

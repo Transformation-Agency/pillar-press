@@ -124,6 +124,23 @@ export function checkReleaseReadiness(rows: TrackerRow[]) {
   return { totalStories: rows.length, statusCounts: counts, blocking };
 }
 
+export function releaseVerificationGuidance(row: Pick<TrackerRow, "storyId">): string[] {
+  if (row.storyId === "PROV-004") {
+    return [
+      "Required live evidence: set KINGS_PRESS_LIVE_OPENAI_API_KEY for one command invocation, then run npm run desktop:verify-live-providers.",
+      "This proves OpenAI model listing, /api/llm/test, and OpenAI LLM-to-media default seeding without printing the key.",
+    ];
+  }
+  if (row.storyId === "MEDIA-002") {
+    return [
+      "Required live evidence: set KINGS_PRESS_LIVE_PROVIDER_VERIFY_SPEND_CREDITS=yes with the needed provider keys, then run npm run desktop:verify-live-providers.",
+      "Expected env vars by provider: KINGS_PRESS_LIVE_OPENAI_API_KEY, KINGS_PRESS_LIVE_XAI_API_KEY, KINGS_PRESS_LIVE_ELEVENLABS_API_KEY, and/or KINGS_PRESS_LIVE_HEDRA_API_KEY.",
+      "For credit-heavy Hedra video/avatar checks, record manual evidence in the tracker and issue #42 if the automated verifier is intentionally not run.",
+    ];
+  }
+  return [];
+}
+
 function main() {
   const result = checkReleaseReadiness(trackerRows());
 
@@ -135,6 +152,9 @@ function main() {
     for (const row of result.blocking) {
       console.error(`- ${row.storyId} (${row.priority}) ${row.featureArea} / ${row.feature}: ${row.testStatus}`);
       if (row.errorsFound) console.error(`  ${row.errorsFound}`);
+      for (const guidance of releaseVerificationGuidance(row)) {
+        console.error(`  ${guidance}`);
+      }
       if (row.testStatus === WAIVED_STATUS && !hasExplicitWaiverNote(row)) {
         console.error("  Waived rows must include a WAIVER: note with owner, YYYY-MM-DD date, and exact release scope.");
       }

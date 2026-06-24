@@ -93,6 +93,22 @@ npm run desktop:verify-live-providers
 
 Multiple providers can be checked in one run by setting multiple env vars.
 
+xAI / Grok LLM and image readiness:
+
+```sh
+KINGS_PRESS_LIVE_XAI_API_KEY="..." \
+npm run desktop:verify-live-providers
+```
+
+Optional Grok model overrides:
+
+```sh
+KINGS_PRESS_LIVE_XAI_CHAT_MODEL="grok-4.3" \
+KINGS_PRESS_LIVE_XAI_IMAGE_MODEL="grok-2-image" \
+KINGS_PRESS_LIVE_XAI_API_KEY="..." \
+npm run desktop:verify-live-providers
+```
+
 ## Credit-Spending Verification
 
 This is the release-gate proof for provider-backed media/TTS that still remains
@@ -101,6 +117,7 @@ under `MEDIA-002`:
 ```sh
 KINGS_PRESS_LIVE_PROVIDER_VERIFY_SPEND_CREDITS=yes \
 KINGS_PRESS_LIVE_OPENAI_API_KEY="..." \
+KINGS_PRESS_LIVE_XAI_API_KEY="..." \
 KINGS_PRESS_LIVE_ELEVENLABS_API_KEY="..." \
 KINGS_PRESS_LIVE_HEDRA_API_KEY="..." \
 npm run desktop:verify-live-providers
@@ -115,6 +132,8 @@ The script currently performs:
 - OpenAI media-provider configured check
 - OpenAI image generation through `/api/hedra/generate`
 - OpenAI saved TTS generation through `/api/hedra/generate`
+- xAI/Grok model listing and `/api/llm/test`
+- xAI/Grok image generation through `/api/hedra/generate`
 - ElevenLabs voice listing
 - ElevenLabs saved TTS generation when a voice is available
 - Hedra model listing

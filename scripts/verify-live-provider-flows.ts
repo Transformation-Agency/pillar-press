@@ -15,16 +15,20 @@ type Check = {
 const root = process.cwd();
 const spendCredits = process.env.KINGS_PRESS_LIVE_PROVIDER_VERIFY_SPEND_CREDITS === "yes";
 const openaiKey = process.env.KINGS_PRESS_LIVE_OPENAI_API_KEY?.trim();
+const xaiKey = process.env.KINGS_PRESS_LIVE_XAI_API_KEY?.trim() || process.env.KINGS_PRESS_LIVE_GROK_API_KEY?.trim();
 const elevenKey = process.env.KINGS_PRESS_LIVE_ELEVENLABS_API_KEY?.trim();
 const hedraKey = process.env.KINGS_PRESS_LIVE_HEDRA_API_KEY?.trim();
 const openaiBaseUrl = (process.env.KINGS_PRESS_LIVE_OPENAI_BASE_URL || "https://api.openai.com/v1").replace(/\/+$/, "");
+const xaiBaseUrl = (process.env.KINGS_PRESS_LIVE_XAI_BASE_URL || "https://api.x.ai/v1").replace(/\/+$/, "");
 const openaiChatModel = process.env.KINGS_PRESS_LIVE_OPENAI_CHAT_MODEL?.trim();
+const xaiChatModel = process.env.KINGS_PRESS_LIVE_XAI_CHAT_MODEL?.trim() || "grok-4.3";
 const openaiImageModel = process.env.KINGS_PRESS_LIVE_OPENAI_IMAGE_MODEL?.trim() || "gpt-image-1";
+const xaiImageModel = process.env.KINGS_PRESS_LIVE_XAI_IMAGE_MODEL?.trim() || "grok-2-image";
 const openaiAudioModel = process.env.KINGS_PRESS_LIVE_OPENAI_AUDIO_MODEL?.trim() || "gpt-4o-mini-tts";
 const ollamaBaseUrl = (process.env.KINGS_PRESS_LIVE_OLLAMA_BASE_URL || "http://127.0.0.1:11434").replace(/\/+$/, "");
 const ollamaModel = process.env.KINGS_PRESS_LIVE_OLLAMA_MODEL?.trim() || "gemma4:26b-mlx";
 const llmTasks = ["gather", "weave", "draft", "review", "revision", "outputs", "utility", "mediaPrompt", "file"] as const;
-const secretValues = [openaiKey, elevenKey, hedraKey].filter((value): value is string => Boolean(value && value.length >= 6));
+const secretValues = [openaiKey, xaiKey, elevenKey, hedraKey].filter((value): value is string => Boolean(value && value.length >= 6));
 const nodePath = join(root, "src-tauri", "resources", "node", "bin", "node");
 const serverPath = join(root, "src-tauri", "resources", "desktop-server", "server.js");
 const serverRoot = join(root, "src-tauri", "resources", "desktop-server");
@@ -35,6 +39,7 @@ function redact(text: string): string {
     out = out.split(secret).join("[redacted-secret]");
   }
   out = out.replace(/\b(sk-[A-Za-z0-9_\-]{8,})\b/g, "[redacted-openai-key]");
+  out = out.replace(/\b(xai-[A-Za-z0-9_\-]{8,})\b/g, "[redacted-xai-key]");
   out = out.replace(/\b(xi-[A-Za-z0-9_\-]{8,})\b/g, "[redacted-elevenlabs-key]");
   out = out.replace(/Bearer\s+[A-Za-z0-9._\-]{8,}/gi, "Bearer [redacted]");
   return out;
@@ -46,6 +51,7 @@ function assertNoSecrets(value: unknown, label: string) {
     if (text.includes(secret)) throw new Error(`${label} leaked a provider secret.`);
   }
   if (/\bsk-[A-Za-z0-9_\-]{8,}\b/.test(text)) throw new Error(`${label} leaked an OpenAI-shaped key.`);
+  if (/\bxai-[A-Za-z0-9_\-]{8,}\b/.test(text)) throw new Error(`${label} leaked an xAI-shaped key.`);
   if (/\bxi-[A-Za-z0-9_\-]{8,}\b/.test(text)) throw new Error(`${label} leaked an ElevenLabs-shaped key.`);
 }
 
@@ -169,6 +175,9 @@ async function main() {
       OPENAI_API_KEY: openaiKey || "",
       MEDIA_OPENAI_API_KEY: openaiKey || "",
       MEDIA_OPENAI_BASE_URL: openaiBaseUrl,
+      XAI_API_KEY: xaiKey || "",
+      MEDIA_XAI_API_KEY: xaiKey || "",
+      MEDIA_XAI_BASE_URL: xaiBaseUrl,
       ELEVENLABS_API_KEY: elevenKey || "",
       HEDRA_API_KEY: hedraKey || "",
     },
@@ -206,6 +215,7 @@ async function main() {
       assertNoSecrets(providers, "media providers");
       return {
         openaiConfigured: providerConfigured(providers, "openai"),
+        xaiConfigured: providerConfigured(providers, "xai"),
         elevenlabsConfigured: providerConfigured(providers, "elevenlabs"),
         hedraConfigured: providerConfigured(providers, "hedra"),
       };
@@ -322,6 +332,61 @@ async function main() {
       }
     } else {
       skip(checks, "PROV-004 OpenAI live checks", "KINGS_PRESS_LIVE_OPENAI_API_KEY not set");
+    }
+
+    if (xaiKey) {
+      await runCheck(checks, "PROV-006 xAI/Grok model listing", async () => {
+        const modelsPayload = await requestJson(baseUrl, "/api/llm/models", {
+          method: "POST",
+          body: JSON.stringify({ provider: "xai", apiKey: xaiKey, baseUrl: xaiBaseUrl }),
+        });
+        const models = modelIds(modelsPayload);
+        if (!models.length) throw new Error("xAI listed no usable models.");
+        if (!models.includes(xaiChatModel)) throw new Error(`xAI did not list ${xaiChatModel}. Listed: ${models.join(", ")}`);
+        return { modelCount: models.length, requestedModel: xaiChatModel };
+      });
+      await runCheck(checks, "PROV-006 xAI/Grok text test", async () => {
+        const body = await requestJson(baseUrl, "/api/llm/test", {
+          method: "POST",
+          body: JSON.stringify({
+            provider: "xai",
+            apiKey: xaiKey,
+            baseUrl: xaiBaseUrl,
+            model: xaiChatModel,
+          }),
+        });
+        if ((body as { sample?: string }).sample?.trim() !== "OK") throw new Error(`Unexpected xAI sample: ${JSON.stringify(body)}`);
+        return { model: xaiChatModel };
+      });
+      await runCheck(checks, "MEDIA-002 xAI image provider configured", async () => {
+        if (!providerConfigured(providers, "xai")) throw new Error("xAI media provider was not configured in packaged local server.");
+        return { imageModel: xaiImageModel };
+      });
+      if (spendCredits) {
+        await runCheck(checks, "MEDIA-002 xAI image generation", async () => {
+          const body = await requestJson(baseUrl, "/api/hedra/generate", {
+            method: "POST",
+            body: JSON.stringify({
+              type: "image",
+              provider: "xai",
+              modelId: xaiImageModel,
+              prompt: "A simple editorial desk with a notebook and warm morning light.",
+              aspectRatio: "1:1",
+              resolution: "1024x1024",
+              enhance: false,
+              directed: true,
+            }),
+          });
+          const job = (body as { job?: { status?: string; outputUrl?: string; meta?: unknown } }).job;
+          if (job?.status !== "completed" || !job.outputUrl) throw new Error("xAI image generation did not complete with an output URL.");
+          assertNoSecrets(job, "xAI image job");
+          return { status: job.status, hasOutputUrl: true, meta: job.meta };
+        });
+      } else {
+        skip(checks, "MEDIA-002 xAI image generation", "set KINGS_PRESS_LIVE_PROVIDER_VERIFY_SPEND_CREDITS=yes to spend provider credits");
+      }
+    } else {
+      skip(checks, "PROV-006 xAI/Grok live checks", "KINGS_PRESS_LIVE_XAI_API_KEY or KINGS_PRESS_LIVE_GROK_API_KEY not set");
     }
 
     if (elevenKey) {
