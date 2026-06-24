@@ -7,6 +7,8 @@ describe("desktop native provider settings", () => {
 
     expect(source).toContain("fn save_llm_settings");
     expect(source).toContain("let mut media_providers = read_desktop_settings(&app)");
+    expect(source).toContain("let saved_media_api_key = media_providers");
+    expect(source).toContain(".or(saved_media_api_key)");
     expect(source).toContain('p.provider.eq_ignore_ascii_case("openai")');
     expect(source).toContain('media_providers.insert(\n            "openai".into()');
     expect(source).toContain('base_url: profile\n                    .base_url\n                    .clone()');

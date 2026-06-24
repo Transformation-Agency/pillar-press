@@ -623,7 +623,7 @@ function InlineModelSetup({ status, onSaved }) {
         return;
       }
       if (config.provider === "openai-compatible" && !config.baseUrl) throw new Error("Add a base URL first.");
-      if (["openai", "anthropic", "gemini", "xai"].includes(config.provider) && !config.apiKey) throw new Error("Paste an API key first.");
+      if (!(hasDesktop && ["openai", "xai"].includes(config.provider)) && ["openai", "anthropic", "gemini", "xai"].includes(config.provider) && !config.apiKey) throw new Error("Paste an API key first.");
       const response = await fetch("/api/llm/models", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -690,7 +690,7 @@ function InlineModelSetup({ status, onSaved }) {
       setMessage("Choose or type a model first.");
       return;
     }
-    if (["openai", "anthropic", "gemini", "xai"].includes(config.provider) && !config.apiKey) {
+    if (!(hasDesktop && ["openai", "xai"].includes(config.provider)) && ["openai", "anthropic", "gemini", "xai"].includes(config.provider) && !config.apiKey) {
       setMessage("Paste an API key first.");
       return;
     }

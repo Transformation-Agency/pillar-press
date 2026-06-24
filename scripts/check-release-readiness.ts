@@ -127,7 +127,7 @@ export function checkReleaseReadiness(rows: TrackerRow[]) {
 export function releaseVerificationGuidance(row: Pick<TrackerRow, "storyId">): string[] {
   if (row.storyId === "PROV-004") {
     return [
-      "Required live evidence: set KINGS_PRESS_LIVE_OPENAI_API_KEY for one command invocation, then run npm run desktop:verify-live-providers.",
+      "Required live evidence: set KINGS_PRESS_LIVE_OPENAI_API_KEY for one command invocation or save a valid OpenAI key in desktop settings, then run npm run desktop:verify-live-providers.",
       "This proves OpenAI model listing, /api/llm/test, and OpenAI LLM-to-media default seeding without printing the key.",
     ];
   }

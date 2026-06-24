@@ -42,7 +42,7 @@ describe("live provider input preflight", () => {
     expect(summary.savedSettings.exists).toBe(true);
     expect(summary.savedSettings.llmProfilesWithKeys).toEqual(["openai", "xai"]);
     expect(summary.savedSettings.mediaProvidersWithKeys).toEqual(["elevenlabs"]);
-    expect(summary.releaseBlockerReadiness.prov004OpenAI).toBe("missing");
+    expect(summary.releaseBlockerReadiness.prov004OpenAI).toBe("saved-only");
     expect(summary.releaseBlockerReadiness.media002Providers.openai).toBe("saved-only");
     expect(summary.releaseBlockerReadiness.media002Providers.xai).toBe("saved-only");
     expect(summary.releaseBlockerReadiness.media002Providers.elevenlabs).toBe("saved-only");

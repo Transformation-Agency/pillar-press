@@ -260,11 +260,14 @@ describe("desktop OpenAI media provider setup wiring", () => {
     expect(appSource).toContain("const modelOptionsForSetup = () =>");
     expect(appSource).toContain("visibleModelOptions.map");
     expect(appSource).toContain("Showing \" + providerLabel(cloudProvider) + \" defaults until you list models.");
+    expect(appSource).toContain('const canUseSavedDesktopKey = !isHostedSetup && (config.provider === "openai" || config.provider === "xai")');
+    expect(appSource).toContain("if (!canUseSavedDesktopKey && config.provider !== \"openai-compatible\" && config.provider !== \"ollama\" && !config.apiKey && !config.profileId)");
 
     expect(helperSource).toContain('const options = uniqueModelOptions(mode === "ollama" ? listedModels.concat(ollamaSuggestions) : (listedModels.length ? listedModels : (cloudModels[provider] || [])));');
     expect(helperSource).toContain('setModel(localModels[0] || "gemma4:26b-mlx")');
     expect(helperSource).toContain('setModel("gpt-4o-mini")');
     expect(helperSource).toContain("Available models");
+    expect(helperSource).toContain('if (!(hasDesktop && ["openai", "xai"].includes(config.provider)) && ["openai", "anthropic", "gemini", "xai"].includes(config.provider) && !config.apiKey)');
     expect(helperSource).not.toContain('list="kp-inline-model-options"');
   });
 

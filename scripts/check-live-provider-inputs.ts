@@ -16,7 +16,7 @@ export type ProviderInputSummary = {
     mediaProvidersWithKeys: string[];
   };
   releaseBlockerReadiness: {
-    prov004OpenAI: "ready" | "missing";
+    prov004OpenAI: "ready" | "saved-only" | "missing";
     media002SpendFlag: boolean;
     media002Providers: Record<"openai" | "xai" | "elevenlabs" | "hedra", "ready" | "saved-only" | "missing">;
   };
@@ -122,7 +122,7 @@ export function summarizeLiveProviderInputs(env: Env = process.env): ProviderInp
       mediaProvidersWithKeys: saved.mediaProvidersWithKeys,
     },
     releaseBlockerReadiness: {
-      prov004OpenAI: envHasAny(env, ["KINGS_PRESS_LIVE_OPENAI_API_KEY"]) ? "ready" : "missing",
+      prov004OpenAI: providerReadiness("openai"),
       media002SpendFlag: env.KINGS_PRESS_LIVE_PROVIDER_VERIFY_SPEND_CREDITS === "yes",
       media002Providers: {
         openai: providerReadiness("openai"),
@@ -139,7 +139,7 @@ function main() {
   console.log(JSON.stringify(summary, null, 2));
   const { releaseBlockerReadiness } = summary;
   if (releaseBlockerReadiness.prov004OpenAI === "missing") {
-    console.error("PROV-004 still needs KINGS_PRESS_LIVE_OPENAI_API_KEY for live OpenAI model/test evidence.");
+    console.error("PROV-004 still needs KINGS_PRESS_LIVE_OPENAI_API_KEY or a saved desktop OpenAI key for live OpenAI model/test evidence.");
   }
   if (!releaseBlockerReadiness.media002SpendFlag) {
     console.error("MEDIA-002 spend-credit generation still needs KINGS_PRESS_LIVE_PROVIDER_VERIFY_SPEND_CREDITS=yes.");

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireUser } from "@/lib/auth";
+import { desktopMediaProvider } from "@/lib/desktopSettings";
 import { toErrorResponse } from "@/lib/errors";
 import { normalizeHostedProviderBaseUrl } from "@/lib/hostedProviderUrls";
 import { isLocalFirstMode } from "@/lib/local/mode";
@@ -58,6 +59,18 @@ function normalizeConfig(body: z.infer<typeof Body>) {
   };
 }
 
+function savedDesktopModelCredential(body: z.infer<typeof Body>) {
+  if (!isLocalFirstMode() || body.apiKey?.trim() || body.profileId) return null;
+  if (body.provider !== "openai" && body.provider !== "xai") return null;
+  const saved = desktopMediaProvider(body.provider);
+  const apiKey = saved?.apiKey?.trim();
+  if (!apiKey) return null;
+  return {
+    apiKey,
+    baseUrl: body.baseUrl || saved?.baseUrl,
+  };
+}
+
 export async function POST(req: Request) {
   try {
     const user = await requireUser();
@@ -69,6 +82,7 @@ export async function POST(req: Request) {
       await requireByokProviderAccess({ ...user, workspaceId: user.workspaceId });
     }
     const saved = body.profileId ? await getHostedProviderProfile(user, body.profileId) : null;
+    const savedDesktop = saved ? null : savedDesktopModelCredential(body);
     const merged = saved
       ? {
           provider: saved.provider,
@@ -76,7 +90,11 @@ export async function POST(req: Request) {
           baseUrl: body.baseUrl || saved.baseUrl,
           apiKey: body.apiKey || saved.apiKey,
         }
-      : body;
+      : {
+          ...body,
+          baseUrl: body.baseUrl || savedDesktop?.baseUrl,
+          apiKey: body.apiKey || savedDesktop?.apiKey,
+        };
     const ai = createAIFromConfig(normalizeConfig(merged));
     const text = await ai.text("Reply with exactly OK. No punctuation, no extra words.");
     return NextResponse.json({

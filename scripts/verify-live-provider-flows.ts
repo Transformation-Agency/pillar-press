@@ -272,10 +272,11 @@ async function main() {
     });
 
     const providers = await requestJson(baseUrl, "/api/media/providers");
+    const openaiMediaConfigured = providerConfigured(providers, "openai");
     await runCheck(checks, "secret-free media provider catalog", async () => {
       assertNoSecrets(providers, "media providers");
       return {
-        openaiConfigured: providerConfigured(providers, "openai"),
+        openaiConfigured: openaiMediaConfigured,
         xaiConfigured: providerConfigured(providers, "xai"),
         elevenlabsConfigured: providerConfigured(providers, "elevenlabs"),
         hedraConfigured: providerConfigured(providers, "hedra"),
@@ -319,17 +320,18 @@ async function main() {
       return { model: ollamaModel, text };
     });
 
-    if (openaiKey) {
+    const openaiCredentialSource = openaiKey ? "env" : openaiMediaConfigured ? "desktop-settings" : null;
+    if (openaiCredentialSource) {
       let chosenChatModel = openaiChatModel;
       await runCheck(checks, "PROV-004 OpenAI chat model listing", async () => {
         const modelsPayload = await requestJson(baseUrl, "/api/llm/models", {
           method: "POST",
-          body: JSON.stringify({ provider: "openai", apiKey: openaiKey, baseUrl: openaiBaseUrl }),
+          body: JSON.stringify({ provider: "openai", apiKey: openaiKey || undefined, baseUrl: openaiBaseUrl }),
         });
         const models = modelIds(modelsPayload);
         chosenChatModel ||= models[0];
         if (!chosenChatModel) throw new Error("OpenAI listed no chat-capable models.");
-        return { modelCount: models.length, chosenModel: chosenChatModel };
+        return { modelCount: models.length, chosenModel: chosenChatModel, source: openaiCredentialSource };
       });
       if (chosenChatModel) {
         await runCheck(checks, "PROV-004 OpenAI text test", async () => {
@@ -337,18 +339,18 @@ async function main() {
             method: "POST",
             body: JSON.stringify({
               provider: "openai",
-              apiKey: openaiKey,
+              apiKey: openaiKey || undefined,
               baseUrl: openaiBaseUrl,
               model: chosenChatModel,
             }),
           });
           if ((body as { sample?: string }).sample?.trim() !== "OK") throw new Error(`Unexpected OpenAI sample: ${JSON.stringify(body)}`);
-          return { model: chosenChatModel };
+          return { model: chosenChatModel, source: openaiCredentialSource };
         });
       }
       await runCheck(checks, "OpenAI media provider configured", async () => {
-        if (!providerConfigured(providers, "openai")) throw new Error("OpenAI media provider was not configured in packaged local server.");
-        return { imageModel: openaiImageModel, audioModel: openaiAudioModel };
+        if (!openaiMediaConfigured) throw new Error("OpenAI media provider was not configured in packaged local server.");
+        return { imageModel: openaiImageModel, audioModel: openaiAudioModel, source: openaiCredentialSource };
       });
       if (spendCredits) {
         await runCheck(checks, "MEDIA-002 OpenAI image generation", async () => {
@@ -392,7 +394,7 @@ async function main() {
         skip(checks, "MEDIA-002 OpenAI saved TTS generation", "set KINGS_PRESS_LIVE_PROVIDER_VERIFY_SPEND_CREDITS=yes to spend provider credits");
       }
     } else {
-      skip(checks, "PROV-004 OpenAI live checks", "KINGS_PRESS_LIVE_OPENAI_API_KEY not set");
+      skip(checks, "PROV-004 OpenAI live checks", "KINGS_PRESS_LIVE_OPENAI_API_KEY not set and no saved desktop OpenAI media key was available");
     }
 
     const xaiMediaConfigured = providerConfigured(providers, "xai");

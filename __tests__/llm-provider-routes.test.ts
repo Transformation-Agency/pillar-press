@@ -78,6 +78,70 @@ describe("hosted LLM provider utility routes", () => {
     expect(JSON.stringify(body)).not.toContain("sk-openai-secret");
   });
 
+  it("uses a saved desktop OpenAI media key to list chat models without reposting the key", async () => {
+    mockLocalRouteUser();
+    vi.doMock("@/lib/desktopSettings", () => ({
+      desktopMediaProvider: vi.fn((provider: string) => provider === "openai"
+        ? { apiKey: "sk-saved-openai", baseUrl: "https://api.openai.com/v1" }
+        : null),
+    }));
+    const fetch = vi.fn(async () => new Response(JSON.stringify({
+      data: [
+        { id: "babbage-2" },
+        { id: "gpt-4o-mini" },
+      ],
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetch);
+
+    const { POST } = await import("../app/api/llm/models/route");
+    const res = await POST(new Request("http://test.local/api/llm/models", {
+      method: "POST",
+      body: JSON.stringify({ provider: "openai" }),
+    }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.models).toEqual(["gpt-4o-mini"]);
+    expect(body.models).not.toContain("babbage-2");
+    expect(fetch).toHaveBeenCalledWith("https://api.openai.com/v1/models", expect.objectContaining({
+      headers: expect.objectContaining({ Authorization: "Bearer sk-saved-openai" }),
+    }));
+    expect(JSON.stringify(body)).not.toContain("sk-saved-openai");
+  });
+
+  it("uses a saved desktop OpenAI media key to test chat models without reposting the key", async () => {
+    mockLocalRouteUser();
+    vi.doMock("@/lib/desktopSettings", () => ({
+      desktopMediaProvider: vi.fn((provider: string) => provider === "openai"
+        ? { apiKey: "sk-saved-openai", baseUrl: "https://api.openai.com/v1" }
+        : null),
+    }));
+    const createAIFromConfig = vi.fn(() => ({
+      text: vi.fn(async () => "OK"),
+    }));
+    vi.doMock("@/lib/llm", async () => {
+      const actual = await vi.importActual<any>("@/lib/llm");
+      return { ...actual, createAIFromConfig };
+    });
+
+    const { POST } = await import("../app/api/llm/test/route");
+    const res = await POST(new Request("http://test.local/api/llm/test", {
+      method: "POST",
+      body: JSON.stringify({ provider: "openai", model: "gpt-4o-mini" }),
+    }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body).toMatchObject({ ok: true, provider: "openai", model: "gpt-4o-mini", sample: "OK" });
+    expect(createAIFromConfig).toHaveBeenCalledWith(expect.objectContaining({
+      provider: "openai",
+      model: "gpt-4o-mini",
+      apiKey: "sk-saved-openai",
+      baseUrl: "https://api.openai.com/v1",
+    }));
+    expect(JSON.stringify(body)).not.toContain("sk-saved-openai");
+  });
+
   it("keeps provider listing errors readable without leaking OpenAI credentials", async () => {
     mockLocalRouteUser();
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({

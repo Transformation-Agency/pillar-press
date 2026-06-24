@@ -1104,8 +1104,9 @@ function DesktopOnboarding() {
     const config = currentProviderConfig();
     setBusy(true); setMessage("Listing models from " + providerLabel(config.provider) + ".");
     try {
+      const canUseSavedDesktopKey = !isHostedSetup && (config.provider === "openai" || config.provider === "xai");
       if (config.provider === "openai-compatible" && !config.baseUrl) throw new Error("Add a base URL first.");
-      if (config.provider !== "openai-compatible" && config.provider !== "ollama" && !config.apiKey && !config.profileId) throw new Error("Add an API key first.");
+      if (!canUseSavedDesktopKey && config.provider !== "openai-compatible" && config.provider !== "ollama" && !config.apiKey && !config.profileId) throw new Error("Add an API key first.");
       const res = await fetch("/api/llm/models", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -1167,7 +1168,8 @@ function DesktopOnboarding() {
         };
       } else {
         const key = apiKey.trim();
-        if (!key) throw new Error("Add an API key for the selected cloud provider.");
+        const canUseSavedDesktopKey = !isHostedSetup && (cloudProvider === "openai" || cloudProvider === "xai");
+        if (!key && !canUseSavedDesktopKey) throw new Error("Add an API key for the selected cloud provider.");
         nextProfile = {
           provider: cloudProvider,
           model: picked,

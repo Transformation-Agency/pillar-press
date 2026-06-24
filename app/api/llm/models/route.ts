@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireUser } from "@/lib/auth";
+import { desktopMediaProvider } from "@/lib/desktopSettings";
 import { toErrorResponse } from "@/lib/errors";
 import { normalizeHostedProviderBaseUrl } from "@/lib/hostedProviderUrls";
 import { isLocalFirstMode } from "@/lib/local/mode";
@@ -191,6 +192,18 @@ function modelsRoot(provider: z.infer<typeof Body>["provider"], baseUrl?: string
   return root;
 }
 
+function savedDesktopModelCredential(body: z.infer<typeof Body>) {
+  if (!isLocalFirstMode() || body.apiKey?.trim() || body.profileId) return null;
+  if (body.provider !== "openai" && body.provider !== "xai") return null;
+  const saved = desktopMediaProvider(body.provider);
+  const apiKey = saved?.apiKey?.trim();
+  if (!apiKey) return null;
+  return {
+    apiKey,
+    baseUrl: body.baseUrl || saved?.baseUrl,
+  };
+}
+
 function normalizeGeminiModels(payload: GeminiModelsResponse): string[] {
   return (payload.models || [])
     .filter((model) => !model.supportedGenerationMethods || model.supportedGenerationMethods.includes("generateContent"))
@@ -244,13 +257,18 @@ export async function POST(req: Request) {
       await requireByokProviderAccess({ ...user, workspaceId: user.workspaceId });
     }
     const saved = body.profileId ? await getHostedProviderProfile(user, body.profileId) : null;
+    const savedDesktop = saved ? null : savedDesktopModelCredential(body);
     const request = saved
       ? {
           provider: saved.provider,
           baseUrl: body.baseUrl || saved.baseUrl,
           apiKey: body.apiKey || saved.apiKey,
         }
-      : body;
+      : {
+          ...body,
+          baseUrl: body.baseUrl || savedDesktop?.baseUrl,
+          apiKey: body.apiKey || savedDesktop?.apiKey,
+        };
     const root = modelsRoot(request.provider, request.baseUrl);
     const url = request.provider === "ollama" ? `${root}/api/tags` : modelsUrl(request.provider, request.baseUrl);
     const headers = headersFor(request.provider, request.apiKey);

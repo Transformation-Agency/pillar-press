@@ -1241,6 +1241,10 @@ fn save_model_choice(app: AppHandle, model: String) -> Result<(), String> {
 fn save_llm_settings(app: AppHandle, settings: DesktopSettings) -> Result<(), String> {
     let provider = settings.provider.as_deref().unwrap_or("ollama").trim();
     let model = settings.model.as_deref().unwrap_or("").trim();
+    let mut media_providers = read_desktop_settings(&app)
+        .ok()
+        .and_then(|s| s.media_providers)
+        .unwrap_or_default();
     let mut profiles = Vec::new();
     for p in settings.profiles.unwrap_or_default() {
         let id = p.id.trim().to_string();
@@ -1249,6 +1253,10 @@ fn save_llm_settings(app: AppHandle, settings: DesktopSettings) -> Result<(), St
         if id.is_empty() || provider.is_empty() || model.is_empty() {
             continue;
         }
+        let saved_media_api_key = media_providers
+            .get(&provider.to_lowercase())
+            .and_then(|saved| saved.api_key.clone())
+            .filter(|v| !v.trim().is_empty());
         profiles.push(DesktopLLMProfile {
             id,
             label: p
@@ -1272,7 +1280,8 @@ fn save_llm_settings(app: AppHandle, settings: DesktopSettings) -> Result<(), St
                     .map(str::trim)
                     .filter(|v| !v.is_empty())
                     .map(str::to_string),
-            )?,
+            )?
+            .or(saved_media_api_key),
         });
     }
     if model.is_empty() {
@@ -1295,11 +1304,13 @@ fn save_llm_settings(app: AppHandle, settings: DesktopSettings) -> Result<(), St
             .map(str::trim)
             .filter(|v| !v.is_empty())
             .map(str::to_string),
-    )?;
-    let mut media_providers = read_desktop_settings(&app)
-        .ok()
-        .and_then(|s| s.media_providers)
-        .unwrap_or_default();
+    )?
+    .or_else(|| {
+        media_providers
+            .get(&provider.to_lowercase())
+            .and_then(|saved| saved.api_key.clone())
+            .filter(|v| !v.trim().is_empty())
+    });
     let openai_profile = profiles.iter().find(|p| {
         p.provider.eq_ignore_ascii_case("openai")
             && p.api_key
