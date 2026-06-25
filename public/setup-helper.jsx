@@ -194,7 +194,7 @@ function SetupHostPanel({ conversation, mode, onModeChange, actionResults, setup
   );
 }
 
-function SetupConversationCanvas({ children, conversation, mode, onModeChange, actionResults, setupError, conversationState, onBack, muted, onToggleMute }) {
+function SetupConversationCanvas({ children, conversation, mode, onModeChange, actionResults, setupError, setupNotice, conversationState, onBack, muted, onToggleMute }) {
   const slotPrompts = (ONBOARDING_CONVERSATION && ONBOARDING_CONVERSATION.slotPrompts) || {};
   const sequence = (ONBOARDING_CONVERSATION && ONBOARDING_CONVERSATION.QUESTION_SEQUENCE) || [];
   const slots = (conversationState && conversationState.slots) || {};
@@ -296,11 +296,16 @@ function SetupConversationCanvas({ children, conversation, mode, onModeChange, a
           <strong role="alert">{setupError}</strong>
         </div>
       )}
+      {!setupError && setupNotice && (
+        <div className="kp-conversation-status" aria-live="polite">
+          <span>{setupNotice}</span>
+        </div>
+      )}
     </section>
   );
 }
 
-function SetupShell({ children, conversation, mode, onModeChange, actionResults, setupError, centered, showHost, conversationState, onBack, muted, onToggleMute }) {
+function SetupShell({ children, conversation, mode, onModeChange, actionResults, setupError, setupNotice, centered, showHost, conversationState, onBack, muted, onToggleMute }) {
   return (
     <main className={"kp-setup-shell kp-setup-shell-canvas" + (centered ? " kp-setup-shell-centered" : "")}>
       <SetupConversationCanvas
@@ -309,6 +314,7 @@ function SetupShell({ children, conversation, mode, onModeChange, actionResults,
         onModeChange={onModeChange}
         actionResults={actionResults}
         setupError={setupError}
+        setupNotice={setupNotice}
         conversationState={conversationState}
         onBack={onBack}
         muted={muted}
@@ -1138,6 +1144,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
   const [providerStatus, setProviderStatus] = React.useState(null);
   const [busy, setBusy] = React.useState(false);
   const [setupError, setSetupError] = React.useState("");
+  const [setupNotice, setSetupNotice] = React.useState("");
   const [actionResults, setActionResults] = React.useState({});
   const [setupMode, setSetupMode] = React.useState("guided");
   const [audioMuted, setAudioMuted] = React.useState(false);
@@ -1175,6 +1182,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
   const transcriptHandlerRef = React.useRef(null);
   const listenSessionRef = React.useRef(null);
   const contextFileInputRef = React.useRef(null);
+  const setupRootRef = React.useRef(null);
   const setupStartedAtRef = React.useRef(Date.now());
   const metricsSessionIdRef = React.useRef(createSetupSessionId());
   const lastStepMetricRef = React.useRef(null);
@@ -1191,6 +1199,11 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     "Book draft",
     "New focus",
   ].filter(Boolean))).slice(0, 4);
+  const setupHasExistingWork = !!(
+    activeCampaign ||
+    campaigns.length ||
+    (window.Store.getPref && window.Store.getPref(ONBOARDING_FLAGS.onboardingCompletePref, false))
+  );
 
   React.useEffect(() => {
     if (!open) return;
@@ -1228,6 +1241,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
     setConversationState(ONBOARDING_CONVERSATION.createState());
     setIntroAnswer("");
     setIntroVisible(false);
+    setSetupNotice("");
     setAudioMuted(false);
     recordMetric(ONBOARDING_METRIC_EVENTS.STARTED, { stepId: "intro" });
     const refs = window.Store.activeReferences ? window.Store.activeReferences() : {};
@@ -1249,6 +1263,13 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
       gateSpec: (refs.gateSpec && refs.gateSpec.body) || "",
     });
   }, [open, activeCampaign && activeCampaign.id]);
+
+  React.useEffect(() => {
+    if (!open || !setupRootRef.current) return;
+    setTimeout(() => {
+      if (setupRootRef.current) setupRootRef.current.focus();
+    }, 0);
+  }, [open]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -1871,15 +1892,18 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
 
   function listenForAnswer(targetStep) {
     setSetupError("");
+    setSetupNotice("Your Mac may ask for microphone access. If you deny it, typing still works.");
     stopListeningSession();
     setListening(true);
     const session = ONBOARDING_AUDIO.listenOnce && ONBOARDING_AUDIO.listenOnce({
       onFinal: (transcript) => {
+        setSetupNotice("");
         setSetupTranscript(transcript);
         handleTranscript(transcript, targetStep);
       },
       onError: (error) => {
         setSetupError(readableVoiceInputError(error));
+        setSetupNotice("You can keep going by typing. To retry voice later, allow microphone access in macOS System Settings.");
         listenSessionRef.current = null;
         setListening(false);
       },
@@ -1892,6 +1916,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
       listenSessionRef.current = null;
       setListening(false);
       setSetupError("Speech recognition is not available here. You can type instead.");
+      setSetupNotice("");
       recordMetric(ONBOARDING_METRIC_EVENTS.FALLBACK_USED || "fallback_used", {
         stepId: (ONBOARDING_STEPS[step] && ONBOARDING_STEPS[step].id) || "intro",
         fallbackKind: "typing",
@@ -1942,6 +1967,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
 
   async function connectAudio() {
     setAudioError("");
+    setSetupNotice("Your Mac may ask for microphone access. You can keep typing if you do not want to grant it.");
     recordAction(ONBOARDING_ACTIONS.REQUEST_VOICE, ONBOARDING_ACTION_STATUSES.PENDING);
     setAudioState("requesting_microphone");
     const result = ONBOARDING_ACTION_REGISTRY && ONBOARDING_ACTION_REGISTRY.requestVoice
@@ -1965,12 +1991,14 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
         }
       }
       setAudioState("audio_ready");
+      setSetupNotice("Microphone is ready. You can still type any setup answer.");
       captureVoiceSetupAnswer("microphone connected", "button");
       recordAction(ONBOARDING_ACTIONS.REQUEST_VOICE, ONBOARDING_ACTION_STATUSES.SUCCEEDED, result || undefined);
     } catch (e) {
       setAudioState("error");
       const message = (e && e.message) || "Audio setup failed. You can continue by typing.";
       setAudioError(message);
+      setSetupNotice("Typing still works. To retry voice, allow microphone access in macOS System Settings and press Connect again.");
       recordAction(ONBOARDING_ACTIONS.REQUEST_VOICE, ONBOARDING_ACTION_STATUSES.FAILED, { error: message });
       recordMetric(ONBOARDING_METRIC_EVENTS.FALLBACK_USED || "fallback_used", {
         stepId: "voice",
@@ -2253,10 +2281,17 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
   };
 
   return (
-    <div style={{
+    <div
+      ref={setupRootRef}
+      role="dialog"
+      aria-modal="true"
+      aria-label={setupHasExistingWork ? "Update King's Press setup" : "King's Press setup"}
+      tabIndex={-1}
+      style={{
       position: "fixed", inset: 0, zIndex: 190, overflow: "auto",
       background: "#F7F2EB", color: "#2A211E",
       fontFamily: "var(--font-body)",
+      outline: "none",
     }}>
       <style>{`
         .kp-setup-input {
@@ -3091,9 +3126,23 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
       `}</style>
       <div style={{ width: "min(1120px, calc(100% - 72px))", margin: "0 auto", padding: "44px 0 34px" }}>
         <OnboardingBrand />
+        {setupHasExistingWork && (
+          <div role="status" style={{
+            margin: "18px 0 0",
+            border: "1px solid #D8CEC3",
+            borderRadius: 10,
+            background: "rgba(255, 252, 246, 0.72)",
+            padding: "12px 15px",
+            color: "#5D514B",
+            fontSize: 14.5,
+            lineHeight: 1.45,
+          }}>
+            You are updating setup for your existing desk. This will not erase documents, campaigns, or saved preferences.
+          </div>
+        )}
 
         {step === 0 && (
-      <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError} conversationState={conversationState} muted={audioMuted} onToggleMute={() => setAudioMuted((value) => !value)} centered hostless>
+      <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError} setupNotice={setupNotice} conversationState={conversationState} muted={audioMuted} onToggleMute={() => setAudioMuted((value) => !value)} centered hostless>
             <section style={{
               border: "1px solid #D8CEC3", borderRadius: 10, background: "rgba(255, 252, 246, 0.68)",
               overflow: "hidden",
@@ -3134,7 +3183,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
         )}
 
         {step === 1 && (
-          <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError} conversationState={conversationState} muted={audioMuted} onToggleMute={() => setAudioMuted((value) => !value)} onBack={() => goToStep(0)}>
+          <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError} setupNotice={setupNotice} conversationState={conversationState} muted={audioMuted} onToggleMute={() => setAudioMuted((value) => !value)} onBack={() => goToStep(0)}>
             <section style={{
               border: "1px solid #D8CEC3", borderRadius: 10, background: "rgba(255, 252, 246, 0.68)",
               overflow: "hidden",
@@ -3176,7 +3225,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
         )}
 
         {step === 2 && (
-          <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError} conversationState={conversationState} muted={audioMuted} onToggleMute={() => setAudioMuted((value) => !value)} onBack={() => goToStep(1)}>
+          <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError} setupNotice={setupNotice} conversationState={conversationState} muted={audioMuted} onToggleMute={() => setAudioMuted((value) => !value)} onBack={() => goToStep(1)}>
             <SetupField label="First project or campaign name" helper="Name the first place King's Press should organize drafts, sources, and notes.">
               <input
                 className="kp-setup-input"
@@ -3240,7 +3289,7 @@ function SetupHelper({ open, onClose, onComplete, onOpenProviderSetup, initialSt
         )}
 
         {step === 3 && prefDraft && (
-          <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError} conversationState={conversationState} muted={audioMuted} onToggleMute={() => setAudioMuted((value) => !value)} onBack={() => goToStep(2)}>
+          <SetupShell conversation={conversation} mode={setupMode} onModeChange={setSetupMode} actionResults={actionResults} setupError={setupError} setupNotice={setupNotice} conversationState={conversationState} muted={audioMuted} onToggleMute={() => setAudioMuted((value) => !value)} onBack={() => goToStep(2)}>
             <SetupAnswerComposer
               question={preferencesPrompt && preferencesPrompt.question}
               helper={preferencesPrompt && preferencesPrompt.helper}

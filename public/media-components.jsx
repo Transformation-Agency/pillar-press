@@ -273,7 +273,10 @@ function MediaCard({ media, pieces, audios, onAttach, onCombine, onRegen, onDupl
                 {driveState === "saving" ? <Spinner size={13} /> : <Icon name={driveState === "saved" ? "check" : "upload"} size={13} />} {driveState === "saved" ? "Saved" : "Drive"}
               </button>
             )}
-            {onDelete && <button className="btn ghost sm" onClick={() => onDelete(media)} title="Delete"><Icon name="trash" size={13} /></button>}
+            {onDelete && <button className="btn ghost sm" onClick={() => {
+              const label = media.title || media.prompt || "this media item";
+              if (window.confirm(`Delete "${String(label).slice(0, 80)}" from Studio? This can't be undone except by restoring a backup.`)) onDelete(media);
+            }} title="Delete"><Icon name="trash" size={13} /></button>}
             {attachOpen && onAttach && (
               <div className="card" style={{ position: "absolute", top: 32, left: 0, zIndex: 30, width: 220, maxHeight: 240, overflowY: "auto", padding: 6, boxShadow: "var(--shadow-lg)" }}>
                 <div className="eyebrow" style={{ padding: "4px 8px" }}>Attach to piece</div>
@@ -301,7 +304,9 @@ function MediaCard({ media, pieces, audios, onAttach, onCombine, onRegen, onDupl
         {media.status === "completed" && driveState && driveState !== "saving" && driveState !== "saved" && (
           <div style={{ fontSize: 12, color: "var(--sev-must)" }}>{driveState}</div>
         )}
-        {media.status === "processing" && <button className="btn ghost sm" onClick={() => onDelete && onDelete(media)} style={{ alignSelf: "flex-start" }}>Cancel</button>}
+        {media.status === "processing" && <button className="btn ghost sm" onClick={() => {
+          if (onDelete && window.confirm("Cancel and remove this in-progress media item from Studio?")) onDelete(media);
+        }} style={{ alignSelf: "flex-start" }}>Cancel</button>}
       </div>
     </div>
   );

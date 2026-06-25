@@ -57,7 +57,7 @@ function PieceRow({ piece, campaignLabel, onOpen, onDelete }) {
           {titling ? <Spinner size={14} /> : <Icon name="sparkle" size={15} />}
         </button>
         <button className="icon-btn" title="Delete piece"
-          onClick={(e) => { e.stopPropagation(); if (confirm(`Delete "${piece.title}"? This can't be undone.`)) onDelete(piece.id); }}
+          onClick={(e) => { e.stopPropagation(); if (confirm(`Delete "${piece.title}" from this local library? This can't be undone except by restoring a backup.`)) onDelete(piece.id); }}
           style={{ opacity: hover ? 1 : 0.55, transition: "opacity 0.15s" }}>
           <Icon name="trash" size={15} />
         </button>

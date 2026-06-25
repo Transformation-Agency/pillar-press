@@ -161,7 +161,7 @@ function Desk({ campaignId, onOpenPiece }) {
     const target = threads.find((t) => t.id === id);
     if (target && (target.messages || []).length) {
       const label = target.title || "this Desk thread";
-      if (!window.confirm(`Delete "${label}"? This can't be undone.`)) return;
+      if (!window.confirm(`Delete "${label}" from Desk? This can't be undone except by restoring a backup.`)) return;
     }
     const rest = threads.filter((t) => t.id !== id);
     const next = rest.length ? rest : [newDeskThread()];

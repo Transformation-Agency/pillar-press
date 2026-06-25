@@ -42,9 +42,31 @@
     const ct = r.headers.get("content-type") || "";
     return ct.indexOf("application/json") >= 0 ? r.json() : null;
   }
+  function storeEvent(type, detail) {
+    try {
+      window.dispatchEvent(new CustomEvent(type, { detail: detail || {} }));
+    } catch (e) { /* ignore event failures */ }
+  }
+
+  function safeErrorMessage(error) {
+    const raw = error && error.message ? error.message : String(error || "Unknown persistence error.");
+    return raw.replace(/(sk-[A-Za-z0-9_-]{8,})/g, "[redacted]");
+  }
+
   // fire-and-forget background persist
   function bg(promise, label) {
-    Promise.resolve(promise).catch((e) => console.warn("[Store] " + (label || "persist") + " failed:", e && e.message ? e.message : e));
+    const id = uid();
+    const persistLabel = label || "persist";
+    storeEvent("kingspress:store-persist", { id, label: persistLabel, status: "saving", startedAt: now() });
+    Promise.resolve(promise).then(
+      () => storeEvent("kingspress:store-persist", { id, label: persistLabel, status: "saved", finishedAt: now() }),
+      (e) => {
+        const message = safeErrorMessage(e);
+        console.warn("[Store] " + persistLabel + " failed:", message);
+        storeEvent("kingspress:store-persist", { id, label: persistLabel, status: "failed", message, finishedAt: now() });
+        storeEvent("kingspress:store-warning", { id, label: persistLabel, message });
+      },
+    );
   }
 
   /* ---- minimal default state so getters never crash before hydrate ---- */

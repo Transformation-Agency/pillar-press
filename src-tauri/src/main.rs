@@ -32,6 +32,7 @@ const MENU_OPEN_BACKUPS: &str = "open-backups-folder";
 const MENU_START_OLLAMA: &str = "start-ollama";
 const MENU_OPEN_OLLAMA_DOWNLOAD: &str = "open-ollama-download";
 const MENU_RELOAD: &str = "reload-window";
+const MENU_CHECK_UPDATES: &str = "check-updates";
 const SECRET_PREFIX: &str = "kpenc:v1:";
 const KEYCHAIN_SERVICE: &str = "Kings Press Desktop Settings";
 const KEYCHAIN_ACCOUNT: &str = "llm-settings";
@@ -805,6 +806,14 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
                         true,
                         None::<&str>,
                     )?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &MenuItem::with_id(
+                        app,
+                        MENU_CHECK_UPDATES,
+                        "Check for Updates...",
+                        true,
+                        None::<&str>,
+                    )?,
                 ],
             )?,
         ],
@@ -854,6 +863,9 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.eval("window.location.reload()");
             }
+        }
+        MENU_CHECK_UPDATES => {
+            let _ = open_url("https://github.com/jedisherpa/kings-press-releases/releases/latest");
         }
         _ => {}
     }

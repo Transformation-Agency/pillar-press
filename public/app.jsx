@@ -649,9 +649,9 @@ function CampaignCreateDialog({ open, onClose, onCreate }) {
   };
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 210, background: "oklch(0 0 0 / 0.32)", display: "grid", placeItems: "center", padding: 20 }}>
-      <div className="card" style={{ width: "min(520px, 100%)", padding: "26px 28px", boxShadow: "var(--shadow-lg)" }}>
+      <div role="dialog" aria-modal="true" aria-labelledby="kp-new-campaign-title" className="card" style={{ width: "min(520px, 100%)", padding: "26px 28px", boxShadow: "var(--shadow-lg)" }}>
         <div className="eyebrow" style={{ marginBottom: 8 }}>New campaign</div>
-        <h2 style={{ fontSize: 25, margin: "0 0 10px" }}>Name this body of work</h2>
+        <h2 id="kp-new-campaign-title" style={{ fontSize: 25, margin: "0 0 10px" }}>Name this body of work</h2>
         <p className="muted" style={{ margin: "0 0 18px", fontSize: 14.5, lineHeight: 1.5 }}>
           Campaigns hold pieces, preferences, Gather sources, and Studio media together.
         </p>
@@ -692,6 +692,7 @@ function DesktopOnboarding() {
   const [savedSettings, setSavedSettings] = React.useState(null);
   const [profileName, setProfileName] = React.useState("");
   const [taskDefaults, setTaskDefaults] = React.useState({});
+  const modelSetupRef = React.useRef(null);
 
   const desktop = window.KINGS_DESKTOP;
   const authSnapshot = window.KP_AUTH && window.KP_AUTH.snapshot ? window.KP_AUTH.snapshot() : {};
@@ -1260,6 +1261,13 @@ function DesktopOnboarding() {
     setBusy(false);
   };
 
+  React.useEffect(() => {
+    if (!open || !modelSetupRef.current) return;
+    setTimeout(() => {
+      if (modelSetupRef.current) modelSetupRef.current.focus();
+    }, 0);
+  }, [open]);
+
   if (!open) return null;
   const installed = !!(status && status.installed);
   const running = !!(status && status.running);
@@ -1275,15 +1283,26 @@ function DesktopOnboarding() {
   const savedProfiles = profilesFromSettings(savedSettings);
 
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "var(--paper)", display: "flex", flexDirection: "column" }}>
+    <div
+      ref={modelSetupRef}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="kp-model-setup-title"
+      tabIndex={-1}
+      onKeyDown={(e) => { if (e.key === "Escape") closeModelSetup(); }}
+      style={{ position: "fixed", inset: 0, zIndex: 200, background: "var(--paper)", display: "flex", flexDirection: "column", outline: "none" }}
+    >
       <div style={{ padding: "28px clamp(20px, 4vw, 56px) 22px", borderBottom: "1px solid var(--hair)", display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start", flexShrink: 0 }}>
         <div>
           <div className="eyebrow" style={{ marginBottom: 8 }}>{isHostedSetup ? "King's Press hosted setup" : "King's Press desktop setup"}</div>
-          <h2 style={{ fontSize: 30, marginBottom: 10 }}>Choose your writing model</h2>
+          <h2 id="kp-model-setup-title" style={{ fontSize: 30, marginBottom: 10 }}>Choose your writing model</h2>
           <p className="muted" style={{ fontSize: 15.5, lineHeight: 1.55, maxWidth: 760 }}>
             {isHostedSetup
               ? "Save a provider key encrypted on the server, then use it for hosted King's Press workflows without pasting it again."
               : "King's Press keeps your editorial database local. Use a local model by default, or add a cloud API key when you want hosted compute."}
+          </p>
+          <p className="muted" style={{ margin: "8px 0 0", fontSize: 13.5, lineHeight: 1.45, maxWidth: 760 }}>
+            Setup order: choose a provider, list or pull a model, test it, then use it for your writing defaults.
           </p>
         </div>
         <button className="icon-btn" onClick={closeModelSetup} title="Close setup"><Icon name="xLogo" size={15} /></button>
@@ -1542,7 +1561,7 @@ function BillingPanel({ open, onClose, billing, notice }) {
   };
 
   return (
-    <div role="dialog" aria-label="Billing and usage" style={{
+    <div role="dialog" aria-modal="true" aria-label="Billing and usage" style={{
       position: "fixed", inset: 0, zIndex: 220, background: "oklch(0 0 0 / 0.32)",
       display: "grid", placeItems: "center", padding: 20,
     }}>
@@ -1863,6 +1882,18 @@ function App() {
     window.addEventListener("kingspress:billing-action-required", onBillingRequired);
     return () => window.removeEventListener("kingspress:billing-action-required", onBillingRequired);
   }, []);
+
+  React.useEffect(() => {
+    const onStoreWarning = (event) => {
+      const detail = (event && event.detail) || {};
+      setDesktopNotice({
+        type: "err",
+        text: "Local save failed: " + (detail.message || "Try the action again before quitting."),
+      });
+    };
+    window.addEventListener("kingspress:store-warning", onStoreWarning);
+    return () => window.removeEventListener("kingspress:store-warning", onStoreWarning);
+  }, []);
   const completeSetup = (payload) => {
     const result = payload || {};
     const handoff = window.Store.getPref(handoffPref, null);
@@ -1929,9 +1960,9 @@ function App() {
     setDesktopNotice(null);
     try {
       const result = await window.KINGS_DESKTOP.createLocalBackup();
-      setDesktopNotice({ type: "ok", text: "Backup created" + (result && result.path ? ": " + result.path : ".") });
+      setDesktopNotice({ type: "ok", text: "Backup created with secrets redacted" + (result && result.path ? ": " + result.path : ".") });
     } catch (e) {
-      setDesktopNotice({ type: "err", text: (e && e.message) || "Could not create backup." });
+      setDesktopNotice({ type: "err", text: (e && e.message) || "Could not create local backup. Try again before quitting." });
     }
     setBackupBusy(false);
   };
@@ -1985,8 +2016,9 @@ function App() {
         {(hasDesktopBridge || auth.hosted) && (
           <>
             {hasDesktopBridge && (
-              <button className="icon-btn" onClick={createDesktopBackup} title="Create local backup" disabled={backupBusy}>
+              <button className="btn sm ghost" onClick={createDesktopBackup} title="Create local backup" disabled={backupBusy}>
                 {backupBusy ? <Spinner size={15} /> : <Icon name="db" size={16} />}
+                Backup
               </button>
             )}
             <button className="icon-btn" onClick={openModelSetup} title="Model settings">
@@ -2043,7 +2075,7 @@ function App() {
         <EmptyState icon="doc" title="No piece open" body="Head back to the Library to open or start one." />
       )}
       {desktopNotice && (
-        <div style={{
+        <div role={desktopNotice.type === "err" ? "alert" : "status"} style={{
           position: "fixed", right: 18, bottom: 18, zIndex: 180, maxWidth: "min(520px, calc(100vw - 36px))",
           padding: "10px 13px", borderRadius: "var(--radius)", boxShadow: "var(--shadow-lg)",
           border: "1px solid var(--hair)", background: "var(--paper-2)",
@@ -2057,7 +2089,7 @@ function App() {
         </div>
       )}
       {sentimentOpen && (
-        <div role="dialog" aria-label="Setup usefulness rating" style={{
+        <div role="dialog" aria-modal="false" aria-label="Setup usefulness rating" style={{
           position: "fixed", right: 18, bottom: 18, zIndex: 181, width: "min(390px, calc(100vw - 36px))",
           padding: 18, borderRadius: 14, boxShadow: "var(--shadow-lg)",
           border: "1px solid var(--hair)", background: "var(--paper-2)", color: "var(--ink)",
