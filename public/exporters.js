@@ -83,9 +83,13 @@
     a.href = url;
     a.download = filename;
     a.rel = "noopener";
-    a.style.display = "none";
+    if (a.style) a.style.display = "none";
     document.body.appendChild(a);
-    a.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+    if (typeof a.dispatchEvent === "function" && typeof MouseEvent !== "undefined") {
+      a.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+    } else if (typeof a.click === "function") {
+      a.click();
+    }
     setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 4000);
     return { path: filename };
   }

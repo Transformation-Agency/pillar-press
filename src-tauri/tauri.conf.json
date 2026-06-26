@@ -1,18 +1,17 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Pillar Press",
-  "mainBinaryName": "Pillar Press",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "identifier": "com.pillar.press",
   "build": {
     "beforeDevCommand": "npm run desktop:web",
-    "devUrl": "http://localhost:3000",
+    "devUrl": "http://127.0.0.1:41739/index.html",
     "beforeBuildCommand": "npm run desktop:web:build",
     "beforeBundleCommand": "npm run desktop:sign-macos-resources",
     "frontendDist": "../public"
   },
   "app": {
-    "withGlobalTauri": true,
+    "withGlobalTauri": false,
     "windows": [
       {
         "title": "Pillar Press",
@@ -24,12 +23,11 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http://127.0.0.1:*; media-src 'self' data: blob: https: http://127.0.0.1:*; connect-src 'self' https: http://127.0.0.1:*; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
     }
   },
   "bundle": {
     "active": true,
-    "createUpdaterArtifacts": true,
     "targets": "all",
     "category": "Productivity",
     "icon": [
@@ -42,16 +40,18 @@
     "shortDescription": "Local-first content generation desk for Pillar Press",
     "longDescription": "Pillar Press is a local-first AI-assisted content generation and editorial operations workstation.",
     "macOS": {
+      "signingIdentity": "-",
       "bundleName": "Pillar Press",
-      "minimumSystemVersion": "12.0",
-      "signingIdentity": "-"
+      "minimumSystemVersion": "12.0"
     },
     "resources": [
       "resources/desktop-server",
       "resources/node",
       "resources/whisper"
-    ]
+    ],
+    "createUpdaterArtifacts": true
   },
+  "mainBinaryName": "Pillar Press",
   "plugins": {
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEVDMThCMTI4NDYzOTU4RApSV1NObFdPRUVvdkJEb3ppcldVVXZIM2pRa05maE5Vd2RKVUR3L081eVZ3RFhYeno4SGtkcVhpNgo=",

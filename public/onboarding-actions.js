@@ -157,27 +157,27 @@
   function providerSafeDetail(settings) {
     const profile = settings && settings.profile ? settings.profile : settings;
     if (!profile || typeof profile !== "object") return {};
-    const rawBaseUrl = profile.baseUrl || settings.baseUrl || null;
-    let safeBaseUrl = rawBaseUrl;
-    if (rawBaseUrl) {
-      try {
-        const URLCtor = typeof URL !== "undefined" ? URL : window && window.URL;
-        const parsed = new URLCtor(rawBaseUrl);
-        parsed.username = "";
-        parsed.password = "";
-        safeBaseUrl = parsed.toString().replace(/\/$/, rawBaseUrl.endsWith("/") ? "/" : "");
-      } catch (_error) {
-        safeBaseUrl = String(rawBaseUrl).replace(/^(https?:\/\/)[^/@]+@/i, "$1");
-      }
-    }
-    return {
+    const detail = {
       id: profile.id || settings.defaultProfileId || null,
       label: profile.label || null,
       provider: profile.provider || settings.provider || null,
       model: profile.model || settings.model || null,
-      baseUrl: safeBaseUrl,
-      hasApiKey: !!(profile.hasApiKey || settings.hasApiKey || profile.apiKey || settings.apiKey),
     };
+    if (profile.baseUrl || settings.baseUrl) {
+      const rawBaseUrl = String(profile.baseUrl || settings.baseUrl || "");
+      try {
+        const url = new URL(rawBaseUrl);
+        url.username = "";
+        url.password = "";
+        detail.baseUrl = url.toString();
+      } catch (_err) {
+        detail.baseUrl = rawBaseUrl.replace(/\/\/[^/@]+@/, "//");
+      }
+    }
+    if (profile.apiKey || profile.hasApiKey || settings.apiKey || settings.hasApiKey) {
+      detail.hasApiKey = true;
+    }
+    return detail;
   }
 
   function emit(name, detail) {
@@ -221,16 +221,23 @@
   async function requestVoice() {
     const intent = INTENTS.REQUEST_VOICE || "request_voice";
     try {
+      const audio = window.KP_ONBOARDING_AUDIO;
+      const permission = audio && audio.requestMicrophonePermission
+        ? await audio.requestMicrophonePermission()
+        : null;
+      if (!permission) {
+        const nav = window.navigator || (typeof navigator !== "undefined" ? navigator : null);
+        if (!nav || !nav.mediaDevices || !nav.mediaDevices.getUserMedia) {
+          throw new Error("Microphone access is not available here. You can keep typing instead.");
+        }
+        const stream = await nav.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach((track) => track.stop());
+      }
       const desktop = window.PILLAR_DESKTOP;
       if (desktop && desktop.isDesktop && desktop.isDesktop() && desktop.startVoiceSession) {
-        return succeeded(intent, { voiceConnected: true, transcription: "local-whisper" });
+        await desktop.startVoiceSession();
       }
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error("Microphone access is not available here.");
-      }
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stream.getTracks().forEach((track) => track.stop());
-      return succeeded(intent, { voiceConnected: true, transcription: "browser" });
+      return succeeded(intent, { voiceConnected: true, permission: permission || { microphone: "granted" } });
     } catch (error) {
       return failed(intent, error, "Audio setup failed. You can continue by typing.");
     }
@@ -500,19 +507,6 @@
     });
   }
 
-  function onVoiceStatus(handler) {
-    const desktop = window.PILLAR_DESKTOP;
-    if (!desktop || !desktop.isDesktop || !desktop.isDesktop() || !desktop.onVoiceStatus) {
-      return Promise.resolve(function () {});
-    }
-    return desktop.onVoiceStatus((event) => {
-      const payload = event && event.payload ? event.payload : event;
-      handler(payload || {});
-    }).catch(function () {
-      return function () {};
-    });
-  }
-
   function notifyProviderSetupSaved(settings) {
     markDesktopSetupComplete();
     emit(EVENTS.PROVIDER_SETUP_SAVED, providerSafeDetail(settings));
@@ -543,7 +537,6 @@
     skipOnboarding,
     onProviderSetupSaved,
     onSttFinal,
-    onVoiceStatus,
     notifyProviderSetupSaved,
     notifyProviderSetupClosed,
   };

@@ -43,10 +43,12 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
     const packet = (piece.packet as Record<string, GateResult> | null) ?? {};
     const completed = GATES.filter((g) => packet[g.id]).map((g) => g.id);
+    const trace = (packet as Record<string, unknown>).__trace ?? null;
 
     return NextResponse.json({
       status: piece.status,
       packet,
+      trace,
       completed,
       total: GATES.length,
       done: completed.length >= GATES.length,

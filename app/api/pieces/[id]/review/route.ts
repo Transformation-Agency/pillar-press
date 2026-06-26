@@ -6,13 +6,18 @@ import { db, campaigns, pieces, references } from "@/lib/db";
 import type { Piece } from "@/lib/db";
 import { getLocalPiece, getLocalReferences, updateLocalPiece } from "@/lib/local/database";
 import { isLocalFirstMode } from "@/lib/local/mode";
-import { getAIForTask } from "@/lib/llm";
+import { getAIForTaskForUser } from "@/lib/llm";
 import { buildRefContext, type ReferencesDoc } from "@/lib/refContext";
-import { GATES, runGate, type GateResult } from "@/lib/gates";
+import { GATES, type GateResult } from "@/lib/gates";
+import { buildCategoryContext } from "@/lib/editorial/categoryContext";
+import { runCategoryAwareReview, type PacketWithTrace } from "@/lib/editorial/review";
 import { toErrorResponse } from "@/lib/errors";
+import { completeUsageReservation, failUsageReservation, reserveUsage, type UsageReservation } from "@/lib/billing/usage";
 
 const notFound = () =>
   NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
+
+export const maxDuration = 900;
 
 /**
  * Load a piece the caller is allowed to touch, or null. The piece must be owned
@@ -42,6 +47,7 @@ async function resolvePiece(id: string, user: SessionUser): Promise<Piece | null
 // piece.packet[gateId] incrementally after each gate, then sets status
 // Draft→Reviewed and returns the full packet.
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  let reservation: UsageReservation = null;
   try {
     const user = await requireUser();
     const { id } = await params;
@@ -59,38 +65,48 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
 
     // The draft under review is the piece's original text (prototype: task(draft)).
     const draft = piece.original ?? "";
+    const taskAI = await getAIForTaskForUser("review", user);
+    const categoryCtx = buildCategoryContext(piece);
+    const existingPacket = ((piece.packet as Record<string, GateResult> | null) ?? {}) as Record<string, GateResult>;
+    reservation = await reserveUsage({
+      user,
+      task: "review",
+      feature: "pieces.review",
+      campaignId: piece.campaignId,
+      pieceId: piece.id,
+      providerSource: taskAI.providerSource,
+      provider: taskAI.provider,
+      model: taskAI.model,
+      metadata: { ...(taskAI.profileId ? { profileId: taskAI.profileId } : {}), category: categoryCtx.category },
+      estimatedCredits: GATES.length,
+    });
 
-    // Accumulate into a fresh packet keyed by gate id. Clear stale packets at
-    // the start so /review/status reflects the current run, not a prior review.
-    const packet: Record<string, GateResult> = {};
-    if (isLocalFirstMode()) {
-      updateLocalPiece(piece.id, user.id, { packet }, user.workspaceId);
-    } else {
-      await db
-        .update(pieces)
-        .set({ packet, updatedAt: new Date() })
-        .where(and(eq(pieces.id, piece.id), eq(pieces.userId, user.id)));
-    }
-
-    // Run gates IN ORDER, persisting incrementally after each one.
-    const reviewAI = getAIForTask("review");
-    for (const gate of GATES) {
-      const result = await runGate(gate, draft, refCtx, reviewAI);
-      packet[gate.id] = result;
+    const persistPacket = async (packet: PacketWithTrace) => {
       if (isLocalFirstMode()) {
         updateLocalPiece(piece.id, user.id, { packet }, user.workspaceId);
-        continue;
+        return;
       }
       await db
         .update(pieces)
         .set({ packet, updatedAt: new Date() })
         .where(and(eq(pieces.id, piece.id), eq(pieces.userId, user.id)));
-    }
+    };
+
+    const { packet, callCount } = await runCategoryAwareReview({
+      draft,
+      refCtx,
+      categoryCtx,
+      taskAI,
+      ai: taskAI.ai,
+      existingPacket,
+      onGate: persistPacket,
+    });
 
     // Draft → Reviewed (idempotent; only advance from Draft).
     const nextStatus = piece.status === "Draft" ? "Reviewed" : piece.status;
     if (isLocalFirstMode()) {
       updateLocalPiece(piece.id, user.id, { status: nextStatus }, user.workspaceId);
+      await completeUsageReservation(reservation, { actualCredits: callCount || GATES.length });
       return NextResponse.json({ packet, status: nextStatus });
     }
     await db
@@ -98,8 +114,10 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
       .set({ status: nextStatus, updatedAt: new Date() })
       .where(and(eq(pieces.id, piece.id), eq(pieces.userId, user.id)));
 
+    await completeUsageReservation(reservation, { actualCredits: callCount || GATES.length });
     return NextResponse.json({ packet, status: nextStatus });
   } catch (err) {
+    await failUsageReservation(reservation, err);
     return toErrorResponse(err);
   }
 }

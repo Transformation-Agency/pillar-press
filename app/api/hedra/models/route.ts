@@ -3,24 +3,52 @@ import { requireUser } from "@/lib/auth";
 import { listModels, type GenerationType } from "@/lib/hedra";
 import { FALLBACK_MODELS } from "@/lib/models-fallback";
 import { toErrorResponse } from "@/lib/errors";
+import { isLocalFirstMode } from "@/lib/local/mode";
+import { requireByokProviderAccess, requireManagedProviderAccess } from "@/lib/billing/entitlements";
+import { tenantNotFound } from "@/lib/tenant";
+import { getHedraProviderForUser } from "@/lib/mediaProviders";
+
+function fallbackModels(types: GenerationType[] | undefined) {
+  return types ? FALLBACK_MODELS.filter((m) => types.includes(m.type)) : FALLBACK_MODELS;
+}
 
 // GET /api/hedra/models?type=image,video
 // Returns live Hedra models (filtered by type), or a fallback catalog so the
 // UI still works if the provider list can't be fetched.
 export async function GET(req: Request) {
   try {
-    await requireUser();
+    const user = await requireUser();
     const url = new URL(req.url);
     const typeParam = url.searchParams.get("type");
+    const profileId = url.searchParams.get("mediaProfileId") || url.searchParams.get("profileId") || undefined;
     const types = typeParam ? (typeParam.split(",").filter(Boolean) as GenerationType[]) : undefined;
+    const hedraProvider = await getHedraProviderForUser(user, process.env, profileId);
+    if (!isLocalFirstMode()) {
+      if (!user.workspaceId) return tenantNotFound();
+      try {
+        if (hedraProvider?.providerSource === "byok") {
+          await requireByokProviderAccess({ ...user, workspaceId: user.workspaceId });
+        } else {
+          await requireManagedProviderAccess({ ...user, workspaceId: user.workspaceId });
+        }
+      } catch (err) {
+        if ((err as { status?: unknown })?.status !== 402) throw err;
+        console.warn(JSON.stringify({ level: "warn", msg: "listModels skipped, managed provider unavailable" }));
+        return NextResponse.json({ models: fallbackModels(types), source: "fallback", providerAccess: "provider_unavailable" });
+      }
+    }
     try {
-      const models = await listModels(types);
-      return NextResponse.json({ models, source: "hedra" });
+      const models = await listModels(types, { apiKey: hedraProvider?.apiKey });
+      return NextResponse.json({
+        models,
+        source: "hedra",
+        providerSource: hedraProvider?.providerSource ?? "managed",
+        profileId: hedraProvider?.profileId ?? null,
+      });
     } catch (e) {
       // graceful fallback — log server-side, still serve the UI
       console.warn(JSON.stringify({ level: "warn", msg: "listModels failed, serving fallback" }));
-      const models = types ? FALLBACK_MODELS.filter((m) => types.includes(m.type)) : FALLBACK_MODELS;
-      return NextResponse.json({ models, source: "fallback" });
+      return NextResponse.json({ models: fallbackModels(types), source: "fallback" });
     }
   } catch (err) {
     return toErrorResponse(err);

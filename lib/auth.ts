@@ -13,21 +13,27 @@ import { headers, cookies } from "next/headers";
 import { and, eq } from "drizzle-orm";
 import { db, memberships } from "@/lib/db";
 import { ensureLocalWorkspace, LOCAL_USER_ID } from "@/lib/local/database";
-import { isLocalFirstMode } from "@/lib/local/mode";
+import { isHostedWebMode, isLocalFirstMode } from "@/lib/local/mode";
 import { supabaseFromToken } from "@/lib/supabase";
 
 export type Role = (typeof import("@/db/schema").membershipRole)[number];
 
-// Skip-login compatibility: when AUTH_DISABLED is not explicitly "false", web
-// dev runs without authentication. Desktop local-first mode has its own branch
-// below and never needs Supabase.
+// Skip-login compatibility remains the default for local web/dev, but hosted
+// SaaS mode must fail safer: public deployments require real account auth
+// unless AUTH_DISABLED=true is deliberately set for a private-preview gate.
 const DEFAULT_USER_ID = process.env.DEFAULT_USER_ID ?? "dev-user";
-const authDisabled = () => process.env.AUTH_DISABLED !== "false";
+const localFirstUserId = () => process.env.PILLAR_PRESS_LOCAL_USER_ID ?? LOCAL_USER_ID;
+export const isAuthDisabled = () => {
+  const value = (process.env.AUTH_DISABLED ?? "").trim();
+  if (isHostedWebMode()) return /^(1|true|yes)$/i.test(value);
+  return value !== "false";
+};
 
 export interface SessionUser {
   id: string;
   workspaceId?: string;
   role?: Role;
+  email?: string | null;
 }
 
 /* ------------------------------------------------------------------ *
@@ -69,19 +75,20 @@ async function readAccessToken(): Promise<string | null> {
  * Returns just the id (no workspace) if no membership exists yet, so callers can
  * bootstrap one via {@link getOrCreateWorkspace}.
  */
-async function resolveMembership(userId: string): Promise<SessionUser> {
+async function resolveMembership(userId: string, email?: string | null): Promise<SessionUser> {
+  const identity = email ? { id: userId, email } : { id: userId };
   const rows = await db
     .select()
     .from(memberships)
     .where(eq(memberships.userId, userId));
 
-  if (rows.length === 0) return { id: userId };
+  if (rows.length === 0) return identity;
 
   // Deterministic pick: newest membership wins.
   const active = rows.reduce((a, b) =>
     a.createdAt > b.createdAt ? a : b,
   );
-  return { id: userId, workspaceId: active.workspaceId, role: active.role };
+  return { ...identity, workspaceId: active.workspaceId, role: active.role };
 }
 
 /**
@@ -92,7 +99,7 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
   // Desktop/local-first mode: a single local owner profile is resolved from the
   // embedded SQLite database. This path does not touch Supabase or Postgres.
   if (isLocalFirstMode()) {
-    const id = process.env.DEFAULT_USER_ID ?? LOCAL_USER_ID;
+    const id = localFirstUserId();
     const workspaceId = ensureLocalWorkspace(id);
     return { id, workspaceId, role: "author" };
   }
@@ -104,15 +111,17 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
     if (debugId) {
       const debugWorkspace = h.get("x-debug-workspace") ?? undefined;
       const debugRole = h.get("x-debug-role") as Role | null;
+      const debugEmail = h.get("x-debug-email");
       if (debugWorkspace) {
         return {
           id: debugId,
           workspaceId: debugWorkspace,
           role: debugRole ?? "author",
+          ...(debugEmail ? { email: debugEmail } : {}),
         };
       }
       // No explicit workspace header → resolve from membership like a real user.
-      const resolved = await resolveMembership(debugId);
+      const resolved = await resolveMembership(debugId, debugEmail);
       if (debugRole) resolved.role = debugRole;
       return resolved;
     }
@@ -120,7 +129,7 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
 
   // Skip-login compatibility: resolve a single default user and workspace. The
   // seed hook now creates no default campaigns.
-  if (authDisabled()) {
+  if (isAuthDisabled()) {
     const workspaceId = await getOrCreateWorkspace(DEFAULT_USER_ID);
     return { id: DEFAULT_USER_ID, workspaceId, role: "author" };
   }
@@ -129,25 +138,37 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
   if (!token) return null;
 
   let userId: string;
+  let email: string | null = null;
   try {
     const supabase = supabaseFromToken(token);
     const { data, error } = await supabase.auth.getUser(token);
     if (error || !data?.user) return null;
     userId = data.user.id;
+    email = data.user.email ?? null;
   } catch {
     // Misconfiguration / network — treat as no session rather than leaking 500s
     // from a read of the session.
     return null;
   }
 
-  return resolveMembership(userId);
+  return resolveMembership(userId, email);
 }
 
 /** Require a valid session or throw a 401-tagged error. */
 export async function requireUser(): Promise<SessionUser> {
   const u = await getCurrentUser();
   if (!u) throw unauthorized();
-  return u;
+  return ensureWorkspaceForUser(u);
+}
+
+export async function ensureWorkspaceForUser(user: SessionUser): Promise<SessionUser & { workspaceId: string }> {
+  if (user.workspaceId) return { ...user, workspaceId: user.workspaceId };
+  if (isLocalFirstMode()) {
+    const workspaceId = ensureLocalWorkspace(user.id);
+    return { ...user, workspaceId, role: user.role ?? "author" };
+  }
+  const workspaceId = await getOrCreateWorkspace(user.id);
+  return { ...user, workspaceId, role: user.role ?? "author" };
 }
 
 /**
@@ -157,7 +178,7 @@ export async function requireUser(): Promise<SessionUser> {
 export async function requireRole(role: Role): Promise<SessionUser> {
   const u = await requireUser();
   // Skip-login compatibility: roles not enforced.
-  if (authDisabled()) return u;
+  if (isAuthDisabled()) return u;
   if (u.role !== role) throw forbidden(`Requires ${role} role.`);
   return u;
 }

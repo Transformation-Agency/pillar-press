@@ -13,7 +13,8 @@ import { runGather, type GatherItem } from "@/lib/gather";
 import { SOURCE_KIND_LABELS } from "@/lib/gather-validation";
 import { buildRefContext, type ReferencesDoc } from "@/lib/refContext";
 import { craftSourceSummary } from "@/lib/ai/gatherSummary";
-import { getAIForTask } from "@/lib/llm";
+import { getAIForTask, type AI } from "@/lib/llm";
+import { campaignInWorkspace } from "@/lib/tenant";
 
 interface SourceSummary {
   sourceId: string;
@@ -27,18 +28,17 @@ interface SourceSummary {
 export async function runGatherForCampaign(
   campaignId: string,
   user: { id: string; workspaceId?: string | null },
-  opts: { sourceIds?: string[] } = {},
+  ai?: AI,
 ) {
-  const loaded = isLocalFirstMode()
+  if (!(await campaignInWorkspace(campaignId, user.workspaceId))) return null;
+
+  const sources = isLocalFirstMode()
     ? listLocalGatherSources(campaignId, user.id, user.workspaceId || undefined)
     : await db.select().from(gatherSources)
         .where(and(eq(gatherSources.userId, user.id), eq(gatherSources.campaignId, campaignId)));
-  if (!loaded) return null;
-  // Optional subset run (the UI runs one source at a time for real progress).
-  const wanted = opts.sourceIds?.length ? new Set(opts.sourceIds) : null;
-  const sources = wanted ? loaded.filter((s) => wanted.has(s.id)) : loaded;
+  if (!sources) return null;
 
-  const { items, perSource, errors } = await runGather(sources as any);
+  const { items, perSource } = await runGather(sources as any);
 
   if (isLocalFirstMode()) {
     Object.entries(perSource).forEach(([id, count]) =>
@@ -47,7 +47,10 @@ export async function runGatherForCampaign(
   } else {
     await Promise.all(
       Object.entries(perSource).map(([id, count]) =>
-        db.update(gatherSources).set({ lastRun: new Date(), lastCount: count }).where(eq(gatherSources.id, id)),
+        db
+          .update(gatherSources)
+          .set({ lastRun: new Date(), lastCount: count })
+          .where(and(eq(gatherSources.id, id), eq(gatherSources.userId, user.id))),
       ),
     );
   }
@@ -106,7 +109,7 @@ export async function runGatherForCampaign(
     }
     const sourcesWithItems = sources.filter((s) => (bySource.get(s.id)?.length ?? 0) > 0);
 
-    const gatherAI = getAIForTask("gather");
+    const gatherAI = ai ?? getAIForTask("gather");
     summaries = (
       await Promise.allSettled(
         sourcesWithItems.map(async (s): Promise<SourceSummary> => {
@@ -129,7 +132,7 @@ export async function runGatherForCampaign(
               await db
                 .update(gatherSources)
                 .set({ summary: text, summaryAt: new Date(), summaryItemCount: group.length })
-                .where(eq(gatherSources.id, s.id));
+                .where(and(eq(gatherSources.id, s.id), eq(gatherSources.userId, user.id)));
             }
           }
           return { sourceId: s.id, kind: s.kind, label: s.label ?? null, query: s.config ?? "", itemCount: group.length, text };
@@ -143,5 +146,5 @@ export async function runGatherForCampaign(
     console.error(JSON.stringify({ level: "error", msg: "gather summary block failed", detail: (e as Error)?.message ?? String(e) }));
   }
 
-  return { items: saved, found: items.length, saved: saved.length, perSource, errors, summaries };
+  return { items: saved, found: items.length, saved: saved.length, perSource, summaries };
 }

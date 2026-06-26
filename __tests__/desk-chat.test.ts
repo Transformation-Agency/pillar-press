@@ -30,12 +30,23 @@ vi.mock("@/lib/db", () => ({
 }));
 
 vi.mock("@/lib/llm", () => ({
-  getAIForTask: vi.fn(() => ({
-    complete: completeMock,
+  LLMError: class LLMError extends Error {},
+  getAIForTaskForUser: vi.fn(async () => ({
+    ai: { complete: completeMock },
+    providerSource: "managed",
+    provider: "openai",
+    model: "gpt-4o-mini",
+    profileId: null,
   })),
   getAIForProfile: vi.fn(() => ({
     complete: completeProfileMock,
   })),
+}));
+
+vi.mock("@/lib/billing/usage", () => ({
+  reserveUsage: vi.fn(async () => null),
+  completeUsageReservation: vi.fn(),
+  failUsageReservation: vi.fn(),
 }));
 
 describe("POST /api/desk/chat", () => {

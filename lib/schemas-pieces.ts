@@ -5,13 +5,17 @@
  * conventions. Mirrors the piece shape in DATA_MODEL.md / prototype store.js.
  */
 import { z } from "zod";
-import { pieceStatus } from "@/db/schema";
+import { pieceCategory, pieceStatus } from "@/db/schema";
+
+const categoryContextSchema = z.record(z.string(), z.unknown());
 
 /** POST /api/campaigns/:cid/pieces — create a piece (status defaults to Draft). */
 export const createPieceSchema = z.object({
   id: z.string().uuid().optional(),
   title: z.string().trim().min(1, "Title is required.").max(300),
   original: z.string().max(200_000).optional(),
+  category: z.enum(pieceCategory).optional().default("article"),
+  categoryContext: categoryContextSchema.optional().default({}),
 });
 export type CreatePieceInput = z.infer<typeof createPieceSchema>;
 
@@ -23,10 +27,8 @@ export const updatePieceSchema = z
     title: z.string().trim().min(1).max(300).optional(),
     original: z.string().max(200_000).optional(),
     status: z.enum(pieceStatus).optional(),
-    packet: z.unknown().optional(),
-    revision: z.unknown().optional(),
-    outputs: z.record(z.string(), z.unknown()).optional(),
-    outputOrder: z.array(z.string()).optional(),
+    category: z.enum(pieceCategory).optional(),
+    categoryContext: categoryContextSchema.optional(),
     direction: z.string().max(4000).optional(),
     // per-gate commentary; keys must be valid gate ids. Shallow-merged server-side.
     gateNotes: z.record(z.enum(GATE_IDS), z.string().max(2000)).optional(),
@@ -34,8 +36,7 @@ export const updatePieceSchema = z
   .refine(
     (v) =>
       v.title !== undefined || v.original !== undefined || v.status !== undefined ||
-      v.packet !== undefined || v.revision !== undefined || v.outputs !== undefined ||
-      v.outputOrder !== undefined ||
+      v.category !== undefined || v.categoryContext !== undefined ||
       v.direction !== undefined || v.gateNotes !== undefined,
     { message: "Provide at least one updatable field." },
   );

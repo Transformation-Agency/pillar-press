@@ -6,6 +6,8 @@ import { ElevenError } from "./elevenlabs";
 import { DriveError } from "./driveError";
 import { GatherError } from "./gather";
 import { LLMError } from "./llm";
+import { BillingError } from "./billing/stripe";
+import { HostedProviderUrlError } from "./hostedProviderUrls";
 import { ZodError } from "zod";
 
 export function toErrorResponse(err: unknown, requestId?: string) {
@@ -16,6 +18,14 @@ export function toErrorResponse(err: unknown, requestId?: string) {
   if (err instanceof ZodError) {
     log(400, "bad_request", "validation failed", err.flatten());
     return NextResponse.json({ error: "Invalid request.", code: "bad_request", issues: err.flatten().fieldErrors }, { status: 400 });
+  }
+  if (err instanceof BillingError) {
+    log(err.status, err.code, err.message);
+    return NextResponse.json({ error: err.message, code: err.code }, { status: err.status });
+  }
+  if (err instanceof HostedProviderUrlError) {
+    log(err.status, err.code, err.message);
+    return NextResponse.json({ error: err.message, code: err.code }, { status: err.status });
   }
   if (err instanceof HedraError || err instanceof ElevenError || err instanceof DriveError || err instanceof GatherError || err instanceof LLMError) {
     log(err.status, err.code, err.message);

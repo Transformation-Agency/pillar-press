@@ -310,6 +310,8 @@
     const type = KIND_TO_API_TYPE[media.kind] || "image";
     const body = { type, modelId: media.modelId };
     if (media.provider) body.provider = media.provider;
+    if (media.mediaProfileId) body.mediaProfileId = media.mediaProfileId;
+    if (media.audioMediaProfileId) body.audioMediaProfileId = media.audioMediaProfileId;
     if (media.campaignId) body.campaignId = media.campaignId;
     if (media.enhance !== undefined) body.enhance = media.enhance;
     if (media.directed) body.directed = true;

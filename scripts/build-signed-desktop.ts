@@ -1,16 +1,29 @@
+import { readFileSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 
 const root = process.cwd();
-const appPath = join(root, "src-tauri", "target", "release", "bundle", "macos", "Pillar Press.app");
-const dmgPath = join(root, "src-tauri", "target", "release", "bundle", "dmg", "Pillar Press_0.1.1_aarch64.dmg");
+const appVersion = JSON.parse(readFileSync(join(root, "src-tauri", "tauri.conf.json"), "utf8")).version;
+
+function optionalArg(name: string) {
+  const index = process.argv.indexOf(name);
+  return index >= 0 ? process.argv[index + 1]?.trim() || null : null;
+}
 
 function required(name: string) {
   const value = process.env[name]?.trim();
   return value ? value : null;
 }
+
+const buildTarget = optionalArg("--target") || required("PILLAR_PRESS_BUILD_TARGET");
+const targetRoot = buildTarget
+  ? join(root, "src-tauri", "target", buildTarget, "release")
+  : join(root, "src-tauri", "target", "release");
+const artifactArch = buildTarget === "x86_64-apple-darwin" ? "x64" : "aarch64";
+const appPath = join(targetRoot, "bundle", "macos", "Pillar Press.app");
+const dmgPath = join(targetRoot, "bundle", "dmg", `Pillar Press_${appVersion}_${artifactArch}.dmg`);
 
 function hasApiKeyNotaryCredentials() {
   return Boolean(required("APPLE_API_KEY") && required("APPLE_API_ISSUER") && required("APPLE_API_KEY_PATH"));
@@ -31,6 +44,10 @@ function hasKeychainProfileCredentials() {
 function tauriBin() {
   const bin = process.platform === "win32" ? "tauri.cmd" : "tauri";
   return join(root, "node_modules", ".bin", bin);
+}
+
+async function assertReleaseReadiness() {
+  await run("npm", ["run", "desktop:release-readiness"]);
 }
 
 async function run(command: string, args: string[]) {
@@ -96,6 +113,8 @@ if (process.platform !== "darwin") {
   throw new Error("Signed desktop release builds are currently configured for macOS only.");
 }
 
+await assertReleaseReadiness();
+
 const signingIdentity =
   required("PILLAR_PRESS_SIGNING_IDENTITY") ||
   required("APPLE_SIGNING_IDENTITY") ||
@@ -136,7 +155,6 @@ try {
   const macOS: Record<string, unknown> = {
     signingIdentity: signingIdentity ?? null,
     hardenedRuntime: true,
-    minimumSystemVersion: "12.0",
   };
   if (providerShortName) macOS.providerShortName = providerShortName;
 
@@ -157,7 +175,9 @@ try {
   );
 
   console.log("Building Developer ID signed Pillar Press desktop release...");
-  await run(tauriBin(), ["build", "--ci", "--config", configPath]);
+  const buildArgs = ["build", "--ci", "--config", configPath];
+  if (buildTarget) buildArgs.push("--target", buildTarget);
+  await run(tauriBin(), buildArgs);
   if (hasKeychainProfileCredentials() && !hasApiKeyNotaryCredentials() && !hasAppleIdNotaryCredentials()) {
     await notarizeApp(tempDir);
   }

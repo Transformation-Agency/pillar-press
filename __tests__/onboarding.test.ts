@@ -73,7 +73,7 @@ function createTestWindow() {
   return window;
 }
 
-function loadBrowserActions(options?: { fetch?: unknown }) {
+function loadBrowserActions(options?: { fetch?: unknown; navigator?: unknown }) {
   const window = createTestWindow();
   const manifestSource = readFileSync(new URL("../public/onboarding-manifest.js", import.meta.url), "utf8");
   const runtimeSource = readFileSync(new URL("../public/onboarding-runtime.js", import.meta.url), "utf8");
@@ -86,7 +86,7 @@ function loadBrowserActions(options?: { fetch?: unknown }) {
   }
   runInNewContext(manifestSource, { window });
   runInNewContext(runtimeSource, { window, Date });
-  runInNewContext(actionsSource, { window, Date, CustomEvent, Event, navigator: {}, fetch: options?.fetch });
+  runInNewContext(actionsSource, { window, Date, CustomEvent, Event, navigator: options?.navigator || {}, fetch: options?.fetch });
   return window;
 }
 
@@ -155,6 +155,146 @@ describe("browser onboarding audio helpers", () => {
     instance.onresult({ results: [[{ transcript: " LinkedIn and Substack " }]] });
     expect(final).toBe("LinkedIn and Substack");
   });
+
+  it("turns raw microphone permission codes into readable setup guidance", async () => {
+    let instance: any = null;
+    function Recognition(this: any) {
+      instance = this;
+      this.start = () => {};
+      this.stop = () => {};
+    }
+    const audio = loadBrowserAudio({
+      SpeechRecognition: Recognition,
+      navigator: {
+        mediaDevices: {
+          getUserMedia: async () => {
+            throw Object.assign(new Error("not-allowed"), { name: "NotAllowedError" });
+          },
+        },
+      },
+    });
+    let listenMessage = "";
+
+    audio.listenOnce({
+      onError: (error: Error) => {
+        listenMessage = error.message;
+      },
+    });
+    instance.onerror({ error: "not-allowed" });
+
+    await expect(audio.requestMicrophonePermission()).rejects.toThrow(
+      "Microphone permission is blocked. Allow Pillar Press microphone access in macOS System Settings, then try again or keep typing."
+    );
+    expect(listenMessage).toBe(
+      "Microphone permission is blocked. Allow Pillar Press microphone access in macOS System Settings, then try again or keep typing."
+    );
+    expect(audio.describeAudioError(new Error("Microphone permission check has failed"))).toBe(
+      "Microphone permission is blocked. Allow Pillar Press microphone access in macOS System Settings, then try again or keep typing."
+    );
+  });
+
+  it("speaks setup prompts through desktop speech with browser fallback", async () => {
+    const spoken: string[] = [];
+    const cancelled: string[] = [];
+    const audio = loadBrowserAudio({
+      PILLAR_DESKTOP: {
+        isDesktop: () => true,
+        speakText: async () => {
+          throw new Error("desktop voice unavailable");
+        },
+      },
+      SpeechSynthesisUtterance: function SpeechSynthesisUtterance(this: any, text: string) {
+        this.text = text;
+      },
+      speechSynthesis: {
+        cancel: () => cancelled.push("cancelled"),
+        speak: (utterance: any) => {
+          spoken.push(utterance.text);
+          utterance.onend();
+        },
+      },
+    });
+
+    await audio.speakText("Welcome to setup.", { interrupt: true });
+
+    expect(cancelled).toEqual(["cancelled"]);
+    expect(spoken).toEqual(["Welcome to setup."]);
+  });
+});
+
+describe("hosted media provider setup browser wiring", () => {
+  it("setup helper saves hosted media provider keys through the encrypted server route", () => {
+    const source = readFileSync(new URL("../public/setup-helper.jsx", import.meta.url), "utf8");
+
+    expect(source).toContain("function saveHostedMediaProviderProfile");
+    expect(source).toContain("\"/api/media/provider-settings\"");
+    expect(source).toContain("await saveHostedLLMSettings(settings)");
+    expect(source).toContain("await saveHostedMediaProviderProfile({");
+    expect(source).toContain("OpenAI key works. I saved it encrypted for voice, setup, and drafting.");
+  });
+
+  it("Studio exposes hosted media provider profile management instead of env-only instructions", () => {
+    const source = readFileSync(new URL("../public/screen-studio.jsx", import.meta.url), "utf8");
+
+    expect(source).toContain("\"/api/media/provider-settings\"");
+    expect(source).toContain("Add or replace a hosted media key");
+    expect(source).toContain("Provider saved encrypted. Studio can use it now.");
+    expect(source).toContain("Hosted web users should use this encrypted profile path.");
+  });
+});
+
+describe("desktop OpenAI media provider setup wiring", () => {
+  it("keeps desktop and inline setup model options current for OpenAI and Ollama", () => {
+    const appSource = readFileSync(new URL("../public/app.jsx", import.meta.url), "utf8");
+    const helperSource = readFileSync(new URL("../public/setup-helper.jsx", import.meta.url), "utf8");
+
+    for (const source of [appSource, helperSource]) {
+      expect(source).toContain('openai: ["gpt-4o-mini", "gpt-4.1-mini", "gpt-4o"]');
+      expect(source).toContain('const fallbackOllamaModels = ["gemma4:26b-mlx", "llama3.2", "qwen2.5:latest", "mistral"]');
+      expect(source).toContain('openai: "OpenAI / ChatGPT"');
+      expect(source).toContain('/^gemma4/i.test');
+      expect(source).not.toContain('"babbage-2"');
+      expect(source).not.toContain("'babbage-2'");
+    }
+
+    expect(appSource).toContain("const modelOptionsForSetup = () =>");
+    expect(appSource).toContain("visibleModelOptions.map");
+    expect(appSource).toContain("Showing \" + providerLabel(cloudProvider) + \" defaults until you list models.");
+    expect(appSource).toContain('const canUseSavedDesktopKey = !isHostedSetup && (config.provider === "openai" || config.provider === "xai")');
+    expect(appSource).toContain("if (!canUseSavedDesktopKey && config.provider !== \"openai-compatible\" && config.provider !== \"ollama\" && !config.apiKey && !config.profileId)");
+
+    expect(helperSource).toContain('const options = uniqueModelOptions(mode === "ollama" ? listedModels.concat(ollamaSuggestions) : (listedModels.length ? listedModels : (cloudModels[provider] || [])));');
+    expect(helperSource).toContain('setModel(localModels[0] || "gemma4:26b-mlx")');
+    expect(helperSource).toContain('setModel("gpt-4o-mini")');
+    expect(helperSource).toContain("Available models");
+    expect(helperSource).toContain('if (!(hasDesktop && ["openai", "xai"].includes(config.provider)) && ["openai", "anthropic", "gemini", "xai"].includes(config.provider) && !config.apiKey)');
+    expect(helperSource).not.toContain('list="kp-inline-model-options"');
+  });
+
+  it("routes setup speech input errors through readable audio guidance", () => {
+    const helperSource = readFileSync(new URL("../public/setup-helper.jsx", import.meta.url), "utf8");
+
+    expect(helperSource).toContain("function readableVoiceInputError");
+    expect(helperSource).toContain("ONBOARDING_AUDIO.describeAudioError(error");
+    expect(helperSource).toContain("setSetupError(readableVoiceInputError(error))");
+  });
+
+  it("main desktop setup saves OpenAI as an encrypted desktop media provider", () => {
+    const source = readFileSync(new URL("../public/app.jsx", import.meta.url), "utf8");
+
+    expect(source).toContain("if (nextProfile.provider === \"openai\" && nextProfile.apiKey)");
+    expect(source).toContain("await desktop.saveMediaProviderKey(\"openai\", nextProfile.apiKey");
+    expect(source).toContain("baseUrl: \"https://api.openai.com/v1\"");
+  });
+
+  it("inline setup helper saves OpenAI through desktop LLM and media-provider settings", () => {
+    const source = readFileSync(new URL("../public/setup-helper.jsx", import.meta.url), "utf8");
+
+    expect(source).toContain("await desktop.saveLLMSettings(settings)");
+    expect(source).toContain("await desktop.saveMediaProviderKey(\"openai\", profile.apiKey");
+    expect(source).toContain("await desktop.saveMediaProviderKey(desktopProvider, apiKey.trim()");
+    expect(source).toContain("OpenAI key works. I saved it encrypted for voice, setup, and drafting.");
+  });
 });
 
 describe("setup profile extraction schema", () => {
@@ -187,6 +327,12 @@ describe("setup profile extraction schema", () => {
     const parsed = setupProfileSchema.parse({
       brand: "pillar_press",
       communicationPlatforms: [{ platform: "Substack", priority: "primary" }],
+      publicationDefaults: {
+        humanReviewRequired: false,
+      },
+      voiceProfile: {
+        memoryPermission: "approved",
+      },
       permissions: {
         mayUseSavedMemory: true,
         mayUseUploadedVoiceExamples: true,
@@ -201,6 +347,8 @@ describe("setup profile extraction schema", () => {
       mayUseWebResearch: false,
       mayPublishOrSend: false,
     });
+    expect(parsed.publicationDefaults.humanReviewRequired).toBe(true);
+    expect(parsed.voiceProfile.memoryPermission).toBe("not_asked");
   });
 
   it("frames transcripts and uploads as untrusted source material", () => {
@@ -285,14 +433,12 @@ describe("browser onboarding runtime contract", () => {
     expect(runtime.manifest.graph.map((node: any) => node.id)).toEqual([
       "intro",
       "voice",
-      "connect",
       "focus",
       "preferences",
     ]);
     expect(runtime.pack.steps.map((step: any) => step.id)).toEqual([
       "intro",
       "voice",
-      "connect",
       "focus",
       "preferences",
     ]);
@@ -441,7 +587,7 @@ describe("browser onboarding runtime contract", () => {
       type: "answer_captured",
       sessionId: "session-1",
       stepId: "focus",
-      stepIndex: 3,
+      stepIndex: 2,
       inputMethod: "voice",
       conversational: true,
       answerAccepted: true,
@@ -819,6 +965,60 @@ describe("browser onboarding action registry", () => {
     expect(cleaned).toBe(true);
   });
 
+  it("requests microphone access, stops tracks, and starts desktop voice setup", async () => {
+    const stopped: string[] = [];
+    let requested: any = null;
+    let desktopStarted = false;
+    const window = loadBrowserActions({
+      navigator: {
+        mediaDevices: {
+          getUserMedia: async (constraints: any) => {
+            requested = constraints;
+            return {
+              getTracks: () => [{ stop: () => stopped.push("audio") }],
+            };
+          },
+        },
+      },
+    });
+    const registry = window.KP_ONBOARDING_ACTIONS;
+    window.PILLAR_DESKTOP.startVoiceSession = async () => {
+      desktopStarted = true;
+    };
+
+    const result = await registry.requestVoice();
+
+    expect(result).toMatchObject({
+      intent: "request_voice",
+      status: "succeeded",
+      data: { voiceConnected: true },
+    });
+    expect(requested).toEqual({ audio: true });
+    expect(stopped).toEqual(["audio"]);
+    expect(desktopStarted).toBe(true);
+
+    const unsupported = loadBrowserActions();
+    unsupported.navigator = {};
+    const failure = await unsupported.KP_ONBOARDING_ACTIONS.requestVoice();
+
+    expect(failure).toMatchObject({
+      intent: "request_voice",
+      status: "failed",
+      error: "Microphone access is not available here. You can keep typing instead.",
+    });
+  });
+
+  it("exposes context-file preference analysis and regeneration in setup helper", () => {
+    const source = readFileSync(new URL("../public/setup-helper.jsx", import.meta.url), "utf8");
+
+    expect(source).toContain("async function addContextFiles");
+    expect(source).toContain("async function analyzeContextFiles");
+    expect(source).toContain("window.extractFileText(file)");
+    expect(source).toContain("Pass \" + (index + 1) + \" of \" + contextFiles.length");
+    expect(source).toContain("Synthesize the final editable onboarding profile from the file passes.");
+    expect(source).toContain("Regenerate");
+  });
+
   it("posts setup profile extraction for review without saving references", async () => {
     const calls: any[] = [];
     const window = loadBrowserActions({
@@ -862,6 +1062,59 @@ describe("browser onboarding action registry", () => {
     expect(saved).toBe(false);
   });
 
+  it("saves approved setup preferences through the local reference store", async () => {
+    const window = loadBrowserActions();
+    let savedPatch: any = null;
+    window.Store = {
+      updateReferences: async (patch: any) => {
+        savedPatch = patch;
+      },
+    };
+
+    const patch = {
+      setupProfile: {
+        version: 1,
+        approvedAt: "2026-06-21T00:00:00.000Z",
+        profile: {
+          brand: "pillar_press",
+          communicationPlatforms: [{ platform: "LinkedIn", priority: "primary" }],
+          selfStatement: "I help operators turn field notes into useful systems.",
+          primaryAudience: "Independent operators",
+          throughline: "Useful ideas should become publishable work.",
+          publicationDefaults: {
+            defaultOutputTypes: ["linkedin_post", "article"],
+            preserveRawLanguage: "preserve_heavily",
+            humanReviewRequired: true,
+          },
+          permissions: { mayPublishOrSend: false },
+        },
+      },
+      selfVision: "I help operators turn field notes into useful systems.",
+      audiences: [{ id: "operators", name: "Independent operators", note: "Wants direct practical work." }],
+      throughlines: [{ id: "useful-work", name: "Useful work", note: "Useful ideas should become publishable work." }],
+      strategy: { body: "Shape drafts for LinkedIn." },
+      voiceRules: { rules: ["Keep the original cadence."] },
+      redLines: { rules: ["Do not publish automatically."] },
+    };
+
+    const result = await window.KP_ONBOARDING_ACTIONS.savePreferences(patch);
+
+    expect(result).toMatchObject({
+      intent: "save_preferences",
+      status: "succeeded",
+      data: { saved: true },
+    });
+    expect(savedPatch).toEqual(patch);
+    expect(savedPatch.setupProfile.profile.permissions).toEqual({ mayPublishOrSend: false });
+    expect(savedPatch.setupProfile.profile.publicationDefaults).toMatchObject({
+      humanReviewRequired: true,
+      preserveRawLanguage: "preserve_heavily",
+    });
+    expect(savedPatch.selfVision).toContain("operators");
+    expect(savedPatch.audiences[0]).toMatchObject({ id: "operators", name: "Independent operators" });
+    expect(savedPatch.throughlines[0]).toMatchObject({ id: "useful-work", name: "Useful work" });
+  });
+
   it("reuses an existing focus name instead of creating a duplicate campaign", async () => {
     const window = loadBrowserActions();
     let created = false;
@@ -890,6 +1143,33 @@ describe("browser onboarding action registry", () => {
     });
     expect(created).toBe(false);
     expect(activeId).toBe("existing-campaign");
+  });
+
+  it("creates a new local first focus and returns the saved campaign id", async () => {
+    const window = loadBrowserActions();
+    const added: string[] = [];
+    window.Store = {
+      addCampaign: (name: string) => {
+        added.push(name);
+        return "temp-focus";
+      },
+      whenCampaignSaved: async (tempId: string) => ({ id: `saved-${tempId}` }),
+    };
+
+    const result = await window.KP_ONBOARDING_ACTIONS.saveFocus("  Book launch  ", {
+      campaigns: [{ id: "existing-campaign", name: "Untitled focus" }],
+    });
+
+    expect(result).toMatchObject({
+      intent: "save_focus",
+      status: "succeeded",
+      data: {
+        campaignId: "saved-temp-focus",
+        tempId: "temp-focus",
+        reused: false,
+      },
+    });
+    expect(added).toEqual(["Book launch"]);
   });
 
   it("persists onboarding completion and rich first-value metadata", async () => {

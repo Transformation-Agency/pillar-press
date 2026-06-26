@@ -104,6 +104,9 @@ Developer ID signing and Apple notarization use the stricter signed path:
 npm run desktop:build:signed
 npm run desktop:verify-signed-release
 ```
+The signed build runs `npm run desktop:release-readiness` first and stops before
+signing/notarization if the canonical tracker still has unwaived release
+blockers.
 
 ## LLM Configuration
 `GET /api/llm/status` reports the active provider/model and capabilities without
@@ -249,9 +252,59 @@ MEDIA_IMAGE_MODELS=model-a,model-b
 ```
 
 ## Hosted Compatibility
-The repo still contains the old hosted web stack for compatibility. To exercise
-that path, configure `DATABASE_URL`, `SUPABASE_URL`, Supabase keys, and set
-local-first variables off. Do not run Drizzle push/generate against a local-first
+The repo still contains the old hosted web stack for compatibility and public
+web deployments. Use `.env.hosted.example` as the template for an
+internet-accessible deployment.
+
+Required hosted runtime flags:
+```bash
+PILLAR_PRESS_RUNTIME=hosted
+PILLAR_PRESS_HOSTED_WEB=true
+PILLAR_PRESS_LOCAL_FIRST=false
+DATA_BACKEND=postgres
+STORAGE_PROVIDER=supabase
+PILLAR_PRESS_STORAGE=supabase
+```
+
+If you enable the built-in password gate, the hosted app accepts `SITE_USERS`
+as a comma-separated allow-list:
+```bash
+SITE_USERS=king,pillar
+SITE_PASSWORD=<strong-password>
+```
+
+If a browser keeps rejecting a newly corrected username/password, close that
+tab/window or open a private window. Browsers cache failed Basic Auth
+credentials aggressively.
+
+Required hosted services:
+```bash
+DATABASE_URL=postgres://...
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_ANON_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=...
+```
+
+Run the hosted web path locally:
+```bash
+cp .env.hosted.example .env
+npm run db:migrate
+npm run web:dev
+```
+
+Build and start the hosted web server:
+```bash
+npm run web:build
+npm run web:start
+```
+
+`web:build` also prepares `.next/standalone` with the static and public assets
+needed by `web:start`. On a VPS such as Hetzner, run `npm run web:start` behind
+Nginx/Caddy with `PORT=3000` or the port your reverse proxy expects.
+
+If `AUTH_DISABLED=true` on a public URL, set `SITE_PASSWORD` so the app is not
+an open AI/media-credit relay. Set `AUTH_DISABLED=false` only when Supabase auth
+is fully configured. Do not run Drizzle push/generate against a local-first
 desktop database.
 
 ## Useful Commands

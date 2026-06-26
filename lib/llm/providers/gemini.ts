@@ -1,4 +1,4 @@
-import { LLMError } from "@/lib/llm/errors";
+import { LLMError, providerRequestError, providerResponseError } from "@/lib/llm/errors";
 import { PROVIDER_CAPABILITIES } from "@/lib/llm/config";
 import type { AIMessage, AIOptions, LLMAdapter, LLMConfig, MultimodalContentBlock } from "@/lib/llm/types";
 
@@ -67,6 +67,7 @@ export function geminiProvider(config: LLMConfig): LLMAdapter {
 
   const modelPath = config.model.replace(/^models\//, "");
   const url = `${config.baseUrl.replace(/\/+$/, "")}/models/${encodeURIComponent(modelPath)}:generateContent`;
+  const maxOutputTokens = Math.min(config.maxTokens, 8192);
 
   async function request(body: Record<string, unknown>): Promise<string> {
     let res: Response;
@@ -81,15 +82,15 @@ export function geminiProvider(config: LLMConfig): LLMAdapter {
         body: JSON.stringify({
           ...body,
           generationConfig: {
-            maxOutputTokens: config.maxTokens,
+            maxOutputTokens,
           },
         }),
       });
     } catch (err) {
-      throw new LLMError(502, "llm", "gemini request failed.", "gemini", (err as Error)?.message);
+      throw providerRequestError("gemini", err);
     }
     if (!res.ok) {
-      throw new LLMError(res.status, "llm", "gemini request failed.", "gemini");
+      throw await providerResponseError("gemini", res);
     }
     const json = (await res.json()) as GeminiResponse;
     const text = textFromResponse(json);

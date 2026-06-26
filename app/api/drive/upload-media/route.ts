@@ -1,14 +1,15 @@
 import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { requireUser, type SessionUser } from "@/lib/auth";
+import { getOrCreateWorkspace, requireUser, type SessionUser } from "@/lib/auth";
 import { db, mediaJobs, settings } from "@/lib/db";
 import { uploadBinaryFile, DriveError } from "@/lib/drive";
 import { safeName } from "@/lib/exporters";
 import { toErrorResponse } from "@/lib/errors";
-import { getLocalMediaJob, getOrCreateLocalSettings } from "@/lib/local/database";
+import { getLocalMediaJob } from "@/lib/local/database";
 import { isLocalFirstMode } from "@/lib/local/mode";
-import { writeLocalPublicFile } from "@/lib/local/storage";
+import { isLocalStoredUrl, writeLocalPublicFile } from "@/lib/local/storage";
+import { requireDriveEnabled } from "@/lib/billing/entitlements";
 
 const bodySchema = z.object({ mediaId: z.string().uuid() });
 
@@ -44,11 +45,20 @@ export async function POST(req: Request) {
   try {
     const user = await requireUser();
     const { mediaId } = bodySchema.parse(await req.json());
+    let userWithWorkspace = user;
+    if (!isLocalFirstMode()) {
+      const workspaceId = user.workspaceId ?? (await getOrCreateWorkspace(user.id));
+      const hostedUser = { ...user, workspaceId };
+      await requireDriveEnabled(hostedUser);
+      userWithWorkspace = hostedUser;
+    }
 
     const media = isLocalFirstMode()
       ? getLocalMediaJob(mediaId, user.id)
       : await db.query.mediaJobs.findFirst({
-          where: and(eq(mediaJobs.id, mediaId), eq(mediaJobs.userId, user.id)),
+          where: userWithWorkspace.workspaceId
+            ? and(eq(mediaJobs.id, mediaId), eq(mediaJobs.userId, user.id), eq(mediaJobs.workspaceId, userWithWorkspace.workspaceId))
+            : and(eq(mediaJobs.id, mediaId), eq(mediaJobs.userId, user.id)),
         });
     if (!media) return NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
 
@@ -57,17 +67,15 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "This media isn't ready to save yet.", code: "validation" }, { status: 422 });
     }
 
-    // (Local-first requests fall through: the bytes are fetched below — relative
-    // /api/local-files URLs resolve against this request's own origin — and go
-    // to Drive when linked, or the local exports folder otherwise.)
-    const localSetting = isLocalFirstMode()
-      ? getOrCreateLocalSettings(user.id, user.workspaceId ?? "local-workspace")
-      : null;
+    if (isLocalFirstMode() && isLocalStoredUrl(url)) {
+      const base = safeName(media.prompt || media.modelName || media.type || "media");
+      return NextResponse.json({ file: { id: url, name: base, webViewLink: url } }, { status: 201 });
+    }
+
     const [setting] = isLocalFirstMode()
       ? []
-      : await db.select().from(settings).where(settingsScope(user)).limit(1);
-    const driveRefreshToken = isLocalFirstMode() ? localSetting?.driveRefreshToken : setting?.driveRefreshToken;
-    const driveFolderId = isLocalFirstMode() ? localSetting?.driveFolderId : setting?.driveFolderId;
+      : await db.select().from(settings).where(settingsScope(userWithWorkspace)).limit(1);
+    const driveRefreshToken = setting?.driveRefreshToken;
     if (!isLocalFirstMode() && !driveRefreshToken) {
       throw new DriveError("Google Drive is not linked.", 400, "drive_not_linked");
     }
@@ -90,12 +98,12 @@ export async function POST(req: Request) {
     const base = safeName(media.prompt || media.modelName || media.type || "media");
     const name = `${base}-${media.id.slice(0, 8)}.${ext}`;
 
-    if (isLocalFirstMode() && !driveRefreshToken) {
+    if (isLocalFirstMode()) {
       const localUrl = writeLocalPublicFile(bytes, name, mime, "exports");
       return NextResponse.json({ file: { id: localUrl, name, webViewLink: localUrl } }, { status: 201 });
     }
 
-    const file = await uploadBinaryFile(driveRefreshToken!, driveFolderId, name, bytes, mime);
+    const file = await uploadBinaryFile(driveRefreshToken!, setting.driveFolderId, name, bytes, mime);
     return NextResponse.json({ file }, { status: 201 });
   } catch (err) {
     return toErrorResponse(err);

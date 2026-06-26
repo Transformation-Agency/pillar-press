@@ -9,8 +9,9 @@ import { getLocalPiece, getLocalReferences, updateLocalPiece } from "@/lib/local
 import { isLocalFirstMode } from "@/lib/local/mode";
 import { buildRefContext, type ReferencesDoc } from "@/lib/refContext";
 import { condensePost } from "@/lib/ai/condense";
-import { getAIForTask } from "@/lib/llm";
+import { getAIForTaskForUser } from "@/lib/llm";
 import { toErrorResponse } from "@/lib/errors";
+import { completeUsageReservation, failUsageReservation, reserveUsage, type UsageReservation } from "@/lib/billing/usage";
 
 const notFound = () =>
   NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
@@ -33,7 +34,6 @@ async function resolvePiece(id: string, user: SessionUser): Promise<Piece | null
 }
 
 type OutputObject = { draftPost?: string } & Record<string, unknown>;
-const historyLimit = 10;
 
 /**
  * POST /api/pieces/[id]/outputs/[platform]/condense
@@ -45,6 +45,7 @@ export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string; platform: string }> },
 ) {
+  let reservation: UsageReservation = null;
   try {
     const user = await requireUser();
     const { id, platform } = await params;
@@ -66,25 +67,35 @@ export async function POST(
         });
     const refCtx = buildRefContext((ref?.doc as ReferencesDoc | undefined) ?? null);
 
-    const originalDraft = target.draftPost;
-    const draftPost = await condensePost(originalDraft, refCtx, ratio, getAIForTask("outputs"));
-    const currentHistory = Array.isArray(target._history)
-      ? target._history.filter((item): item is string => typeof item === "string")
-      : [];
-    const nextHistory = currentHistory.concat([originalDraft]).slice(-historyLimit);
+    const taskAI = await getAIForTaskForUser("outputs", user);
+    reservation = await reserveUsage({
+      user,
+      task: "outputs",
+      feature: "pieces.outputs.condense",
+      campaignId: piece.campaignId,
+      pieceId: piece.id,
+      providerSource: taskAI.providerSource,
+      provider: taskAI.provider,
+      model: taskAI.model,
+      metadata: taskAI.profileId ? { profileId: taskAI.profileId } : {},
+    });
+    const draftPost = await condensePost(target.draftPost, refCtx, ratio, taskAI.ai);
 
-    const nextOutputs = { ...outputs, [platform]: { ...target, draftPost, _history: nextHistory } };
+    const nextOutputs = { ...outputs, [platform]: { ...target, draftPost } };
     if (isLocalFirstMode()) {
       updateLocalPiece(piece.id, user.id, { outputs: nextOutputs }, user.workspaceId);
-      return NextResponse.json({ platform, draftPost, history: nextHistory });
+      await completeUsageReservation(reservation);
+      return NextResponse.json({ platform, draftPost });
     }
     await db
       .update(pieces)
       .set({ outputs: nextOutputs, updatedAt: new Date() })
       .where(and(eq(pieces.id, piece.id), eq(pieces.userId, user.id)));
 
-    return NextResponse.json({ platform, draftPost, history: nextHistory });
+    await completeUsageReservation(reservation);
+    return NextResponse.json({ platform, draftPost });
   } catch (err) {
+    await failUsageReservation(reservation, err);
     return toErrorResponse(err);
   }
 }

@@ -5,10 +5,11 @@ import { requireUser } from "@/lib/auth";
 import { db, campaigns, references } from "@/lib/db";
 import { getLocalCampaign, getLocalReferences } from "@/lib/local/database";
 import { isLocalFirstMode } from "@/lib/local/mode";
-import { getAIForProfile, getAIForTask } from "@/lib/llm";
+import { getAIForProfile, getAIForTaskForUser } from "@/lib/llm";
 import type { AIMessage, LLMTask } from "@/lib/llm";
 import { buildRefContext, type ReferencesDoc } from "@/lib/refContext";
 import { toErrorResponse } from "@/lib/errors";
+import { completeUsageReservation, failUsageReservation, reserveUsage, type UsageReservation } from "@/lib/billing/usage";
 
 const messageSchema = z.object({
   role: z.enum(["user", "assistant"]),
@@ -20,7 +21,7 @@ const chatSchema = z.object({
   messages: z.array(messageSchema).max(60),
   memory: z.string().max(20000).optional().nullable(),
   campaignId: z.string().max(120).optional().nullable(),
-  llmProfileId: z.string().max(160).optional().nullable(),
+  llmProfileId: z.string().max(200).optional().nullable(),
   task: z.enum(["gather", "weave", "draft", "review", "revision", "outputs", "utility", "mediaPrompt"]).default("utility"),
 });
 
@@ -55,6 +56,7 @@ async function resolveRefContext(campaignId: string | null | undefined, workspac
 }
 
 export async function POST(req: Request) {
+  let reservation: UsageReservation = null;
   try {
     const user = await requireUser();
     const body = chatSchema.parse(await req.json());
@@ -64,20 +66,42 @@ export async function POST(req: Request) {
     }
     const transcript = body.messages.slice(-24);
     const system = [
-      "You are Pillar Press, a calm, precise content generation and editorial assistant.",
-      "Match reply length to the request: short and load-bearing (2-5 sentences) for questions, decisions, and editorial back-and-forth. When the author asks you to write, draft, or continue a piece, write it in full — do not ask clarifying questions first; make reasonable creative choices and let the author redirect afterward.",
-      "Return only the final answer for the author. Do not include hidden reasoning, scratchpad text, analysis notes, or XML-style reasoning tags such as <think> or <thinking>.",
+      "You are the Pillar Press, a calm, precise editorial assistant.",
+      "Keep replies short and load-bearing: usually 2-5 sentences.",
       "Do not claim to have run production workflows unless the browser route did so.",
-      "Provider-hosted web search is enabled for Desk chat on supported cloud models. Use it when the author asks for current facts, source-checking, citations, or web research. Cite sources in the answer when search was used.",
       modePreamble[body.mode] || modePreamble.desk,
       refContext ? `Approved campaign preferences and setup profile:\n${refContext}` : "",
       body.memory ? `Earlier folded context:\n${body.memory}` : "",
     ].filter(Boolean).join("\n\n");
 
-    const ai = body.llmProfileId ? getAIForProfile(body.llmProfileId) : getAIForTask(body.task as LLMTask);
-    const text = await ai.complete(transcript as AIMessage[], system, { webSearch: true });
+    const threadAI = body.llmProfileId ? getAIForProfile(body.llmProfileId) : null;
+    const taskAI = threadAI
+      ? {
+          ai: threadAI,
+          providerSource: "byok" as const,
+          provider: null,
+          model: null,
+          profileId: body.llmProfileId,
+        }
+      : await getAIForTaskForUser(body.task as LLMTask, user);
+    reservation = await reserveUsage({
+      user,
+      task: "chat",
+      feature: `desk.chat.${body.mode}`,
+      campaignId: body.campaignId,
+      providerSource: taskAI.providerSource,
+      provider: taskAI.provider,
+      model: taskAI.model,
+      metadata: taskAI.profileId ? { profileId: taskAI.profileId } : {},
+      estimatedCredits: Math.max(1, Math.ceil(JSON.stringify(transcript).length / 12000)),
+    });
+    const text = await taskAI.ai.complete(transcript as AIMessage[], system);
+    await completeUsageReservation(reservation, {
+      actualCredits: Math.max(1, Math.ceil((JSON.stringify(transcript).length + text.length) / 12000)),
+    });
     return NextResponse.json({ text: text.trim() });
   } catch (err) {
+    await failUsageReservation(reservation, err);
     return toErrorResponse(err);
   }
 }

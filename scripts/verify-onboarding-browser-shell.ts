@@ -2,11 +2,11 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { extname, join, normalize } from "node:path";
-import puppeteer from "puppeteer";
 import {
   DEFAULT_ONBOARDING_UI_PROOF,
   driveOnboardingUiProof,
 } from "./onboarding-ui-proof";
+import { launchProofBrowser } from "./puppeteer-launch";
 
 const root = process.cwd();
 const publicDir = join(root, "public");
@@ -275,11 +275,7 @@ async function startServer(state: TestState) {
 }
 
 async function runBrowserShellProof() {
-  const browser = await puppeteer.launch({
-    headless: true,
-    protocolTimeout: 120000,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
-  });
+  const browser = await launchProofBrowser();
   const scenarios = [
     {
       id: "typed",

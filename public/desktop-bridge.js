@@ -1,10 +1,17 @@
 /* Pillar Press desktop bridge.
-   In a browser this is inert. In Tauri it exposes local-first setup commands. */
-(function () {
-  const core = window.__TAURI__ && window.__TAURI__.core;
-  const event = window.__TAURI__ && window.__TAURI__.event;
+   Bundled by scripts/build-static-browser-shell.ts for the Tauri app. */
+import { invoke as tauriInvoke } from "@tauri-apps/api/core";
+import { listen as tauriListen } from "@tauri-apps/api/event";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { check } from "@tauri-apps/plugin-updater";
 
-  function isDesktop() { return !!(core && typeof core.invoke === "function"); }
+(function () {
+  function isDesktop() {
+    return !!(
+      window.__TAURI_INTERNALS__ &&
+      typeof window.__TAURI_INTERNALS__.invoke === "function"
+    );
+  }
 
   function clean(value) {
     if (value === undefined) return undefined;
@@ -22,33 +29,12 @@
 
   async function invoke(command, args) {
     if (!isDesktop()) throw new Error("Desktop runtime is not available.");
-    return core.invoke(command, clean(args || {}));
+    return tauriInvoke(command, clean(args || {}));
   }
 
   async function listen(name, handler) {
-    if (!isDesktop() || !event || typeof event.listen !== "function") return function () {};
-    return event.listen(name, handler);
-  }
-
-  async function checkForUpdates(options) {
-    if (!isDesktop()) throw new Error("Desktop runtime is not available.");
-    return core.invoke("plugin:updater|check", clean(options || {}));
-  }
-
-  async function downloadAndInstallUpdate(update, onEvent) {
-    if (!isDesktop()) throw new Error("Desktop runtime is not available.");
-    if (!update || update.rid === undefined || update.rid === null) {
-      throw new Error("No update is ready to install.");
-    }
-    if (!core.Channel) {
-      throw new Error("Updater progress channel is not available in this desktop runtime.");
-    }
-    const channel = new core.Channel();
-    if (typeof onEvent === "function") channel.onmessage = onEvent;
-    return core.invoke("plugin:updater|download_and_install", {
-      rid: update.rid,
-      onEvent: channel,
-    });
+    if (!isDesktop()) return function () {};
+    return tauriListen(name, handler);
   }
 
   window.PILLAR_DESKTOP = {
@@ -56,7 +42,6 @@
     ollamaStatus: () => invoke("ollama_status"),
     startOllama: () => invoke("start_ollama_service"),
     openOllamaDownload: () => invoke("open_ollama_download"),
-    openExternalUrl: (url) => invoke("open_external_url", { url }),
     listOllamaModels: () => invoke("list_ollama_models"),
     pullOllamaModel: (model) => invoke("pull_ollama_model", { model }),
     saveModelChoice: (model) => invoke("save_model_choice", { model }),
@@ -70,15 +55,34 @@
     saveAudioFile: (filename, base64) => invoke("save_audio_file", { args: { filename, base64 } }),
     runtimeStatus: () => invoke("desktop_runtime_status"),
     appVersion: () => invoke("desktop_app_version"),
-    checkForUpdates,
-    downloadAndInstallUpdate,
-    restartApp: () => core.invoke("plugin:process|restart"),
+    checkForUpdates: async () => {
+      if (!isDesktop()) return null;
+      const update = await check();
+      return update || null;
+    },
+    downloadAndInstallUpdate: async (update, onProgress) => {
+      if (!update) throw new Error("No update is available.");
+      let downloaded = 0;
+      let total = 0;
+      await update.downloadAndInstall((event) => {
+        if (!onProgress) return;
+        if (event.event === "Started") {
+          total = event.data.contentLength || 0;
+          onProgress({ status: "started", downloaded, total });
+        } else if (event.event === "Progress") {
+          downloaded += event.data.chunkLength || 0;
+          onProgress({ status: "downloading", downloaded, total });
+        } else if (event.event === "Finished") {
+          onProgress({ status: "finished", downloaded, total });
+        }
+      });
+    },
+    restartApp: () => relaunch(),
     startVoiceSession: () => invoke("start_voice_session"),
     speakText: (text, options) => invoke("speak_text", { args: { text, interrupt: !!(options && options.interrupt) } }),
     stopSpeaking: () => invoke("stop_speaking"),
     stopVoiceSession: () => invoke("stop_voice_session"),
     onSttFinal: (handler) => listen("stt:final", handler),
-    onVoiceStatus: (handler) => listen("voice:status", handler),
     onShowModelSetup: (handler) => listen("pillarpress:show-model-setup", handler),
     onBackupCreated: (handler) => listen("pillarpress:backup-created", handler),
   };

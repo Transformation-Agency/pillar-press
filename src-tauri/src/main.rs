@@ -3,35 +3,26 @@ use aes_gcm::{
     Aes256Gcm, Nonce,
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use hound::{SampleFormat as WavSampleFormat, WavSpec, WavWriter};
-#[cfg(target_os = "macos")]
-use objc2_foundation::{NSProcessInfo, NSString};
 use rand::RngCore;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::{
     collections::HashMap,
-    fs::{self, File},
-    io::BufWriter,
+    fs,
+    io::{Read, Write},
+    net::TcpStream,
     path::PathBuf,
     process::{Child, Command},
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
-    },
-    thread::{self, JoinHandle},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    sync::Mutex,
+    time::{SystemTime, UNIX_EPOCH},
 };
 #[cfg(not(debug_assertions))]
-use std::{
-    io::{Read, Write},
-    net::{TcpListener, TcpStream},
-    process::Stdio,
-};
+use std::{net::TcpListener, process::Stdio, thread, time::Duration};
 use tauri::{
     menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu},
-    AppHandle, Emitter, Manager, Url,
+    plugin, AppHandle, Emitter, Manager, Url,
 };
 
 const MENU_SETUP_MODEL: &str = "setup-local-model";
@@ -41,6 +32,7 @@ const MENU_OPEN_BACKUPS: &str = "open-backups-folder";
 const MENU_START_OLLAMA: &str = "start-ollama";
 const MENU_OPEN_OLLAMA_DOWNLOAD: &str = "open-ollama-download";
 const MENU_RELOAD: &str = "reload-window";
+const MENU_CHECK_UPDATES: &str = "check-updates";
 const SECRET_PREFIX: &str = "kpenc:v1:";
 const KEYCHAIN_SERVICE: &str = "Pillar Press Desktop Settings";
 const KEYCHAIN_ACCOUNT: &str = "llm-settings";
@@ -92,7 +84,6 @@ struct DesktopSettings {
     task_defaults: Option<HashMap<String, String>>,
     #[serde(default, rename = "mediaProviders")]
     media_providers: Option<HashMap<String, DesktopMediaProviderSettings>>,
-    // Gather connector keys (brave / x / youtube / ncbi); apiKey stored encrypted.
     #[serde(default)]
     integrations: Option<HashMap<String, DesktopMediaProviderSettings>>,
 }
@@ -111,7 +102,6 @@ struct SaveIntegrationKeyArgs {
     integration: String,
     #[serde(default, rename = "apiKey")]
     api_key: Option<String>,
-    // Secondary non-secret field (e.g. the Google OAuth client id).
     #[serde(default, rename = "baseUrl")]
     base_url: Option<String>,
 }
@@ -138,6 +128,17 @@ struct BackupResult {
     path: String,
 }
 
+#[derive(Serialize)]
+struct BackupManifest {
+    app: String,
+    version: String,
+    created_at_unix_ms: u128,
+    database: String,
+    settings: Option<String>,
+    settings_secrets: String,
+    storage: String,
+}
+
 #[derive(Deserialize)]
 struct SaveExportArgs {
     filename: String,
@@ -160,30 +161,13 @@ struct SaveAudioResult {
     path: String,
 }
 
-#[derive(Serialize)]
-struct BackupManifest {
-    app: String,
-    version: String,
-    created_at_unix_ms: u128,
-    database: String,
-    settings: Option<String>,
-    settings_secrets: String,
-    storage: String,
-}
-
 struct DesktopServer {
     child: Mutex<Option<Child>>,
     ollama_child: Mutex<Option<Child>>,
     speech_child: Mutex<Option<Child>>,
-    voice_session: Mutex<Option<VoiceSession>>,
     port: Mutex<Option<u16>>,
     #[cfg(not(debug_assertions))]
     scheduler_started: Mutex<bool>,
-}
-
-struct VoiceSession {
-    stop: Arc<AtomicBool>,
-    handle: Option<JoinHandle<()>>,
 }
 
 impl DesktopServer {
@@ -192,7 +176,6 @@ impl DesktopServer {
             child: Mutex::new(None),
             ollama_child: Mutex::new(None),
             speech_child: Mutex::new(None),
-            voice_session: Mutex::new(None),
             port: Mutex::new(None),
             #[cfg(not(debug_assertions))]
             scheduler_started: Mutex::new(false),
@@ -217,14 +200,6 @@ impl Drop for DesktopServer {
                 let _ = child.kill();
             }
         }
-        if let Ok(session_slot) = self.voice_session.get_mut() {
-            if let Some(mut session) = session_slot.take() {
-                session.stop.store(true, Ordering::SeqCst);
-                if let Some(handle) = session.handle.take() {
-                    let _ = handle.join();
-                }
-            }
-        }
     }
 }
 
@@ -241,6 +216,40 @@ fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
 
 fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app_data_dir(app)?.join("desktop-settings.json"))
+}
+
+fn write_private_file(path: PathBuf, contents: impl AsRef<[u8]>) -> Result<(), String> {
+    fs::write(&path, contents).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        let permissions = fs::Permissions::from_mode(0o600);
+        fs::set_permissions(&path, permissions).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+fn official_provider_base_url(provider: &str) -> Option<&'static str> {
+    if provider.eq_ignore_ascii_case("openai") {
+        Some("https://api.openai.com/v1")
+    } else if provider.eq_ignore_ascii_case("xai") {
+        Some("https://api.x.ai/v1")
+    } else if provider.eq_ignore_ascii_case("anthropic") {
+        Some("https://api.anthropic.com/v1")
+    } else if provider.eq_ignore_ascii_case("gemini") {
+        Some("https://generativelanguage.googleapis.com/v1beta")
+    } else {
+        None
+    }
+}
+
+fn clean_desktop_base_url(provider: &str, value: Option<&str>) -> Option<String> {
+    if let Some(url) = official_provider_base_url(provider) {
+        return Some(url.into());
+    }
+    value
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_string)
 }
 
 fn read_desktop_settings(app: &AppHandle) -> Result<DesktopSettings, String> {
@@ -378,7 +387,7 @@ fn desktop_secret_key(app: &AppHandle) -> Result<String, String> {
 
     let secret = random_secret_key();
     if !should_use_keychain_secret() || !write_keychain_secret(&secret) {
-        fs::write(&local_path, &secret).map_err(|e| e.to_string())?;
+        write_private_file(local_path, &secret)?;
     }
     Ok(secret)
 }
@@ -432,12 +441,6 @@ fn storage_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app_data_dir(app)?.join("storage");
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir)
-}
-
-#[cfg(target_os = "macos")]
-fn set_macos_process_name() {
-    let name = NSString::from_str("Pillar Press");
-    NSProcessInfo::processInfo().setProcessName(&name);
 }
 
 #[cfg(target_os = "macos")]
@@ -538,31 +541,6 @@ fn open_path(path: PathBuf) -> Result<(), String> {
     let mut command = {
         let mut cmd = Command::new("xdg-open");
         cmd.arg(path);
-        cmd
-    };
-
-    command.spawn().map(|_| ()).map_err(|e| e.to_string())
-}
-
-fn reveal_path(path: PathBuf) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    let mut command = {
-        let mut cmd = Command::new("open");
-        cmd.arg("-R").arg(path);
-        cmd
-    };
-
-    #[cfg(target_os = "windows")]
-    let mut command = {
-        let mut cmd = Command::new("explorer");
-        cmd.arg(format!("/select,{}", path.to_string_lossy()));
-        cmd
-    };
-
-    #[cfg(all(unix, not(target_os = "macos")))]
-    let mut command = {
-        let mut cmd = Command::new("xdg-open");
-        cmd.arg(path.parent().map(PathBuf::from).unwrap_or(path));
         cmd
     };
 
@@ -753,7 +731,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let about = AboutMetadata {
         name: Some("Pillar Press".into()),
         version: Some(env!("CARGO_PKG_VERSION").into()),
-        comments: Some("Local-first content generation desk for Pillar Press.".into()),
+        comments: Some("Local-first editorial operations desk for Pillar Press.".into()),
         website: Some("https://ollama.com/download".into()),
         website_label: Some("Local model setup".into()),
         ..Default::default()
@@ -767,7 +745,11 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
                 "Pillar Press",
                 true,
                 &[
-                    &PredefinedMenuItem::about(app, Some("About Pillar Press"), Some(about))?,
+                    &PredefinedMenuItem::about(
+                        app,
+                        Some("About Pillar Press"),
+                        Some(about),
+                    )?,
                     &PredefinedMenuItem::separator(app)?,
                     &MenuItem::with_id(
                         app,
@@ -858,6 +840,14 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
                         true,
                         None::<&str>,
                     )?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &MenuItem::with_id(
+                        app,
+                        MENU_CHECK_UPDATES,
+                        "Check for Updates...",
+                        true,
+                        None::<&str>,
+                    )?,
                 ],
             )?,
         ],
@@ -907,6 +897,9 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.eval("window.location.reload()");
             }
+        }
+        MENU_CHECK_UPDATES => {
+            let _ = open_url("https://github.com/jedisherpa/pillar-press-releases/releases/latest");
         }
         _ => {}
     }
@@ -1034,25 +1027,8 @@ fn start_packaged_server(app: &AppHandle) -> Result<Option<String>, String> {
             .env("PILLAR_PRESS_STORAGE_DIR", &storage_path)
             .env("PILLAR_PRESS_LLM_SETTINGS_PATH", &settings)
             .env("PILLAR_PRESS_DESKTOP_SETTINGS_KEY", desktop_settings_key)
-            // The basic-auth gate is for public hosted URLs. The desktop server
-            // binds to localhost only, and the background scheduler's raw POST
-            // sends no credentials — an inherited SITE_PASSWORD would silently
-            // 401 every scheduled gather.
-            .env_remove("SITE_PASSWORD")
-            .stdout(
-                std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(data_dir.join("desktop-server.stdout.log"))
-                    .map_err(|e| format!("Could not open desktop server stdout log: {e}"))?,
-            )
-            .stderr(
-                std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(data_dir.join("desktop-server.stderr.log"))
-                    .map_err(|e| format!("Could not open desktop server stderr log: {e}"))?,
-            );
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
 
         let child = command.spawn().map_err(|e| {
             append_startup_log(&data_dir, &format!("server spawn failed: {e}"));
@@ -1071,6 +1047,71 @@ fn start_packaged_server(app: &AppHandle) -> Result<Option<String>, String> {
 
         Ok(Some(format!("http://127.0.0.1:{port}")))
     }
+}
+
+fn desktop_dev_host() -> String {
+    std::env::var("PILLAR_PRESS_DESKTOP_DEV_HOST")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "127.0.0.1".into())
+}
+
+fn desktop_dev_port() -> Option<u16> {
+    std::env::var("PILLAR_PRESS_DESKTOP_DEV_PORT")
+        .ok()
+        .and_then(|value| value.trim().parse::<u16>().ok())
+        .or(Some(41739))
+}
+
+fn host_matches_loopback(host: &str, expected: &str) -> bool {
+    host == expected || (host == "localhost" && expected == "127.0.0.1")
+}
+
+fn allowed_desktop_navigation(
+    url: &Url,
+    active_server_port: Option<u16>,
+    debug_build: bool,
+) -> bool {
+    match url.scheme() {
+        "tauri" | "asset" => return true,
+        "http" => {}
+        _ => return false,
+    }
+
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    let Some(port) = url.port_or_known_default() else {
+        return false;
+    };
+
+    if host == "127.0.0.1" && active_server_port == Some(port) {
+        return true;
+    }
+
+    debug_build
+        && desktop_dev_port() == Some(port)
+        && host_matches_loopback(host, &desktop_dev_host())
+}
+
+fn navigation_guard_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    plugin::Builder::new("pillar-press-navigation-guard")
+        .on_navigation(|webview, url| {
+            let active_server_port = webview
+                .state::<DesktopServer>()
+                .port
+                .lock()
+                .ok()
+                .and_then(|port| *port);
+            let allowed =
+                allowed_desktop_navigation(url, active_server_port, cfg!(debug_assertions));
+            if !allowed {
+                eprintln!("Blocked Pillar Press webview navigation to {url}");
+            }
+            allowed
+        })
+        .build()
 }
 
 #[tauri::command]
@@ -1110,6 +1151,122 @@ fn is_ollama_running() -> bool {
         .output()
         .map(|out| out.status.success())
         .unwrap_or(false)
+}
+
+fn is_embedding_only_model_name(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    lower.contains("embed")
+        || lower.contains("embedding")
+        || lower.contains("nomic-embed")
+        || lower.contains("all-minilm")
+}
+
+fn ollama_model_preference(name: &str) -> u8 {
+    let lower = name.to_lowercase();
+    if lower == "gemma4"
+        || lower.starts_with("gemma4:")
+        || lower.starts_with("gemma4-")
+        || lower.starts_with("gemma4.")
+    {
+        0
+    } else if lower == "gemma"
+        || lower.starts_with("gemma:")
+        || lower.starts_with("gemma-")
+        || lower.starts_with("gemma.")
+    {
+        1
+    } else {
+        2
+    }
+}
+
+fn ollama_api_host() -> (String, u16) {
+    let raw = std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "127.0.0.1:11434".into());
+    let without_scheme = raw
+        .trim()
+        .trim_start_matches("http://")
+        .trim_start_matches("https://");
+    let host_port = without_scheme.split('/').next().unwrap_or(without_scheme);
+    let mut parts = host_port.rsplitn(2, ':');
+    let port = parts
+        .next()
+        .and_then(|part| part.parse::<u16>().ok())
+        .unwrap_or(11434);
+    let host = parts
+        .next()
+        .unwrap_or(host_port)
+        .trim_matches('[')
+        .trim_matches(']');
+    (
+        if host.is_empty() { "127.0.0.1" } else { host }.into(),
+        port,
+    )
+}
+
+fn ollama_show_model_metadata(name: &str) -> Option<serde_json::Value> {
+    let (host, port) = ollama_api_host();
+    let body = serde_json::json!({ "model": name }).to_string();
+    let mut stream = TcpStream::connect((host.as_str(), port)).ok()?;
+    let request = format!(
+        "POST /api/show HTTP/1.1\r\nHost: {host}:{port}\r\nContent-Type: application/json\r\nAccept: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    stream.write_all(request.as_bytes()).ok()?;
+    let mut response = String::new();
+    stream.read_to_string(&mut response).ok()?;
+    let (headers, payload) = response.split_once("\r\n\r\n")?;
+    if !headers.starts_with("HTTP/1.1 200") && !headers.starts_with("HTTP/1.0 200") {
+        return None;
+    }
+    serde_json::from_str(payload).ok()
+}
+
+fn is_ollama_completion_capable_model(name: &str) -> bool {
+    if is_embedding_only_model_name(name) {
+        return false;
+    }
+    let Some(json) = ollama_show_model_metadata(name) else {
+        return true;
+    };
+
+    let capabilities = json
+        .get("capabilities")
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str())
+                .map(|item| item.to_lowercase())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if !capabilities.is_empty() {
+        let can_complete = capabilities
+            .iter()
+            .any(|cap| matches!(cap.as_str(), "completion" | "chat" | "generate"));
+        let can_embed = capabilities
+            .iter()
+            .any(|cap| matches!(cap.as_str(), "embedding" | "embed"));
+        return can_complete || !can_embed;
+    }
+
+    let details = json.get("details");
+    let family = details
+        .and_then(|value| value.get("family"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    if is_embedding_only_model_name(family) {
+        return false;
+    }
+    let families = details
+        .and_then(|value| value.get("families"))
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+    !families
+        .iter()
+        .filter_map(|value| value.as_str())
+        .any(is_embedding_only_model_name)
 }
 
 #[tauri::command]
@@ -1155,15 +1312,6 @@ fn open_ollama_download() -> Result<(), String> {
 }
 
 #[tauri::command]
-fn open_external_url(url: String) -> Result<(), String> {
-    let parsed = Url::parse(&url).map_err(|_| "Invalid URL.".to_string())?;
-    match parsed.scheme() {
-        "http" | "https" => open_url(parsed.as_str()),
-        _ => Err("Only http and https links can be opened.".to_string()),
-    }
-}
-
-#[tauri::command]
 fn list_ollama_models() -> Result<Vec<String>, String> {
     let out = ollama_command()
         .arg("list")
@@ -1173,13 +1321,21 @@ fn list_ollama_models() -> Result<Vec<String>, String> {
         return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
     }
     let text = String::from_utf8_lossy(&out.stdout);
-    Ok(text
+    let mut models = text
         .lines()
         .skip(1)
         .filter_map(|line| line.split_whitespace().next())
         .filter(|name| !name.is_empty())
+        .filter(|name| is_ollama_completion_capable_model(name))
         .map(str::to_string)
-        .collect())
+        .collect::<Vec<_>>();
+    models.sort_by(|a, b| {
+        ollama_model_preference(a)
+            .cmp(&ollama_model_preference(b))
+            .then_with(|| a.cmp(b))
+    });
+    models.dedup();
+    Ok(models)
 }
 
 #[tauri::command]
@@ -1228,14 +1384,17 @@ fn save_model_choice(app: AppHandle, model: String) -> Result<(), String> {
             .and_then(|s| s.integrations),
     };
     let json = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
-    fs::write(settings_path(&app)?, json).map_err(|e| e.to_string())
+    write_private_file(settings_path(&app)?, json)
 }
 
 #[tauri::command]
 fn save_llm_settings(app: AppHandle, settings: DesktopSettings) -> Result<(), String> {
     let provider = settings.provider.as_deref().unwrap_or("ollama").trim();
     let model = settings.model.as_deref().unwrap_or("").trim();
-    let existing = read_desktop_settings(&app).ok();
+    let mut media_providers = read_desktop_settings(&app)
+        .ok()
+        .and_then(|s| s.media_providers)
+        .unwrap_or_default();
     let mut profiles = Vec::new();
     for p in settings.profiles.unwrap_or_default() {
         let id = p.id.trim().to_string();
@@ -1244,30 +1403,11 @@ fn save_llm_settings(app: AppHandle, settings: DesktopSettings) -> Result<(), St
         if id.is_empty() || provider.is_empty() || model.is_empty() {
             continue;
         }
-        let incoming_key = p
-            .api_key
-            .as_deref()
-            .map(str::trim)
-            .filter(|v| !v.is_empty())
-            .map(str::to_string);
-        let existing_key = existing
-            .as_ref()
-            .and_then(|s| s.profiles.as_ref())
-            .and_then(|items| {
-                items
-                    .iter()
-                    .find(|item| {
-                        item.id == id
-                            || (item.provider == provider
-                                && item.model == model
-                                && item.base_url.as_deref().unwrap_or("")
-                                    == p.base_url.as_deref().unwrap_or(""))
-                            || (item.provider == provider
-                                && item.base_url.as_deref().unwrap_or("")
-                                    == p.base_url.as_deref().unwrap_or(""))
-                    })
-                    .and_then(|item| item.api_key.clone())
-            });
+        let saved_media_api_key = media_providers
+            .get(&provider.to_lowercase())
+            .and_then(|saved| saved.api_key.clone())
+            .filter(|v| !v.trim().is_empty());
+        let base_url = clean_desktop_base_url(&provider, p.base_url.as_deref());
         profiles.push(DesktopLLMProfile {
             id,
             label: p
@@ -1278,16 +1418,16 @@ fn save_llm_settings(app: AppHandle, settings: DesktopSettings) -> Result<(), St
                 .map(str::to_string),
             provider,
             model,
-            base_url: p
-                .base_url
-                .as_deref()
-                .map(str::trim)
-                .filter(|v| !v.is_empty())
-                .map(str::to_string),
-            api_key: match incoming_key {
-                Some(key) => encrypt_setting_secret(&app, Some(key))?,
-                None => existing_key,
-            },
+            base_url,
+            api_key: encrypt_setting_secret(
+                &app,
+                p.api_key
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                    .map(str::to_string),
+            )?
+            .or(saved_media_api_key),
         });
     }
     if model.is_empty() {
@@ -1302,6 +1442,70 @@ fn save_llm_settings(app: AppHandle, settings: DesktopSettings) -> Result<(), St
         .filter(|v| !v.is_empty())
         .map(str::to_string)
         .or_else(|| profiles.first().map(|p| p.id.clone()));
+    let encrypted_api_key = encrypt_setting_secret(
+        &app,
+        settings
+            .api_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_string),
+    )?
+    .or_else(|| {
+        media_providers
+            .get(&provider.to_lowercase())
+            .and_then(|saved| saved.api_key.clone())
+            .filter(|v| !v.trim().is_empty())
+    });
+    let openai_compatible_media_profile = profiles.iter().find(|p| {
+        (p.provider.eq_ignore_ascii_case("openai") || p.provider.eq_ignore_ascii_case("xai"))
+            && p.api_key
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|v| !v.is_empty())
+    });
+    if let Some(profile) = openai_compatible_media_profile {
+        let media_provider = if profile.provider.eq_ignore_ascii_case("xai") {
+            "xai"
+        } else {
+            "openai"
+        };
+        media_providers.insert(
+            media_provider.into(),
+            DesktopMediaProviderSettings {
+                api_key: profile.api_key.clone(),
+                base_url: profile
+                    .base_url
+                    .clone()
+                    .filter(|v| !v.trim().is_empty())
+                    .or_else(|| official_provider_base_url(media_provider).map(str::to_string)),
+            },
+        );
+    } else if (provider.eq_ignore_ascii_case("openai") || provider.eq_ignore_ascii_case("xai"))
+        && encrypted_api_key
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|v| !v.is_empty())
+    {
+        let media_provider = if provider.eq_ignore_ascii_case("xai") {
+            "xai"
+        } else {
+            "openai"
+        };
+        media_providers.insert(
+            media_provider.into(),
+            DesktopMediaProviderSettings {
+                api_key: encrypted_api_key.clone(),
+                base_url: settings
+                    .base_url
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                    .map(str::to_string)
+                    .or_else(|| official_provider_base_url(media_provider).map(str::to_string)),
+            },
+        );
+    }
     let cleaned = DesktopSettings {
         provider: Some(provider.into()),
         model: if model.is_empty() {
@@ -1309,25 +1513,8 @@ fn save_llm_settings(app: AppHandle, settings: DesktopSettings) -> Result<(), St
         } else {
             Some(model.into())
         },
-        base_url: settings
-            .base_url
-            .as_deref()
-            .map(str::trim)
-            .filter(|v| !v.is_empty())
-            .map(str::to_string),
-        api_key: match settings
-            .api_key
-            .as_deref()
-            .map(str::trim)
-            .filter(|v| !v.is_empty())
-            .map(str::to_string)
-        {
-            Some(key) => encrypt_setting_secret(&app, Some(key))?,
-            None => existing
-                .as_ref()
-                .filter(|s| s.provider.as_deref().unwrap_or("") == provider)
-                .and_then(|s| s.api_key.clone()),
-        },
+        base_url: clean_desktop_base_url(provider, settings.base_url.as_deref()),
+        api_key: encrypted_api_key,
         profiles: if profiles.is_empty() {
             None
         } else {
@@ -1348,11 +1535,17 @@ fn save_llm_settings(app: AppHandle, settings: DesktopSettings) -> Result<(), St
                 })
                 .collect()
         }),
-        media_providers: existing.as_ref().and_then(|s| s.media_providers.clone()),
-        integrations: existing.and_then(|s| s.integrations),
+        media_providers: if media_providers.is_empty() {
+            None
+        } else {
+            Some(media_providers)
+        },
+        integrations: read_desktop_settings(&app)
+            .ok()
+            .and_then(|s| s.integrations),
     };
     let json = serde_json::to_string_pretty(&cleaned).map_err(|e| e.to_string())?;
-    fs::write(settings_path(&app)?, json).map_err(|e| e.to_string())
+    write_private_file(settings_path(&app)?, json)
 }
 
 #[tauri::command]
@@ -1372,21 +1565,17 @@ fn save_media_provider_key(app: AppHandle, args: SaveMediaProviderKeyArgs) -> Re
     }
     let mut settings = read_desktop_settings(&app)?;
     let mut media = settings.media_providers.unwrap_or_default();
+    let base_url = clean_desktop_base_url(&provider, args.base_url.as_deref());
     media.insert(
         provider,
         DesktopMediaProviderSettings {
             api_key: encrypt_setting_secret(&app, api_key)?,
-            base_url: args
-                .base_url
-                .as_deref()
-                .map(str::trim)
-                .filter(|v| !v.is_empty())
-                .map(str::to_string),
+            base_url,
         },
     );
     settings.media_providers = Some(media);
     let json = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
-    fs::write(settings_path(&app)?, json).map_err(|e| e.to_string())
+    write_private_file(settings_path(&app)?, json)
 }
 
 #[tauri::command]
@@ -1410,7 +1599,6 @@ fn save_integration_key(app: AppHandle, args: SaveIntegrationKeyArgs) -> Result<
     let mut settings = read_desktop_settings(&app)?;
     let mut integrations = settings.integrations.unwrap_or_default();
     match api_key {
-        // An empty key disconnects the integration.
         None => {
             integrations.remove(&integration);
         }
@@ -1430,7 +1618,7 @@ fn save_integration_key(app: AppHandle, args: SaveIntegrationKeyArgs) -> Result<
         Some(integrations)
     };
     let json = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
-    fs::write(settings_path(&app)?, json).map_err(|e| e.to_string())
+    write_private_file(settings_path(&app)?, json)
 }
 
 #[tauri::command]
@@ -1511,35 +1699,6 @@ fn unique_path(mut path: PathBuf) -> PathBuf {
     path
 }
 
-#[tauri::command]
-fn save_export_file(app: AppHandle, args: SaveExportArgs) -> Result<SaveExportResult, String> {
-    let bytes = BASE64
-        .decode(args.base64.as_bytes())
-        .map_err(|_| "Could not decode export data.".to_string())?;
-    let filename = safe_export_filename(&args.filename);
-    let fallback_dir = match app.path().download_dir() {
-        Ok(path) => path,
-        Err(_) => app_data_dir(&app)?.join("exports"),
-    };
-    let Some(path) = save_panel_path(&filename)? else {
-        return Err("Save canceled.".to_string());
-    };
-    let path = if path.file_name().is_some() {
-        path
-    } else {
-        fallback_dir.join(filename)
-    };
-    let path = unique_path(path);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    fs::write(&path, bytes).map_err(|e| e.to_string())?;
-    let _ = reveal_path(path.clone());
-    Ok(SaveExportResult {
-        path: path.to_string_lossy().to_string(),
-    })
-}
-
 #[cfg(target_os = "macos")]
 fn save_panel_path(filename: &str) -> Result<Option<PathBuf>, String> {
     let script = r#"on run argv
@@ -1573,6 +1732,36 @@ fn save_panel_path(_filename: &str) -> Result<Option<PathBuf>, String> {
     Ok(None)
 }
 
+fn reveal_path(path: PathBuf) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        open_path(parent.to_path_buf())
+    } else {
+        open_path(path)
+    }
+}
+
+#[tauri::command]
+fn save_export_file(app: AppHandle, args: SaveExportArgs) -> Result<SaveExportResult, String> {
+    let bytes = BASE64
+        .decode(args.base64.as_bytes())
+        .map_err(|_| "Could not decode export data.".to_string())?;
+    let filename = safe_export_filename(&args.filename);
+    let fallback_dir = match app.path().download_dir() {
+        Ok(path) => path,
+        Err(_) => app_data_dir(&app)?.join("exports"),
+    };
+    let path = save_panel_path(&filename)?.unwrap_or_else(|| fallback_dir.join(filename));
+    let path = unique_path(path);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    fs::write(&path, bytes).map_err(|e| e.to_string())?;
+    let _ = reveal_path(path.clone());
+    Ok(SaveExportResult {
+        path: path.to_string_lossy().to_string(),
+    })
+}
+
 #[tauri::command]
 fn save_audio_file(app: AppHandle, args: SaveAudioArgs) -> Result<SaveAudioResult, String> {
     let bytes = BASE64
@@ -1583,14 +1772,8 @@ fn save_audio_file(app: AppHandle, args: SaveAudioArgs) -> Result<SaveAudioResul
         Ok(path) => path,
         Err(_) => app_data_dir(&app)?.join("exports"),
     };
-    let Some(path) = save_panel_path(&filename)? else {
-        return Err("Save canceled.".to_string());
-    };
-    let path = if path.file_name().is_some() {
-        path
-    } else {
-        fallback_dir.join(filename)
-    };
+    let path = save_panel_path(&filename)?.unwrap_or_else(|| fallback_dir.join(filename));
+    let path = unique_path(path);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
@@ -1620,260 +1803,15 @@ fn desktop_runtime_status(app: AppHandle) -> Result<DesktopRuntimeStatus, String
     })
 }
 
-fn whisper_resource_path(
-    app: &AppHandle,
-    env_key: &str,
-    resource_parts: &[&str],
-) -> Result<PathBuf, String> {
-    if let Some(path) = std::env::var_os(env_key).map(PathBuf::from) {
-        if path.exists() {
-            return Ok(path);
-        }
-        return Err(format!(
-            "{env_key} points to a missing path: {}",
-            path.to_string_lossy()
-        ));
-    }
-
-    let root = resource_path(app, "whisper").ok_or_else(|| {
-        "Bundled Whisper resources were not found. Run scripts/setup-whisper-sidecar.ts or set PILLAR_PRESS_WHISPER_BIN and PILLAR_PRESS_WHISPER_MODEL.".to_string()
-    })?;
-    let path = resource_parts
-        .iter()
-        .fold(root, |current, part| current.join(part));
-    if path.exists() {
-        Ok(path)
-    } else {
-        Err(format!(
-            "Bundled Whisper resource is missing at {}.",
-            path.to_string_lossy()
-        ))
-    }
-}
-
-fn whisper_bin_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let binary = if cfg!(windows) {
-        "whisper-cli.exe"
-    } else {
-        "whisper-cli"
-    };
-    whisper_resource_path(app, "PILLAR_PRESS_WHISPER_BIN", &["bin", binary])
-}
-
-fn whisper_model_path(app: &AppHandle) -> Result<PathBuf, String> {
-    whisper_resource_path(
-        app,
-        "PILLAR_PRESS_WHISPER_MODEL",
-        &["models", "ggml-tiny.en.bin"],
-    )
-}
-
-fn voice_capture_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app_data_dir(app)?.join("voice-captures");
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|e| e.to_string())?
-        .as_millis();
-    Ok(dir.join(format!("utterance-{now}.wav")))
-}
-
-fn emit_voice_status(app: &AppHandle, status: &str, message: Option<String>) {
-    let mut payload = serde_json::json!({ "status": status });
-    if let Some(message) = message {
-        payload["message"] = serde_json::json!(message);
-    }
-    let _ = app.emit("voice:status", payload);
-}
-
-fn write_i16_sample(writer: &Arc<Mutex<Option<WavWriter<BufWriter<File>>>>>, sample: i16) {
-    if let Ok(mut guard) = writer.lock() {
-        if let Some(wav) = guard.as_mut() {
-            let _ = wav.write_sample(sample);
-        }
-    }
-}
-
-fn record_input_wav(
-    path: PathBuf,
-    stop: Arc<AtomicBool>,
-    max_duration: Duration,
-) -> Result<(), String> {
-    let host = cpal::default_host();
-    let device = host
-        .default_input_device()
-        .ok_or_else(|| "No microphone input device was found.".to_string())?;
-    let supported = device
-        .default_input_config()
-        .map_err(|e| format!("Could not read the default microphone format: {e}"))?;
-    let sample_rate = supported.sample_rate().0;
-    let channels = supported.channels();
-    let stream_config: cpal::StreamConfig = supported.clone().into();
-    let spec = WavSpec {
-        channels,
-        sample_rate,
-        bits_per_sample: 16,
-        sample_format: WavSampleFormat::Int,
-    };
-    let writer = Arc::new(Mutex::new(Some(
-        WavWriter::create(&path, spec)
-            .map_err(|e| format!("Could not create voice recording: {e}"))?,
-    )));
-    let err_fn = |err| eprintln!("voice input stream error: {err}");
-
-    let stream = match supported.sample_format() {
-        cpal::SampleFormat::F32 => {
-            let writer = Arc::clone(&writer);
-            device.build_input_stream(
-                &stream_config,
-                move |data: &[f32], _| {
-                    for sample in data {
-                        write_i16_sample(
-                            &writer,
-                            (sample.clamp(-1.0, 1.0) * i16::MAX as f32) as i16,
-                        );
-                    }
-                },
-                err_fn,
-                None,
-            )
-        }
-        cpal::SampleFormat::I16 => {
-            let writer = Arc::clone(&writer);
-            device.build_input_stream(
-                &stream_config,
-                move |data: &[i16], _| {
-                    for sample in data {
-                        write_i16_sample(&writer, *sample);
-                    }
-                },
-                err_fn,
-                None,
-            )
-        }
-        cpal::SampleFormat::U16 => {
-            let writer = Arc::clone(&writer);
-            device.build_input_stream(
-                &stream_config,
-                move |data: &[u16], _| {
-                    for sample in data {
-                        let centered =
-                            (*sample as i32 - 32768).clamp(i16::MIN as i32, i16::MAX as i32) as i16;
-                        write_i16_sample(&writer, centered);
-                    }
-                },
-                err_fn,
-                None,
-            )
-        }
-        other => return Err(format!("Unsupported microphone sample format: {other:?}")),
-    }
-    .map_err(|e| format!("Could not start microphone recording: {e}"))?;
-
-    stream
-        .play()
-        .map_err(|e| format!("Could not activate microphone recording: {e}"))?;
-    let start = SystemTime::now();
-    while !stop.load(Ordering::SeqCst) {
-        if start.elapsed().unwrap_or_default() >= max_duration {
-            break;
-        }
-        thread::sleep(Duration::from_millis(100));
-    }
-    drop(stream);
-    if let Ok(mut guard) = writer.lock() {
-        if let Some(wav) = guard.take() {
-            wav.finalize()
-                .map_err(|e| format!("Could not finalize voice recording: {e}"))?;
-        }
-    }
-    Ok(())
-}
-
-fn transcribe_with_whisper(
-    whisper_bin: PathBuf,
-    model: PathBuf,
-    wav_path: PathBuf,
-) -> Result<String, String> {
-    let output_base = wav_path.with_extension("whisper");
-    let output = Command::new(&whisper_bin)
-        .args([
-            "-m",
-            &model.to_string_lossy(),
-            "-f",
-            &wav_path.to_string_lossy(),
-            "-nt",
-            "-otxt",
-            "-of",
-            &output_base.to_string_lossy(),
-        ])
-        .output()
-        .map_err(|e| format!("Could not run Whisper transcription: {e}"))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(if stderr.is_empty() {
-            "Whisper transcription failed.".to_string()
-        } else {
-            stderr
-        });
-    }
-    let transcript_path = output_base.with_extension("txt");
-    let text = fs::read_to_string(&transcript_path)
-        .unwrap_or_else(|_| String::from_utf8_lossy(&output.stdout).to_string())
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty() && !line.starts_with("whisper_"))
-        .collect::<Vec<_>>()
-        .join(" ")
-        .trim()
-        .to_string();
-    if text.is_empty() {
-        Err("Whisper did not return any speech. Try again closer to the microphone.".into())
-    } else {
-        Ok(text)
-    }
-}
-
 #[tauri::command]
 fn start_voice_session(app: AppHandle) -> Result<(), String> {
-    let whisper_bin = whisper_bin_path(&app)?;
-    let whisper_model = whisper_model_path(&app)?;
-    let capture_path = voice_capture_path(&app)?;
-    let server = app.state::<DesktopServer>();
-    let mut session_slot = server.voice_session.lock().map_err(|e| e.to_string())?;
-    if let Some(mut session) = session_slot.take() {
-        session.stop.store(true, Ordering::SeqCst);
-        if let Some(handle) = session.handle.take() {
-            let _ = handle.join();
-        }
-    }
-    let stop = Arc::new(AtomicBool::new(false));
-    let thread_stop = Arc::clone(&stop);
-    let thread_app = app.clone();
-    emit_voice_status(&app, "listening", None);
-    let handle = thread::spawn(move || {
-        let result = (|| {
-            record_input_wav(
-                capture_path.clone(),
-                Arc::clone(&thread_stop),
-                Duration::from_secs(6),
-            )?;
-            emit_voice_status(&thread_app, "transcribing", None);
-            transcribe_with_whisper(whisper_bin, whisper_model, capture_path)
-        })();
-        match result {
-            Ok(transcript) => {
-                let _ =
-                    thread_app.emit("stt:final", serde_json::json!({ "transcript": transcript }));
-                emit_voice_status(&thread_app, "ready", None);
-            }
-            Err(error) => emit_voice_status(&thread_app, "error", Some(error)),
-        }
-    });
-    *session_slot = Some(VoiceSession {
-        stop,
-        handle: Some(handle),
-    });
+    app.emit(
+        "voice:status",
+        serde_json::json!({
+            "status": "ready"
+        }),
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -1924,12 +1862,6 @@ fn stop_speaking(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 fn stop_voice_session(app: AppHandle) -> Result<(), String> {
     let server = app.state::<DesktopServer>();
-    {
-        let mut session_slot = server.voice_session.lock().map_err(|e| e.to_string())?;
-        if let Some(session) = session_slot.take() {
-            session.stop.store(true, Ordering::SeqCst);
-        }
-    }
     let mut speech_child = server.speech_child.lock().map_err(|e| e.to_string())?;
     if let Some(child) = speech_child.as_mut() {
         let _ = child.kill();
@@ -1952,21 +1884,16 @@ fn desktop_app_version() -> String {
 
 fn main() {
     #[cfg(target_os = "macos")]
-    set_macos_process_name();
-
-    #[cfg(target_os = "macos")]
     disable_macos_window_restoration();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(navigation_guard_plugin())
         .menu(build_menu)
         .on_menu_event(|app, event| handle_menu_event(app, event.id().as_ref()))
         .manage(DesktopServer::new())
         .setup(|app| {
-            #[cfg(target_os = "macos")]
-            set_macos_process_name();
-
             if let Some(server_url) = start_packaged_server(app.handle())? {
                 start_gather_scheduler(app.handle())?;
                 if let Some(window) = app.get_webview_window("main") {
@@ -1980,7 +1907,6 @@ fn main() {
             ollama_status,
             start_ollama_service,
             open_ollama_download,
-            open_external_url,
             list_ollama_models,
             pull_ollama_model,
             save_model_choice,
@@ -2005,9 +1931,13 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{redact_setting_secrets, write_backup_manifest};
+    use super::{
+        allowed_desktop_navigation, clean_desktop_base_url, redact_setting_secrets,
+        write_backup_manifest,
+    };
     use serde_json::json;
     use std::{fs, path::PathBuf};
+    use tauri::Url;
 
     #[test]
     fn redacts_secret_like_desktop_settings_without_removing_model_config() {
@@ -2060,5 +1990,59 @@ mod tests {
         assert_eq!(manifest["storage"], "storage/");
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn pins_official_provider_base_urls_while_allowing_custom_endpoints() {
+        assert_eq!(
+            clean_desktop_base_url("openai", Some("https://attacker.example/v1")).as_deref(),
+            Some("https://api.openai.com/v1")
+        );
+        assert_eq!(
+            clean_desktop_base_url("xai", Some("https://attacker.example/v1")).as_deref(),
+            Some("https://api.x.ai/v1")
+        );
+        assert_eq!(
+            clean_desktop_base_url("gemini", Some("https://attacker.example/v1")).as_deref(),
+            Some("https://generativelanguage.googleapis.com/v1beta")
+        );
+        assert_eq!(
+            clean_desktop_base_url("openai-compatible", Some("http://127.0.0.1:12434/v1"))
+                .as_deref(),
+            Some("http://127.0.0.1:12434/v1")
+        );
+        assert_eq!(
+            clean_desktop_base_url("custom-image", Some("https://images.example/v1")).as_deref(),
+            Some("https://images.example/v1")
+        );
+    }
+
+    #[test]
+    fn restricts_privileged_navigation_to_app_and_expected_local_ports() {
+        assert!(allowed_desktop_navigation(
+            &Url::parse("tauri://localhost/index.html").unwrap(),
+            None,
+            false
+        ));
+        assert!(allowed_desktop_navigation(
+            &Url::parse("http://127.0.0.1:3219/index.html").unwrap(),
+            Some(3219),
+            false
+        ));
+        assert!(!allowed_desktop_navigation(
+            &Url::parse("http://127.0.0.1:9999/index.html").unwrap(),
+            Some(3219),
+            false
+        ));
+        assert!(!allowed_desktop_navigation(
+            &Url::parse("https://example.com/").unwrap(),
+            Some(3219),
+            false
+        ));
+        assert!(allowed_desktop_navigation(
+            &Url::parse("http://127.0.0.1:41739/index.html").unwrap(),
+            None,
+            true
+        ));
     }
 }

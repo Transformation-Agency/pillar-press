@@ -11,6 +11,8 @@ import {
   generateRevision,
   type RevisionPacket,
 } from "@/lib/revision";
+import { buildCategoryContext, withCategoryPrompt } from "@/lib/editorial/categoryContext";
+import { runCategoryAwareRevision } from "@/lib/editorial/revision";
 import type { AI } from "@/lib/llm";
 
 describe("author guidance (direction + gate commentary)", () => {
@@ -184,6 +186,115 @@ describe("REVISION_SYSTEM", () => {
     expect(sys).toContain("@@REVISION@@");
     expect(sys).toContain("@@CHANGELOG@@");
     expect(sys).toContain("@@END@@");
+  });
+
+  it("can include category context additively", () => {
+    const ctx = buildCategoryContext({ category: "book", categoryContext: { chapterRole: "bridge chapter" } });
+    const sys = REVISION_SYSTEM(withCategoryPrompt("REF", ctx));
+    expect(sys).toContain("DESK WORKFLOW CONTEXT");
+    expect(sys).toContain("bridge chapter");
+  });
+});
+
+describe("category-aware revision orchestration", () => {
+  it("uses a letter lens and skips structural rewrite when no structure guidance is provided", async () => {
+    const calls: { prompt: string; system?: string }[] = [];
+    const ai: AI = {
+      calls,
+      async text(prompt: string, opts?: { system?: string }) {
+        calls.push({ prompt, system: opts?.system });
+        return "@@REVISION@@\nDear Ada, thank you for yesterday.\n@@CHANGELOG@@\n- [C1] warmed the sentence :: letter tone\n@@END@@";
+      },
+      async json() { throw new Error("not used"); },
+      async complete() { throw new Error("not used"); },
+      extractJSON: () => null,
+      repairJSON: () => null,
+    } as AI & { calls: typeof calls };
+    const categoryCtx = buildCategoryContext({
+      category: "letter",
+      categoryContext: { recipientName: "Ada", toneGuidance: "warm but direct" },
+    });
+
+    const result = await runCategoryAwareRevision({
+      piece: { original: "Dear Ada, thanks.", packet: FULL_PACKET },
+      refCtx: "REF",
+      categoryCtx,
+      taskAI: { provider: "ollama", model: "gemma4:26b-mlx" },
+      ai,
+      opts: { mode: "full" },
+    });
+
+    expect(result.revision.trace).toMatchObject({
+      category: "letter",
+      categoryLabel: "Letter: Ada",
+      plan: "light_polish",
+      chunks: 1,
+    });
+    expect(result.revision.trace?.warnings).toContain("category_structural_pass_disabled");
+    expect(calls).toHaveLength(1);
+    expect(calls[0].system).toContain("Letter / direct communication");
+    expect(calls[0].system).toContain("warm but direct");
+  });
+
+  it("uses staged structural planning for long full revisions", async () => {
+    const calls: { prompt: string; system?: string }[] = [];
+    const ai: AI = {
+      calls,
+      async text(prompt: string, opts?: { system?: string }) {
+        calls.push({ prompt, system: opts?.system });
+        return "@@REVISION@@\nrevised\n@@CHANGELOG@@\n- [STRUCT] changed structure :: plan\n@@END@@";
+      },
+      async json() { throw new Error("not used"); },
+      async complete() { throw new Error("not used"); },
+      extractJSON: () => null,
+      repairJSON: () => null,
+    } as AI & { calls: typeof calls };
+    const categoryCtx = buildCategoryContext({ category: "book", categoryContext: { continuityDigest: "Earlier chapter introduced the problem." } });
+    const result = await runCategoryAwareRevision({
+      piece: { original: "Very long. ".repeat(40_000), packet: FULL_PACKET },
+      refCtx: "REF",
+      categoryCtx,
+      taskAI: { provider: "ollama", model: "small-local" },
+      ai,
+      opts: { mode: "full" },
+    });
+    expect(result.revision.trace?.plan).toBe("chunked_structural_plan_then_polish");
+    expect(result.revision.trace?.warnings.some((w) => /^long_input_staged/.test(w))).toBe(true);
+    expect(calls[0].system).toContain("DESK WORKFLOW CONTEXT");
+  });
+
+  it("reports the actual light-polish passage count in the final trace", async () => {
+    const calls: { prompt: string; system?: string }[] = [];
+    const ai: AI = {
+      calls,
+      async text(prompt: string, opts?: { system?: string }) {
+        calls.push({ prompt, system: opts?.system });
+        return "@@REVISION@@\nRevised passage.\n@@CHANGELOG@@\n- [C1] tightened the passage :: clearer\n@@END@@";
+      },
+      async json() { throw new Error("not used"); },
+      async complete() { throw new Error("not used"); },
+      extractJSON: () => null,
+      repairJSON: () => null,
+    } as AI & { calls: typeof calls };
+    const paragraph = Array(180).fill("chapter").join(" ");
+    const categoryCtx = buildCategoryContext({ category: "book", categoryContext: { chapterRole: "trust chapter" } });
+
+    const result = await runCategoryAwareRevision({
+      piece: { original: `${paragraph}\n\n${paragraph}`, packet: FULL_PACKET },
+      refCtx: "REF",
+      categoryCtx,
+      taskAI: { provider: "ollama", model: "gemma4:26b-mlx" },
+      ai,
+      opts: { mode: "light" },
+    });
+
+    expect(result.revision.trace).toMatchObject({
+      category: "book",
+      plan: "light_polish",
+      chunks: 2,
+    });
+    expect(result.revision.trace?.warnings).toContain("revision_chunked:2");
+    expect(calls).toHaveLength(2);
   });
 });
 

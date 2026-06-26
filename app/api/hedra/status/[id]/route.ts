@@ -4,12 +4,48 @@ import { requireUser } from "@/lib/auth";
 import { db, mediaJobs } from "@/lib/db";
 import { getLocalMediaJob, updateLocalMediaJob } from "@/lib/local/database";
 import { isLocalFirstMode } from "@/lib/local/mode";
-import { getGenerationStatus, getAssetUrls } from "@/lib/hedra";
+import { HedraError, getGenerationStatus, getAssetUrls } from "@/lib/hedra";
 import { persistRemoteImage, persistRemoteVideo } from "@/lib/storage";
 import { toErrorResponse } from "@/lib/errors";
+import { getHostedMediaProviderProfile } from "@/lib/mediaProviderSettings";
 
 // Downloading + re-uploading a rendered video can take a while.
 export const maxDuration = 60;
+
+function metaRecord(meta: unknown): Record<string, unknown> {
+  return meta && typeof meta === "object" && !Array.isArray(meta) ? meta as Record<string, unknown> : {};
+}
+
+function hedraProfileIdFromMeta(meta: unknown): string | undefined {
+  const record = metaRecord(meta);
+  if (typeof record.hedraProfileId === "string") return record.hedraProfileId;
+  if (record.provider === "hedra" && typeof record.profileId === "string") return record.profileId;
+  return undefined;
+}
+
+function expectsByokHedra(meta: unknown): boolean {
+  const record = metaRecord(meta);
+  return record.providerSource === "byok"
+    || typeof record.hedraProfileId === "string"
+    || (record.provider === "hedra" && typeof record.profileId === "string");
+}
+
+async function hedraApiKeyForJob(user: Awaited<ReturnType<typeof requireUser>>, meta: unknown): Promise<string | undefined> {
+  if (isLocalFirstMode()) return undefined;
+  const hedraProfileId = hedraProfileIdFromMeta(meta);
+  if (!hedraProfileId) return undefined;
+  const profile = await getHostedMediaProviderProfile(user, hedraProfileId);
+  const apiKey = profile?.provider === "hedra" ? profile.apiKey?.trim() : "";
+  if (apiKey) return apiKey;
+  if (expectsByokHedra(meta)) {
+    throw new HedraError(
+      409,
+      "media_provider_unavailable",
+      "Reconnect the Hedra media provider for this generation.",
+    );
+  }
+  return undefined;
+}
 
 // GET /api/hedra/status/[id]
 // Authorizes the job to the current user (no cross-user reads), polls Hedra for
@@ -23,7 +59,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     const job = isLocalFirstMode()
       ? getLocalMediaJob(id, user.id)
       : await db.query.mediaJobs.findFirst({
-          where: and(eq(mediaJobs.id, id), eq(mediaJobs.userId, user.id)),
+          where: user.workspaceId
+            ? and(eq(mediaJobs.id, id), eq(mediaJobs.userId, user.id), eq(mediaJobs.workspaceId, user.workspaceId))
+            : and(eq(mediaJobs.id, id), eq(mediaJobs.userId, user.id)),
         });
     if (!job) return NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
 
@@ -32,7 +70,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       return NextResponse.json({ job });
     }
 
-    const s = await getGenerationStatus(job.hedraGenerationId);
+    const hedraApiKey = await hedraApiKeyForJob(user, job.meta);
+    const s = await getGenerationStatus(job.hedraGenerationId, { apiKey: hedraApiKey });
     const terminal = ["completed", "failed", "canceled"].includes(s.status);
 
     // Hedra's status endpoint returns a null url for completed images/videos —
@@ -42,7 +81,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     let dl = s.download_url ?? undefined;
     if (terminal && s.status === "completed" && !outUrl && s.asset_id) {
       try {
-        const a = await getAssetUrls(s.asset_id, job.type === "image" ? "image" : "video");
+        const a = await getAssetUrls(s.asset_id, job.type === "image" ? "image" : "video", { apiKey: hedraApiKey });
         outUrl = a.url ?? outUrl;
         thumb = thumb ?? a.thumbnailUrl;
         dl = dl ?? a.url;
@@ -57,7 +96,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     // on any failure we keep the signed URL.
     if (terminal && s.status === "completed" && outUrl) {
       if (job.type === "image") {
-        const permanent = await persistRemoteImage(outUrl, job.id);
+        const permanent = await persistRemoteImage(outUrl, job.id, { user });
         if (permanent) {
           outUrl = permanent;
           dl = permanent;
@@ -66,13 +105,13 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       } else {
         // video / avatar_video: persist the clip, and the poster (a signed
         // image URL that also expires) so it keeps showing before playback.
-        const permanent = await persistRemoteVideo(outUrl, job.id);
+        const permanent = await persistRemoteVideo(outUrl, job.id, { user });
         if (permanent) {
           outUrl = permanent;
           dl = permanent;
         }
         if (thumb) {
-          const poster = await persistRemoteImage(thumb, `${job.id}-poster`);
+          const poster = await persistRemoteImage(thumb, `${job.id}-poster`, { user });
           if (poster) thumb = poster;
         }
       }
@@ -112,7 +151,11 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
         completedAt: terminal ? new Date() : dbJob.completedAt,
         updatedAt: new Date(),
       })
-      .where(eq(mediaJobs.id, dbJob.id))
+      .where(
+        user.workspaceId
+          ? and(eq(mediaJobs.id, dbJob.id), eq(mediaJobs.userId, user.id), eq(mediaJobs.workspaceId, user.workspaceId))
+          : and(eq(mediaJobs.id, dbJob.id), eq(mediaJobs.userId, user.id)),
+      )
       .returning();
 
     return NextResponse.json({ job: updated });

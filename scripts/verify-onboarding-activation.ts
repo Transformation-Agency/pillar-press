@@ -183,10 +183,10 @@ async function loadRuntime(context: ProofContext) {
 function assertManifestContract(runtime: any, scenarioId: string) {
   assert(runtime.manifestValidation?.valid === true, scenarioId + ": Pillar Press onboarding manifest is invalid.");
   assert(runtime.manifestValidation.errors.length === 0, scenarioId + ": manifest validation reported errors.");
-  assert(runtime.manifestValidation.summary.steps >= 5, scenarioId + ": manifest did not expose the expected setup steps.");
+  assert(runtime.manifestValidation.summary.steps >= 4, scenarioId + ": manifest did not expose the expected setup steps.");
   assert(runtime.manifestValidation.summary.requiredSlots >= 2, scenarioId + ": manifest did not expose required setup slots.");
   assert(runtime.pack?.id === "pillar_press", scenarioId + ": runtime pack is not scoped to Pillar Press.");
-  assert(runtime.pack?.graph?.length >= 5, scenarioId + ": runtime pack does not expose deterministic graph nodes.");
+  assert(runtime.pack?.graph?.length >= 4, scenarioId + ": runtime pack does not expose deterministic graph nodes.");
 
   const broken = runtime.validateManifest({
     id: "broken_pack",

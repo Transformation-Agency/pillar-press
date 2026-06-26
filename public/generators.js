@@ -6,39 +6,15 @@
 
   /* ---- minimal REST helper (same-origin, no auth headers) ---- */
   async function apiSend(method, path, body) {
-    let r;
-    try {
-      r = await fetch("/api" + path, {
-        method,
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: body == null ? undefined : JSON.stringify(body),
-      });
-    } catch (e) {
-      throw new Error("Connection to the local Pillar Press server was interrupted. Try again; if it keeps happening, restart the app. (" + ((e && e.message) || "request failed") + ")");
-    }
-    if (!r.ok) {
-      let msg = "";
-      try {
-        const data = await r.json();
-        msg = data && (data.error || data.message) ? " " + (data.error || data.message) : "";
-      } catch (e) {
-        try { msg = " " + (await r.text()).slice(0, 160); } catch (_e) {}
-      }
-      throw new Error(method + " " + path + " -> " + r.status + msg);
-    }
+    const r = await fetch("/api" + path, {
+      method,
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: body == null ? undefined : JSON.stringify(body),
+    });
     const ct = r.headers.get("content-type") || "";
-    return ct.indexOf("application/json") >= 0 ? r.json() : null;
-  }
-
-  async function apiGet(path) {
-    let r;
-    try {
-      r = await fetch("/api" + path, { headers: { Accept: "application/json" } });
-    } catch (e) {
-      throw new Error("Connection to the local Pillar Press server was interrupted. Try again; if it keeps happening, restart the app. (" + ((e && e.message) || "request failed") + ")");
-    }
-    if (!r.ok) throw new Error("GET " + path + " -> " + r.status);
-    return r.json();
+    const json = ct.indexOf("application/json") >= 0 ? await r.json().catch(() => null) : null;
+    if (!r.ok) throw new Error((json && (json.error || json.message)) || (method + " " + path + " -> " + r.status));
+    return json;
   }
 
   /* ---------- Proposed Revision ----------
@@ -104,48 +80,15 @@
     // returns { piece } with piece.revision = { text, changelog }.
     // opts.mode "full" runs a whole-document restructure (strategy/structure/
     // etc.) before the per-passage clarity/tone/inoculation polish.
-    const runId = (window.crypto && window.crypto.randomUUID)
-      ? window.crypto.randomUUID()
-      : String(Date.now()) + "-" + Math.random().toString(36).slice(2);
-    const body = Object.assign({}, opts && opts.mode ? { mode: opts.mode } : {}, { runId });
-    let polling = true;
-    let latest = null;
-    const poll = async () => {
-      while (polling) {
-        await new Promise((r) => setTimeout(r, 900));
-        if (!polling) break;
-        try {
-          const st = await apiGet("/pieces/" + piece.id + "/revision/status?runId=" + encodeURIComponent(runId));
-          latest = st;
-          if (onProgress) onProgress(st.done || 0, st.total || 1);
-          if (st.status === "done" || st.status === "error") break;
-        } catch (_e) { /* transient */ }
-      }
-      return latest;
-    };
-    const pollPromise = poll();
-    let res;
-    try {
-      res = await apiSend("POST", "/pieces/" + piece.id + "/revision", body);
-    } catch (e) {
-      polling = false;
-      const st = latest || await apiGet("/pieces/" + piece.id + "/revision/status?runId=" + encodeURIComponent(runId)).catch(() => null);
-      if (st && st.status === "done" && st.revision && st.revision.text) {
-        if (onProgress) onProgress(st.total || 1, st.total || 1);
-        return {
-          revision: st.revision.text || "",
-          changelog: Array.isArray(st.revision.changelog) ? st.revision.changelog : [],
-        };
-      }
-      throw e;
-    }
-    polling = false;
-    await pollPromise;
-    const rev = (res && res.piece && res.piece.revision) || (latest && latest.revision) || {};
+    const body = opts && opts.mode ? { mode: opts.mode } : null;
+    const res = await apiSend("POST", "/pieces/" + piece.id + "/revision", body);
+    const rev = (res && res.piece && res.piece.revision) || {};
     if (onProgress) onProgress(1, 1);
     return {
       revision: rev.text || "",
       changelog: Array.isArray(rev.changelog) ? rev.changelog : [],
+      trace: rev.trace || null,
+      status: rev.status || "complete",
     };
   }
 
@@ -164,30 +107,15 @@
   // prefers to derive from; falls back to canonical source if absent.
   const PLATFORMS = [
     { id: "substack", name: "Substack", order: 1, register: "essay",
-      derivesFrom: [],
-      role: "Canonical source. The fullest expression in a long-form essay/newsletter register.",
-      constraints: "Aim for 900-1,400 words when the source can support it; never exceed 1,600 words.",
-      outputShape: "Write a complete newsletter-style essay with short section breaks or strong paragraph turns. No hashtags." },
+      derivesFrom: [], role: "Canonical source. The fullest expression — long-form essay register." },
     { id: "facebook", name: "Facebook", order: 2, register: "field",
-      derivesFrom: ["substack"],
-      role: "Relational adaptation of the canonical source. Warm, personal, field register.",
-      constraints: "Aim for 120-220 words; never exceed 300 words. Keep it skimmable on mobile.",
-      outputShape: "Use 2-5 short paragraphs. Avoid hashtags unless essential. End with a soft invitation, reflective question, or light CTA." },
+      derivesFrom: ["substack"], role: "Relational adaptation of the canonical source. Warm, personal, field register." },
     { id: "instagram", name: "Instagram", order: 3, register: "field",
-      derivesFrom: ["facebook"],
-      role: "Caption-first adaptation that supports a visual post, carousel, or Reel.",
-      constraints: "Aim for 90-180 words; never exceed 2,000 characters. First line must work as a hook under 125 characters.",
-      outputShape: "Write the caption only. Put visual recommendations, carousel slide breakdowns, Reel beat lists, and bracketed production notes in metadata only. Include 3-8 relevant hashtags only if useful." },
+      derivesFrom: ["facebook"], role: "Visual adaptation of the Facebook version. Include image/carousel/Reel recommendation." },
     { id: "x", name: "X", order: 4, register: "field",
-      derivesFrom: ["substack", "facebook"],
-      role: "Strongest theses and distinctions from the Substack + Facebook versions. Built for X as a concise thread.",
-      constraints: "Write 5-8 posts. Each post must be 260 characters or fewer.",
-      outputShape: "Format as a numbered thread: 1/ ... through N/. End with the practical takeaway or invitation." },
+      derivesFrom: ["substack", "facebook"], role: "Strongest theses and distinctions from the Substack + Facebook versions. Thread-friendly." },
     { id: "threads", name: "Threads", order: 5, register: "field",
-      derivesFrom: ["facebook", "x"],
-      role: "Conversational register, built from the Facebook + X versions.",
-      constraints: "Aim for 80-160 words; never exceed 250 words.",
-      outputShape: "Use 1-4 short paragraphs. No formal essay framing. End with a conversational opening for replies when appropriate." },
+      derivesFrom: ["facebook", "x"], role: "Conversational register, built from the Facebook + X versions." },
   ];
 
   function canonicalSource(piece) {
@@ -232,7 +160,7 @@
   }
 
   // Condense ONE output's post to ~(1-ratio) length, server-side. Returns
-  // { platform, draftPost, history }. Does not touch hooks/CTAs/metadata.
+  // { platform, draftPost }. Does not touch hooks/CTAs/metadata.
   async function condenseOutput(pieceId, platform, ratio) {
     return apiSend("POST", "/pieces/" + pieceId + "/outputs/" + encodeURIComponent(platform) + "/condense", { ratio: ratio || 0.4 });
   }

@@ -38,6 +38,29 @@ function revisionToText(rev) {
   return out;
 }
 
+function revisionTraceLabel(trace) {
+  if (!trace) return "";
+  const running = (trace.stages || []).find((s) => s.status === "running");
+  if (running) return running.label;
+  if (trace.plan === "chunked_structural_plan_then_polish") return "Staged long-form revision";
+  if (trace.plan === "structural_then_polish") return "Structural revision";
+  return "Passage polish";
+}
+
+function RevisionTraceStrip({ rev }) {
+  const trace = rev && rev.trace;
+  if (!trace) return null;
+  return (
+    <div className="card" style={{ padding: "10px 12px", marginBottom: 14, display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+      <span className="eyebrow">{trace.categoryLabel || trace.category || "Article"}</span>
+      <span className="mono muted" style={{ fontSize: 11 }}>{String(trace.plan || "light_polish").replace(/_/g, " ")}</span>
+      {trace.chunks > 1 && <span className="mono muted" style={{ fontSize: 11 }}>{trace.chunks} chunks</span>}
+      {trace.model && <span className="mono muted" style={{ fontSize: 11 }}>{trace.provider ? trace.provider + " · " : ""}{trace.model}</span>}
+      {(trace.warnings || []).map((w, i) => <span key={i} className="mono" style={{ fontSize: 11, color: "var(--accent-ink)" }}>{String(w).replace(/_/g, " ")}</span>)}
+    </div>
+  );
+}
+
 function RevisionTab({ piece, onUpdate, refCtx }) {
   const [busy, setBusy] = React.useState(false);
   const [prog, setProg] = React.useState(null);
@@ -46,34 +69,57 @@ function RevisionTab({ piece, onUpdate, refCtx }) {
   const [full, setFull] = React.useState(false);   // full = restructure + polish
   const isMobile = window.useIsMobile();
   const rev = piece.revision;
+  const accepted = !!(rev && (piece.original || "").trim() === (rev.text || "").trim());
 
   const generate = async () => {
     setBusy(true); setErr(null); setProg(null);
+    let polling = true;
+    const poll = async () => {
+      while (polling) {
+        await new Promise((r) => setTimeout(r, 900));
+        if (!polling) break;
+        try {
+          const r = await fetch("/api/pieces/" + piece.id + "/revision/status", { headers: { Accept: "application/json" } });
+          if (!r.ok) continue;
+          const st = await r.json();
+          const trace = st.trace;
+          if (trace) setProg({ label: revisionTraceLabel(trace), trace });
+          if (st.done && !st.running) break;
+        } catch (e) {}
+      }
+    };
     try {
+      const pollPromise = poll();
       const res = await window.GEN.generateRevision(piece, refCtx, (done, total) => {
-        setProg({ done, total });
+        setProg((p) => Object.assign({}, p || {}, { done, total }));
       }, { mode: full ? "full" : "light" });
-      const revision = { text: res.revision, changelog: res.changelog };
+      polling = false;
+      await pollPromise;
+      const revision = { text: res.revision, changelog: res.changelog, trace: res.trace, status: res.status };
       const patch = { revision };
       if (piece.status === "Reviewed") patch.status = "Revised";
       onUpdate(patch);
-    } catch (e) { setErr(e.message || "Generation failed."); }
+    } catch (e) { polling = false; setErr(e.message || "Generation failed."); }
     setBusy(false); setProg(null);
+  };
+
+  const acceptRevision = () => {
+    if (!rev || !rev.text || accepted) return;
+    const patch = { original: rev.text };
+    if (piece.status !== "Revised") patch.status = "Revised";
+    onUpdate(patch);
   };
 
   const busyLabel = prog && prog.total > 1
     ? `Revising passage ${Math.min(prog.done + 1, prog.total)} of ${prog.total}…`
-    : (full ? "Restructuring, then revising…" : "Writing the revision…");
+    : (prog && prog.label) || (full ? "Restructuring, then revising…" : "Writing the revision…");
 
   // Toggle: light firewall pass vs full restructure-then-polish pass.
   const FullToggle = (
     <label title="Full revision: restructure the piece (strategy, audience, rigor, structure) then polish (clarity, tone, inoculation). Off = the light clarity/tone/inoculation pass only."
-      style={{ display: "flex", alignItems: "flex-start", gap: 9, fontSize: 13, color: full ? "var(--accent-ink)" : "var(--ink-3)", cursor: "pointer", userSelect: "none", maxWidth: 310 }}>
-      <input type="checkbox" checked={full} onChange={(e) => setFull(e.target.checked)} disabled={busy} style={{ marginTop: 3 }} />
-      <span>
-        <span style={{ display: "block", color: full ? "var(--accent-ink)" : "var(--ink)", fontWeight: 650 }}>Revise structure too</span>
-        <span style={{ display: "block", lineHeight: 1.35 }}>Also revisit strategy, audience, rigor, and organization.</span>
-      </span>
+      style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: full ? "var(--accent-ink)" : "var(--ink-3)", cursor: "pointer", userSelect: "none" }}>
+      <input type="checkbox" checked={full} onChange={(e) => setFull(e.target.checked)} disabled={busy} />
+      Full revision — apply strategy &amp; structure too
     </label>
   );
 
@@ -96,14 +142,10 @@ function RevisionTab({ piece, onUpdate, refCtx }) {
           <p className="muted" style={{ fontSize: 14.5, fontStyle: "italic", marginBottom: 24 }}>
             Where a clarity rule would flatten a line that sounds like you, your line wins.
           </p>
-          <div className="revision-action-card" style={{ maxWidth: 500, margin: "0 auto" }}>
-            <div className="revision-action-main" style={{ justifyContent: "center" }}>
-              <button className="btn primary" onClick={generate} disabled={busy}>
-                {busy ? <><Spinner size={15} /> {busyLabel}</> : <><Icon name="play" size={15} /> Generate revision</>}
-              </button>
-              {FullToggle}
-            </div>
-          </div>
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: 16 }}>{FullToggle}</div>
+          <button className="btn primary" onClick={generate} disabled={busy}>
+            {busy ? <><Spinner size={15} /> {busyLabel}</> : <><Icon name="play" size={15} /> Generate revision</>}
+          </button>
           {err && <p style={{ color: "var(--sev-must)", marginTop: 16, fontSize: 14 }}>{err}</p>}
         </div>
       </div>
@@ -115,8 +157,8 @@ function RevisionTab({ piece, onUpdate, refCtx }) {
       <div style={{ maxWidth: 1080, margin: "0 auto", padding: isMobile ? "20px 16px 80px" : "26px 32px 90px",
         display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 320px", gap: isMobile ? 18 : 36, alignItems: "start" }}>
         <div>
-          <div style={{ display: "grid", gap: 14, marginBottom: 16 }}>
-            <div style={{ display: "flex", gap: 4, background: "var(--paper-sunk)", borderRadius: 999, padding: 3, width: "fit-content" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+            <div style={{ display: "flex", gap: 4, background: "var(--paper-sunk)", borderRadius: 999, padding: 3 }}>
               {[["clean", "Clean"], ["diff", "Show changes"]].map(([id, l]) => (
                 <button key={id} onClick={() => setMode(id)} className="mono"
                   style={{ fontSize: 11.5, padding: "6px 14px", borderRadius: 999, border: "none", cursor: "pointer",
@@ -124,30 +166,21 @@ function RevisionTab({ piece, onUpdate, refCtx }) {
                     boxShadow: mode === id ? "var(--shadow-sm)" : "none" }}>{l}</button>
               ))}
             </div>
-            <div className="revision-actions">
-              <div className="revision-action-card">
-                <div className="revision-action-label">Regenerate</div>
-                <div className="revision-action-main">
-                  <button className="btn primary sm" onClick={generate} disabled={busy}>
-                    {busy ? <><Spinner size={14} /> {busyLabel}</> : <><Icon name="play" size={14} /> Regenerate</>}
-                  </button>
-                  {FullToggle}
-                </div>
-              </div>
-              <div className="revision-action-card">
-                <div className="revision-action-label">Audio</div>
-                <div className="revision-action-main">
-                  {window.AudioActions && <AudioActions text={() => rev.text} label="revision" filename={(piece.title || "revision") + "-revision.mp3"} pieceId={piece.id} campaignId={piece.campaignId} />}
-                </div>
-              </div>
-              <div className="revision-action-card">
-                <div className="revision-action-label">Other</div>
-                <div className="revision-action-main">
-                  <CopyButton text={() => rev.text} label="Copy revision" />
-                </div>
-              </div>
+            <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+              {FullToggle}
+              {accepted
+                ? <span className="chip" style={{ color: "var(--st-approved)", borderColor: "var(--st-approved)" }}><span className="dot" /> Accepted into draft</span>
+                : <button className="btn primary sm" onClick={acceptRevision} disabled={busy}>
+                    <Icon name="check" size={14} /> Accept revision
+                  </button>}
+              {window.AudioActions && <AudioActions text={() => rev.text} label="revision" filename={(piece.title || "revision") + "-revision.mp3"} pieceId={piece.id} campaignId={piece.campaignId} />}
+              <CopyButton text={() => rev.text} label="Copy revision" />
+              <button className="btn ghost sm" onClick={generate} disabled={busy}>
+                {busy ? <Spinner size={14} /> : <Icon name="play" size={14} />} Regenerate
+              </button>
             </div>
           </div>
+          <RevisionTraceStrip rev={rev} />
           <div className="card" style={{ padding: "34px 40px" }}>
             {mode === "clean"
               ? <div style={{ whiteSpace: "pre-wrap", fontSize: 17.5, lineHeight: 1.78 }}>{rev.text}</div>

@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/auth";
+import { getOrCreateWorkspace, requireUser } from "@/lib/auth";
 import { consentUrl } from "@/lib/drive";
 import { toErrorResponse } from "@/lib/errors";
 import { isLocalFirstMode } from "@/lib/local/mode";
+import { requireDriveEnabled } from "@/lib/billing/entitlements";
 
 /**
  * GET /api/drive/auth — begin the server-side Google OAuth flow.
@@ -21,24 +22,26 @@ export async function GET(req: Request) {
   try {
     const user = await requireUser();
 
+    if (isLocalFirstMode()) {
+      return NextResponse.json(
+        { error: "Google Drive linking is disabled in local-first desktop mode. Use local exports instead.", code: "local_first" },
+        { status: 400 },
+      );
+    }
+
+    const workspaceId = user.workspaceId ?? (await getOrCreateWorkspace(user.id));
+    await requireDriveEnabled({ ...user, workspaceId });
+
     const url = new URL(req.url);
     const folderId = url.searchParams.get("folderId") ?? "";
 
     const state = JSON.stringify({
       uid: user.id,
-      wid: user.workspaceId ?? "",
+      wid: workspaceId,
       folderId,
     });
 
-    // Local-first desktop: the server's port is dynamic, so derive the OAuth
-    // callback from this request's own origin instead of a fixed env URI. Use a
-    // Google "Desktop app" OAuth client — those allow loopback redirects on any
-    // port.
-    const redirectOverride = isLocalFirstMode()
-      ? new URL("/api/drive/auth/callback", url).toString()
-      : undefined;
-
-    return NextResponse.redirect(await consentUrl(state, redirectOverride));
+    return NextResponse.redirect(await consentUrl(state));
   } catch (err) {
     return toErrorResponse(err);
   }

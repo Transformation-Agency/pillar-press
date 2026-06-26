@@ -1,207 +1,305 @@
 /* Studio — provider-backed media generation surface. */
 
-function MediaProvidersDialog({ status, onClose }) {
+function MediaProvidersDialog({ status, onClose, onProviderSaved }) {
+  const providers = (status && status.providers) || [];
+  const [settings, setSettings] = React.useState({ profiles: [], defaultProfileId: null });
+  const [provider, setProvider] = React.useState("openai");
+  const [apiKey, setApiKey] = React.useState("");
+  const [model, setModel] = React.useState("gpt-image-1.5");
+  const [baseUrl, setBaseUrl] = React.useState("https://api.openai.com/v1");
+  const [label, setLabel] = React.useState("");
+  const [message, setMessage] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const providerMeta = React.useMemo(() => {
+    const entries = {};
+    providers.forEach((item) => { entries[item.id] = item; });
+    return entries;
+  }, [providers]);
+  const providerLabels = {
+    hedra: "Hedra",
+    elevenlabs: "ElevenLabs",
+    openai: "OpenAI",
+    xai: "xAI / Grok",
+    "custom-image": "Custom image endpoint",
+  };
+  const defaultBaseUrl = {
+    openai: "https://api.openai.com/v1",
+    xai: "https://api.x.ai/v1",
+    "custom-image": "",
+  };
+  const defaultModels = {
+    openai: "gpt-4o-mini-tts",
+    elevenlabs: "eleven-tts-multilingual-v2",
+    xai: "grok-imagine-image-quality",
+    "custom-image": "custom-image-model",
+    hedra: "",
+  };
+  const currentProvider = providerMeta[provider] || null;
+  const currentSetup = (currentProvider && currentProvider.setup) || {};
+  const providerLabel = (id) => (providerMeta[id] && providerMeta[id].label) || providerLabels[id] || id;
+  const desktop = window.PILLAR_DESKTOP;
+  const isDesktop = !!(desktop && desktop.isDesktop && desktop.isDesktop() && desktop.saveMediaProviderKey);
+  const providerDefaultModel = (id) => {
+    const setup = providerMeta[id] && providerMeta[id].setup;
+    return (setup && setup.defaultModel) || defaultModels[id] || "";
+  };
+  const providerDefaultBaseUrl = (id) => {
+    const setup = providerMeta[id] && providerMeta[id].setup;
+    return (setup && typeof setup.defaultBaseUrl === "string") ? setup.defaultBaseUrl : (defaultBaseUrl[id] || "");
+  };
+  const profileIdFor = (profile) =>
+    String(["media", profile.provider, profile.baseUrl || "", profile.model || ""].join("-"))
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 100) || "media-profile";
+
+  React.useEffect(() => {
+    let alive = true;
+    fetch("/api/media/provider-settings", { headers: { Accept: "application/json" } })
+      .then((response) => response.ok ? response.json() : null)
+      .then((body) => {
+        if (alive && body && body.settings) setSettings(body.settings);
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
+  function applyProvider(next) {
+    setProvider(next);
+    setApiKey("");
+    setMessage("");
+    setModel(providerDefaultModel(next));
+    setBaseUrl(providerDefaultBaseUrl(next));
+    setLabel(providerLabel(next));
+  }
+
+  async function saveProvider() {
+    const key = apiKey.trim();
+    if (!key) {
+      setMessage("Paste an API key first.");
+      return;
+    }
+    if (provider === "custom-image" && !baseUrl.trim()) {
+      setMessage("Add the custom endpoint base URL.");
+      return;
+    }
+    setBusy(true);
+    setMessage("Saving provider.");
+    try {
+      const profile = {
+        id: isDesktop ? "desktop-" + provider : profileIdFor({ provider, baseUrl, model }),
+        label: label.trim() || providerLabel(provider),
+        provider,
+        model: model.trim() || undefined,
+        baseUrl: baseUrl.trim() || undefined,
+        apiKey: key,
+      };
+      if (isDesktop) {
+        await desktop.saveMediaProviderKey(provider, key, { baseUrl: profile.baseUrl });
+        setApiKey("");
+        setMessage("Provider saved encrypted on this Mac. Studio can use it now.");
+        if (onProviderSaved) await onProviderSaved();
+        const refreshed = await fetch("/api/media/provider-settings", { headers: { Accept: "application/json" } })
+          .then((response) => response.ok ? response.json() : null)
+          .catch(() => null);
+        if (refreshed && refreshed.settings) setSettings(refreshed.settings);
+        return;
+      }
+      const existing = Array.isArray(settings.profiles) ? settings.profiles : [];
+      const profiles = existing.filter((item) => item.id !== profile.id).concat(profile);
+      const response = await fetch("/api/media/provider-settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ settings: { profiles, defaultProfileId: profile.id } }),
+      });
+      const body = await response.json().catch(() => null);
+      if (!response.ok) throw new Error((body && body.error) || "Could not save media provider.");
+      setSettings(body.settings || { profiles, defaultProfileId: profile.id });
+      setApiKey("");
+      setMessage("Provider saved encrypted. Studio can use it now.");
+    } catch (error) {
+      setMessage((error && error.message) || "Could not save media provider.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteProvider(profile) {
+    if (!profile || !profile.id) return;
+    setBusy("delete-" + profile.id);
+    setMessage("Removing " + (profile.label || providerLabel(profile.provider) || "media profile") + ".");
+    try {
+      const response = await fetch("/api/media/provider-settings?profileId=" + encodeURIComponent(profile.id), {
+        method: "DELETE",
+        headers: { Accept: "application/json" },
+      });
+      const body = await response.json().catch(() => null);
+      if (!response.ok) throw new Error((body && body.error) || "Could not remove media provider.");
+      setSettings(body.settings || { profiles: [], defaultProfileId: null });
+      setMessage("Provider removed.");
+    } catch (error) {
+      setMessage((error && error.message) || "Could not remove media provider.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function testSavedProvider(profile) {
+    if (!profile || !profile.id) return;
+    setBusy("test-" + profile.id);
+    setMessage("Testing " + (profile.label || providerLabel(profile.provider) || "media profile") + ".");
+    try {
+      const response = await fetch("/api/media/provider-settings/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ profileId: profile.id }),
+      });
+      const body = await response.json().catch(() => null);
+      if (!response.ok) throw new Error((body && body.error) || "Could not test media provider.");
+      const check = body && body.check;
+      const detail = check && check.kind === "credits"
+        ? " Credits visible."
+        : check && check.kind === "voices"
+          ? " Voices visible."
+          : check && check.kind === "models"
+            ? " Models visible."
+            : "";
+      setMessage((body && body.label ? body.label : "Provider") + " works." + detail);
+    } catch (error) {
+      setMessage((error && error.message) || "Could not test media provider.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "oklch(0 0 0 / 0.4)", display: "grid", placeItems: "center", zIndex: 80 }}>
-      <div className="card scroll-y" onClick={(e) => e.stopPropagation()} style={{ width: 560, maxWidth: "92vw", maxHeight: "88vh", padding: "26px 28px" }}>
+      <div className="card" onClick={(e) => e.stopPropagation()} style={{ width: 720, maxWidth: "92vw", padding: "26px 28px", maxHeight: "86vh", overflowY: "auto" }}>
         <div className="eyebrow" style={{ marginBottom: 6 }}>Media providers</div>
-        <h2 style={{ fontSize: 24, marginBottom: 10 }}>Studio integrations</h2>
+        <h2 style={{ fontSize: 24, marginBottom: 10 }}>Optional cloud media</h2>
         <p className="muted" style={{ fontSize: 13.5, marginBottom: 18 }}>
-          Connect optional services Studio uses for media. Keys are verified, then stored encrypted in the desktop settings — never in browser storage.
+          {isDesktop
+            ? "Studio can use optional cloud media keys for image, video, avatar, and voice generation. Keys are saved encrypted in this Mac's desktop settings and are never returned after save."
+            : "Studio can use hosted BYOK media profiles or managed server providers. Keys are saved encrypted server-side and never returned to the browser after save."}
         </p>
-        <div style={{ display: "grid", gap: 12, marginBottom: 18 }}>
-          <HedraIntegrationCard />
-          <ElevenLabsIntegrationCard />
+        <div style={{ display: "grid", gap: 8, marginBottom: 18 }}>
+          {providers.map((p) => (
+            <div key={p.id} className="card" style={{ padding: "10px 12px", borderRadius: "var(--radius)", display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+              <div>
+                <div style={{ fontSize: 15 }}>{p.label}</div>
+                <div className="muted" style={{ fontSize: 12.5 }}>
+                  {(p.capabilities || []).join(", ") || "No capabilities"}
+                  {Array.isArray(p.sources) && p.sources.length ? " · " + p.sources.join(" + ") : ""}
+                </div>
+              </div>
+              <StatusChipMini ok={!!p.configured} label={p.configured ? "Configured" : "Not configured"} />
+            </div>
+          ))}
         </div>
-        <div style={{ marginBottom: 18 }}>
-          <div className="eyebrow" style={{ marginBottom: 8 }}>Image providers</div>
-          <div style={{ display: "grid", gap: 12 }}>
-            <OpenAIImageIntegrationCard />
-            <XaiImageIntegrationCard />
-            <CustomImageIntegrationCard />
+        <div className="card" style={{ padding: 14, marginBottom: 16, background: "var(--paper-sunk)" }}>
+          <div className="eyebrow" style={{ marginBottom: 8 }}>{isDesktop ? "Add or replace a desktop media key" : "Add or replace a hosted media key"}</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <label>
+              <span className="eyebrow">Provider</span>
+              <select className="field" value={provider} onChange={(e) => applyProvider(e.target.value)}>
+                <option value="openai">OpenAI image + voice</option>
+                <option value="elevenlabs">ElevenLabs voice</option>
+                <option value="hedra">Hedra image/video/avatar</option>
+                <option value="xai">xAI / Grok image</option>
+                <option value="custom-image">Custom image endpoint</option>
+              </select>
+            </label>
+            <label>
+              <span className="eyebrow">Label</span>
+              <input className="field" value={label} onChange={(e) => setLabel(e.target.value)} placeholder={providerLabel(provider)} />
+            </label>
+            <label>
+              <span className="eyebrow">{currentSetup.keyLabel || "API key"}</span>
+              <input className="field" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="Paste API key" />
+            </label>
+            <label>
+              <span className="eyebrow">Model or default</span>
+              <input className="field" value={model} onChange={(e) => setModel(e.target.value)} placeholder={currentSetup.modelPlaceholder || providerDefaultModel(provider) || "Optional"} />
+            </label>
+            {(provider === "openai" || provider === "xai" || provider === "custom-image") && (
+              <label style={{ gridColumn: "1 / -1" }}>
+                <span className="eyebrow">Base URL</span>
+                <input className="field" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder={provider === "custom-image" ? "https://provider.example/v1" : providerDefaultBaseUrl(provider)} />
+              </label>
+            )}
           </div>
-          <p className="muted" style={{ fontSize: 12.5, lineHeight: 1.5, margin: "10px 0 0" }}>
-            Server env keys (<span className="mono">OPENAI_API_KEY</span>, <span className="mono">XAI_API_KEY</span>, <span className="mono">MEDIA_IMAGE_*</span>) still work as fallbacks for hosted installs.
-          </p>
+          {(currentSetup.summary || currentSetup.helpUrl) && (
+            <p className="muted" style={{ fontSize: 12.5, margin: "10px 0 0", lineHeight: 1.5 }}>
+              {currentSetup.summary}
+              {currentSetup.helpUrl ? <> <a href={currentSetup.helpUrl} target="_blank" rel="noreferrer">Get a key</a>.</> : null}
+            </p>
+          )}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginTop: 12 }}>
+            <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>
+              Saved profiles: {(settings.profiles || []).length || 0}. Existing saved keys stay encrypted; leave this blank unless you are adding or replacing a key.
+            </p>
+            <button className="btn primary" onClick={saveProvider} disabled={busy || !apiKey.trim()}>{busy ? <><Spinner size={14} /> Saving…</> : "Save key"}</button>
+          </div>
+          {message && <p className="muted" role="status" style={{ fontSize: 12.5, margin: "10px 0 0" }}>{message}</p>}
         </div>
+        {Array.isArray(settings.profiles) && settings.profiles.length > 0 && (
+          <div className="card" style={{ padding: 14, marginBottom: 16 }}>
+            <div className="eyebrow" style={{ marginBottom: 8 }}>{isDesktop ? "Saved desktop media profiles" : "Saved hosted media profiles"}</div>
+            <div style={{ display: "grid", gap: 8 }}>
+              {settings.profiles.map((profile) => (
+                <div key={profile.id} style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  alignItems: "center",
+                  border: "1px solid var(--hair)",
+                  borderRadius: 10,
+                  padding: "9px 10px",
+                  background: "var(--paper)",
+                }}>
+                  <div>
+                    <div style={{ fontSize: 14.5 }}>{profile.label || providerLabel(profile.provider)}</div>
+                    <div className="muted" style={{ fontSize: 12.5 }}>
+                      {providerLabel(profile.provider) + (profile.model ? " · " + profile.model : "")}
+                      {profile.id === settings.defaultProfileId ? " · default" : ""}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <button
+                      className="btn"
+                      onClick={() => testSavedProvider(profile)}
+                      disabled={!!busy}
+                      title="Test this saved hosted media profile"
+                    >
+                      {busy === "test-" + profile.id ? <Spinner size={14} /> : "Test"}
+                    </button>
+                    {!isDesktop && (
+                      <button
+                        className="btn ghost"
+                        onClick={() => deleteProvider(profile)}
+                        disabled={!!busy}
+                        title="Remove this hosted media profile"
+                      >
+                        {busy === "delete-" + profile.id ? <Spinner size={14} /> : "Remove"}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        <p className="muted" style={{ fontSize: 12.5, lineHeight: 1.5, marginBottom: 18 }}>
+          {isDesktop
+            ? "Desktop keys stay local to this Mac. Add the same key again to replace it."
+            : "Desktop/local-first can still use native encrypted settings or server env vars. Hosted web users should use this encrypted profile path."}
+        </p>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
           <button className="btn primary" onClick={onClose}>Done</button>
         </div>
       </div>
     </div>
-  );
-}
-
-/* Generic media-integration connect card — shared by the model setup modal
-   (Integrations section), the onboarding Connect step, and the Studio media
-   dialog. Verifies the pasted key against the provider's verify endpoint, then
-   saves it encrypted through the desktop bridge; the key never touches browser
-   storage. Driven by a per-provider config so Hedra, ElevenLabs (and future
-   providers) share one implementation. */
-function MediaIntegrationCard({ provider, name, logoSrc, blurb, helper, verifyUrl, verifyBody, requiresBaseUrl, statusKey, parseStatus }) {
-  const [configured, setConfigured] = React.useState(null); // null = checking
-  const [open, setOpen] = React.useState(false);
-  const [apiKey, setApiKey] = React.useState("");
-  const [baseUrl, setBaseUrl] = React.useState("");
-  const [busy, setBusy] = React.useState(false);
-  const [message, setMessage] = React.useState("");
-  const [detail, setDetail] = React.useState(null); // e.g. "120 credits" / "8 voices"
-
-  const refresh = React.useCallback(() => {
-    return fetch("/api/media/providers", { headers: { Accept: "application/json" }, cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((s) => { setConfigured(!!(s && s[statusKey] && s[statusKey].configured)); return s; })
-      .catch(() => { setConfigured(false); return null; });
-  }, [statusKey]);
-  React.useEffect(() => { refresh(); }, [refresh]);
-
-  const hasDesktop = !!(window.PILLAR_DESKTOP && window.PILLAR_DESKTOP.isDesktop && window.PILLAR_DESKTOP.isDesktop());
-
-  const testAndSave = async () => {
-    const key = apiKey.trim();
-    const url = requiresBaseUrl ? baseUrl.trim().replace(/\/+$/, "") : undefined;
-    if (!key) { setMessage("Paste your " + name + " API key first."); return; }
-    if (requiresBaseUrl && !url) { setMessage("Add the endpoint base URL first."); return; }
-    setBusy(true);
-    setMessage(verifyUrl ? "Checking the key with " + name + "…" : "Saving…");
-    try {
-      if (verifyUrl) {
-        const res = await fetch(verifyUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Accept: "application/json" },
-          body: JSON.stringify(Object.assign({ apiKey: key }, verifyBody || {})),
-        });
-        const data = await res.json().catch(() => null);
-        if (!res.ok) throw new Error((data && data.error) || (name + " rejected the key."));
-        if (parseStatus) setDetail(parseStatus(data));
-      }
-      if (hasDesktop && window.PILLAR_DESKTOP.saveMediaProviderKey) {
-        await window.PILLAR_DESKTOP.saveMediaProviderKey(provider, key, url ? { baseUrl: url } : undefined);
-        setApiKey(""); setOpen(false);
-        setMessage(verifyUrl ? name + " key works and was saved encrypted for Studio." : name + " key was saved encrypted for Studio.");
-        await refresh();
-      } else {
-        setMessage(verifyUrl ? name + " key works, but it can only be saved from the desktop app." : name + " keys can only be saved from the desktop app.");
-      }
-    } catch (e) {
-      setMessage((e && e.message) || ("Could not reach " + name + "."));
-    }
-    setBusy(false);
-  };
-
-  const statusText = configured === null
-    ? "Checking…"
-    : configured
-      ? "Connected" + (detail ? " · " + detail : "")
-      : "Not connected";
-
-  return (
-    <div style={{ border: "1.5px solid " + (configured ? "var(--st-approved)" : "var(--hair)"), borderRadius: 8, background: "var(--paper-2)", padding: 18 }}>
-      <div style={{ display: "grid", gridTemplateColumns: "44px 1fr auto", gap: 14, alignItems: "start" }}>
-        <span style={{ width: 42, height: 42, display: "grid", placeItems: "center" }}>
-          <img src={logoSrc} alt="" style={{ maxWidth: 38, maxHeight: 38, objectFit: "contain", borderRadius: 8 }} />
-        </span>
-        <span style={{ display: "grid", gap: 5 }}>
-          <strong style={{ fontSize: 21, lineHeight: 1 }}>{name}</strong>
-          <em style={{ fontStyle: "normal", color: configured ? "var(--st-approved)" : "var(--accent-ink)", fontSize: 14 }}>{statusText}</em>
-          <span style={{ color: "var(--muted)", fontSize: 14.5, lineHeight: 1.35 }}>{blurb}</span>
-        </span>
-        <button className="btn sm" disabled={busy} onClick={() => { setOpen(!open); setMessage(""); }}>
-          <Icon name="key" size={13} /> {configured ? "Update key" : "Connect"}
-        </button>
-      </div>
-      {open && (
-        <div style={{ display: "grid", gap: 8, marginTop: 14 }}>
-          {requiresBaseUrl && (
-            <input
-              className="field" type="url" value={baseUrl} placeholder="Base URL, e.g. https://images.example.com/v1"
-              onChange={(e) => setBaseUrl(e.target.value)}
-              style={{ fontSize: 14 }} />
-          )}
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <input
-              className="field" type="password" value={apiKey} placeholder={name + " API key"}
-              onChange={(e) => setApiKey(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") testAndSave(); }}
-              style={{ flex: 1, fontSize: 14 }} />
-            <button className="btn primary sm" disabled={busy || !apiKey.trim() || (requiresBaseUrl && !baseUrl.trim())} onClick={testAndSave}>
-              {busy ? <Spinner size={13} /> : <Icon name="check" size={13} />} {verifyUrl ? "Test & save" : "Save"}
-            </button>
-          </div>
-        </div>
-      )}
-      {open && helper && (
-        <p className="muted" style={{ margin: "8px 0 0", fontSize: 12.5 }}>{helper}</p>
-      )}
-      {message && <p style={{ margin: "10px 0 0", fontSize: 13.5, color: "var(--accent-ink)" }}>{message}</p>}
-    </div>
-  );
-}
-
-function HedraIntegrationCard() {
-  return (
-    <MediaIntegrationCard
-      provider="hedra" name="Hedra" statusKey="hedra"
-      logoSrc="brand/providers/hedra.png"
-      blurb="Video, avatars, and animation for Studio. Optional — Studio's video features stay off without it."
-      verifyUrl="/api/hedra/credits"
-      parseStatus={(d) => (d && d.credits && typeof d.credits.remaining === "number" ? d.credits.remaining + " credits" : null)}
-      helper="Create a key at hedra.com under API settings. It is verified against your Hedra credits, then stored encrypted in the desktop settings — never in the browser."
-    />
-  );
-}
-
-function ElevenLabsIntegrationCard() {
-  return (
-    <MediaIntegrationCard
-      provider="elevenlabs" name="ElevenLabs" statusKey="elevenlabs"
-      logoSrc="brand/providers/elevenlabs.svg"
-      blurb="Text-to-speech voiceovers for Studio and audio actions. Optional — voiceover stays off without it."
-      verifyUrl="/api/eleven/voices"
-      parseStatus={(d) => (d && Array.isArray(d.voices) ? d.voices.length + " voices" : null)}
-      helper="Create a key at elevenlabs.io under Profile → API Keys. It is verified against your voice list, then stored encrypted in the desktop settings — never in the browser."
-    />
-  );
-}
-
-/* Image provider cards. Keys land in the same encrypted desktop settings the
-   server already reads (lib/mediaProviders.ts), so saving here lights up image
-   generation immediately. OpenAI/xAI keys are verified with a tiny chat call. */
-function OpenAIImageIntegrationCard() {
-  return (
-    <MediaIntegrationCard
-      provider="openai" name="OpenAI" statusKey="openai"
-      logoSrc="brand/providers/openai.svg"
-      blurb="Image generation (gpt-image) and text-to-speech for Studio. Already connected if your writing model uses an OpenAI key."
-      verifyUrl="/api/llm/test"
-      verifyBody={{ provider: "openai", model: "gpt-5.2" }}
-      helper="Create a key at platform.openai.com under API Keys. It is verified with a one-token test call, then stored encrypted in the desktop settings — never in the browser."
-    />
-  );
-}
-
-function XaiImageIntegrationCard() {
-  return (
-    <MediaIntegrationCard
-      provider="xai" name="xAI / Grok" statusKey="xai"
-      logoSrc="brand/providers/xai.svg"
-      blurb="Grok image generation for Studio. Optional — image models from other providers keep working without it."
-      verifyUrl="/api/llm/test"
-      verifyBody={{ provider: "xai", model: "grok-4.3" }}
-      helper="Create a key at console.x.ai. It is verified with a one-token test call, then stored encrypted in the desktop settings — never in the browser."
-    />
-  );
-}
-
-function CustomImageIntegrationCard() {
-  return (
-    <MediaIntegrationCard
-      provider="custom-image" name="Custom image endpoint" statusKey="customImage"
-      logoSrc="brand/providers/api.svg"
-      blurb="Any OpenAI-compatible image API. Needs the endpoint base URL and a key."
-      requiresBaseUrl
-      helper="Saved without a test call (custom endpoints vary) — if generation fails, re-check the base URL and key here."
-    />
   );
 }
 
@@ -216,26 +314,9 @@ function StatusChipMini({ ok, label }) {
 function StartImageField({ value, aspect, prompt, libraryImages, onChange }) {
   const fileRef = React.useRef(null);
   const [pick, setPick] = React.useState(false);
-  const [genBusy, setGenBusy] = React.useState(false);
-  const [genErr, setGenErr] = React.useState(null);
   const upload = (e) => {
     const f = e.target.files[0]; if (!f) return;
     const r = new FileReader(); r.onload = () => onChange(r.result); r.readAsDataURL(f); e.target.value = "";
-  };
-  // Real generation: run the prompt through the first configured image model,
-  // then use the finished image (Hedra asset id when available, else its URL).
-  const generateFrame = () => {
-    const model = window.STUDIO.modelsByType("image")[0];
-    if (!model) { setGenErr("Connect an image provider first (Providers)."); return; }
-    setGenBusy(true); setGenErr(null);
-    window.STUDIO.runJob(
-      { kind: "image", modelId: model.id, provider: model.provider, prompt: prompt || "Abstract editorial start frame", aspect },
-      (u) => {
-        if (u.status === "completed") { setGenBusy(false); onChange(u.outputUrl || u.hedraAssetId); }
-        else if (u.status === "failed" || u.status === "canceled") { setGenBusy(false); setGenErr(u.error || "Frame generation failed."); }
-      },
-      { retries: 0 },
-    );
   };
   return (
     <div>
@@ -251,9 +332,8 @@ function StartImageField({ value, aspect, prompt, libraryImages, onChange }) {
           <button className="btn sm" onClick={() => fileRef.current.click()}><Icon name="upload" size={13} /> Upload image</button>
           <div style={{ display: "flex", gap: 6 }}>
             <button className="btn ghost sm" onClick={() => setPick((o) => !o)} disabled={!libraryImages.length}><Icon name="image" size={13} /> From library</button>
-            <button className="btn ghost sm" disabled={genBusy} onClick={generateFrame} title="Generate a start frame from the prompt with your image model">{genBusy ? <Spinner size={13} /> : <Icon name="sparkle" size={13} />} {genBusy ? "Generating…" : "AI frame"}</button>
+            <button className="btn ghost sm" onClick={() => onChange(window.STUDIO.makeImagePlaceholder(prompt || "frame", aspect, "FRAME"))} title="Generate a start frame from the prompt"><Icon name="sparkle" size={13} /> AI frame</button>
           </div>
-          {genErr && <div style={{ fontSize: 12, color: "var(--sev-must)" }}>{genErr}</div>}
           {value && <button className="btn ghost sm" onClick={() => onChange(null)} style={{ alignSelf: "flex-start", color: "var(--ink-3)" }}>Clear</button>}
           {pick && (
             <div className="card" style={{ position: "absolute", top: 64, left: 0, zIndex: 30, width: 260, maxHeight: 220, overflowY: "auto", padding: 8, boxShadow: "var(--shadow-lg)", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
@@ -348,19 +428,25 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
   // the composer once each lands (the STUDIO getters read from cache).
   const [catalogVersion, setCatalogVersion] = React.useState(0);
   const [providerStatus, setProviderStatus] = React.useState(null);
-  const aliveRef = React.useRef(true);
-  React.useEffect(() => () => { aliveRef.current = false; }, []);
-  const refreshProviders = React.useCallback(() => {
-    const bump = () => { if (aliveRef.current) setCatalogVersion((v) => v + 1); };
-    fetch("/api/media/providers", { headers: { Accept: "application/json" }, cache: "no-store" })
-      .then((r) => r.ok ? r.json() : null)
-      .then((s) => { if (aliveRef.current && s) setProviderStatus(s); })
+  const refreshProviderStatus = React.useCallback(async () => {
+    const response = await fetch("/api/media/providers", { headers: { Accept: "application/json" } });
+    if (!response.ok) return null;
+    const next = await response.json();
+    setProviderStatus(next);
+    setCatalogVersion((v) => v + 1);
+    return next;
+  }, []);
+  React.useEffect(() => {
+    let alive = true;
+    const bump = () => { if (alive) setCatalogVersion((v) => v + 1); };
+    refreshProviderStatus()
+      .then(() => {})
       .catch(() => {});
     Promise.resolve(window.STUDIO.refreshModels()).then(bump);
     Promise.resolve(window.STUDIO.refreshVoices()).then(bump);
     Promise.resolve(window.STUDIO.refreshCredits()).then(bump);
+    return () => { alive = false; };
   }, []);
-  React.useEffect(() => { refreshProviders(); }, [refreshProviders]);
 
   const [type, setType] = React.useState("image");
   const models = window.STUDIO.modelsByType(type);
@@ -471,7 +557,6 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
   };
 
   const generate = () => {
-    if (!model) { setError("Models are still loading — try again in a moment."); return; }
     const usingDirected = type === "image" && directed.trim().length > 0;
     const effective = usingDirected ? directed.trim() : prompt;
     const params = { prompt: effective, aspect, resolution, duration, batch, voiceId, startImage, estDuration,
@@ -484,6 +569,7 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
       // the seed is art-directed server-side (enhance on).
       kind: type, prompt: usingDirected ? directed.trim() : (prompt || (isVoiceModel ? script : "")), modelId: model.id, modelName: model.name,
       provider: model.provider || "hedra",
+      mediaProfileId: model.profileId || null,
       aspect: model.aspectRatios.length ? aspect : (type === "audio" ? null : aspect),
       resolution: model.resolutions.length ? resolution : null,
       duration: model.durations.length ? duration : null,
@@ -537,7 +623,7 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
             <StatusChipMini ok={imageProviders > 0} label={imageProviders ? `${imageProviders} image provider${imageProviders === 1 ? "" : "s"}` : "Images not configured"} />
             <StatusChipMini ok={hedraOn} label={hedraOn ? "Video ready" : "Video not configured"} />
             <StatusChipMini ok={elevenOn} label={elevenOn ? "Voice ready" : "Voice not configured"} />
-            {hedraOn && <span className="chip" title="Hedra credit balance"><Icon name="sparkle" size={12} /> {window.STUDIO.getCredits().toLocaleString()} Hedra credits</span>}
+            <span className="chip" title="Available credits"><Icon name="sparkle" size={12} /> {window.STUDIO.getCredits().toLocaleString()} credits</span>
             <button className="btn sm" onClick={() => setKeysOpen(true)}><Icon name="key" size={13} /> Providers</button>
           </div>
         </div>
@@ -682,7 +768,7 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
 
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 6 }}>
               <button className="btn primary" onClick={generate}><Icon name="sparkle" size={15} /> Generate</button>
-              {cost > 0 && <span className="mono muted" style={{ fontSize: 12 }} title="Estimated Hedra credits — Hedra's own pricing is authoritative">~{cost} Hedra credits</span>}
+              <span className="mono muted" style={{ fontSize: 12 }}>~{cost} credits</span>
             </div>
             {error && <p style={{ color: "var(--sev-must)", fontSize: 13.5, marginTop: 12 }}>{error}</p>}
           </div>
@@ -701,7 +787,7 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
               onTuneStyle={(m) => { setStyleSeedJob(m.id); setStyleOpen(true); }} />
           </div>
         </div>
-        {keysOpen && <MediaProvidersDialog status={providerStatus} onClose={() => { setKeysOpen(false); refreshProviders(); }} />}
+        {keysOpen && <MediaProvidersDialog status={providerStatus} onClose={() => setKeysOpen(false)} onProviderSaved={refreshProviderStatus} />}
         {styleOpen && <StyleSurveyModal campaignId={campaignId} profile={style} mediaJobId={styleSeedJob}
           onClose={() => setStyleOpen(false)} onSaved={(p) => { setStyle(p); setStyleOpen(false); }} />}
       </div>
@@ -709,4 +795,4 @@ function Studio({ campaignId, pieces, onOpenPiece }) {
   );
 }
 
-Object.assign(window, { Studio, MediaProvidersDialog, MediaIntegrationCard, HedraIntegrationCard, ElevenLabsIntegrationCard });
+Object.assign(window, { Studio, MediaProvidersDialog });

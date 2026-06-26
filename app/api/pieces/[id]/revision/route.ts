@@ -4,16 +4,20 @@ import { requireUser } from "@/lib/auth";
 import { db, campaigns, pieces, references } from "@/lib/db";
 import { getLocalPiece, getLocalReferences, updateLocalPiece } from "@/lib/local/database";
 import { isLocalFirstMode } from "@/lib/local/mode";
-import { getAIForTask } from "@/lib/llm";
+import { getAIForTaskForUser } from "@/lib/llm";
 import { buildRefContext, type ReferencesDoc } from "@/lib/refContext";
-import { generateRevision, type RevisionPacket, type RevisionPieceInput } from "@/lib/revision";
-import { failRevisionProgress, finishRevisionProgress, startRevisionProgress, updateRevisionProgress } from "@/lib/revisionStatus";
+import { type RevisionPacket, type RevisionPieceInput } from "@/lib/revision";
+import { buildCategoryContext } from "@/lib/editorial/categoryContext";
+import { runCategoryAwareRevision } from "@/lib/editorial/revision";
 import { toErrorResponse } from "@/lib/errors";
+import { completeUsageReservation, failUsageReservation, reserveUsage, type UsageReservation } from "@/lib/billing/usage";
 import type { SessionUser } from "@/lib/auth";
 import type { Piece } from "@/lib/db";
 
 const notFound = () =>
   NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
+
+export const maxDuration = 900;
 
 /**
  * Load a piece the caller is allowed to touch, or null. The piece must be owned
@@ -47,6 +51,7 @@ async function resolvePiece(id: string, user: SessionUser): Promise<Piece | null
  * Reviewed → Revised. Logic ported from generators.js#generateRevision.
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  let reservation: UsageReservation = null;
   try {
     const user = await requireUser();
     const { id } = await params;
@@ -54,11 +59,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     // Optional { mode: "light" | "full" }. Default light (the firewall pass).
     // "full" runs a whole-document restructure (strategy/structure/etc.) first.
     let mode: "light" | "full" = "light";
-    let runId = "";
     try {
-      const body = (await req.json()) as { mode?: unknown; runId?: unknown } | null;
+      const body = (await req.json()) as { mode?: unknown } | null;
       if (body && body.mode === "full") mode = "full";
-      if (body && typeof body.runId === "string") runId = body.runId.slice(0, 120);
     } catch {
       /* empty/no body → light */
     }
@@ -79,25 +82,44 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const input: RevisionPieceInput = {
       original: piece.original,
       packet: (piece.packet ?? null) as RevisionPacket | null,
+      categoryContext: buildCategoryContext(piece),
       gateNotes: (piece.gateNotes ?? null) as Record<string, string> | null,
       direction: piece.direction ?? null,
     };
 
-    if (runId) startRevisionProgress(piece.id, runId, mode);
-
-    let result;
-    try {
-      result = await generateRevision(
-        input,
-        refCtx,
-        getAIForTask("revision"),
-        runId ? (done, total) => updateRevisionProgress(piece.id, runId, done, total) : undefined,
-        { mode },
-      );
-    } catch (err) {
-      if (runId) failRevisionProgress(piece.id, runId, (err as Error)?.message || "Revision failed.");
-      throw err;
-    }
+    const taskAI = await getAIForTaskForUser("revision", user);
+    const categoryCtx = buildCategoryContext(piece);
+    reservation = await reserveUsage({
+      user,
+      task: "revision",
+      feature: `pieces.revision.${mode}`,
+      campaignId: piece.campaignId,
+      pieceId: piece.id,
+      providerSource: taskAI.providerSource,
+      provider: taskAI.provider,
+      model: taskAI.model,
+      metadata: { ...(taskAI.profileId ? { profileId: taskAI.profileId } : {}), category: categoryCtx.category },
+      estimatedCredits: mode === "full" ? 3 : 2,
+    });
+    const persistProgress = async (revision: unknown) => {
+      if (isLocalFirstMode()) {
+        updateLocalPiece(piece.id, user.id, { revision }, user.workspaceId);
+        return;
+      }
+      await db
+        .update(pieces)
+        .set({ revision, updatedAt: new Date() })
+        .where(and(eq(pieces.id, piece.id), eq(pieces.userId, user.id)));
+    };
+    const { revision: result, callCount } = await runCategoryAwareRevision({
+      piece: input,
+      refCtx,
+      categoryCtx,
+      taskAI,
+      ai: taskAI.ai,
+      opts: { mode },
+      onProgress: persistProgress,
+    });
 
     if (isLocalFirstMode()) {
       const updated = updateLocalPiece(
@@ -110,7 +132,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         user.workspaceId,
       );
       if (!updated) return notFound();
-      if (runId) finishRevisionProgress(piece.id, runId, result);
+      await completeUsageReservation(reservation, { actualCredits: callCount || (mode === "full" ? 3 : 2) });
       return NextResponse.json({ piece: updated });
     }
 
@@ -125,9 +147,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       .where(and(eq(pieces.id, piece.id), eq(pieces.userId, user.id)))
       .returning();
 
-    if (runId) finishRevisionProgress(piece.id, runId, result);
+    await completeUsageReservation(reservation, { actualCredits: callCount || (mode === "full" ? 3 : 2) });
     return NextResponse.json({ piece: updated });
   } catch (err) {
+    await failUsageReservation(reservation, err);
     return toErrorResponse(err);
   }
 }

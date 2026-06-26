@@ -28,6 +28,20 @@ function supabaseUrl(): string {
   );
 }
 
+/** Public anon key. Safe to expose to the browser for Supabase Auth calls. */
+export function supabaseAnonKey(): string {
+  return (
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ??
+    process.env.SUPABASE_ANON_KEY ??
+    ""
+  );
+}
+
+/** Public project URL accessor for server routes that return browser config. */
+export function publicSupabaseUrl(): string {
+  return supabaseUrl();
+}
+
 /** Service-role key — SECRET. Full access, bypasses RLS. Server only. */
 function serviceRoleKey(): string {
   return process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";

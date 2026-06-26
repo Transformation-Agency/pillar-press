@@ -10,9 +10,16 @@ export interface DesktopMediaProviderSettings {
   baseUrl?: string;
 }
 
+export interface DesktopLLMProfileSettings {
+  provider?: string;
+  apiKey?: string;
+  baseUrl?: string;
+}
+
 export interface DesktopSettingsFile {
   mediaProviders?: Record<string, DesktopMediaProviderSettings>;
   integrations?: Record<string, DesktopMediaProviderSettings>;
+  profiles?: DesktopLLMProfileSettings[];
 }
 
 function trim(value: string | undefined): string | undefined {
@@ -49,37 +56,66 @@ export function readDesktopSettings(env: Env = process.env): DesktopSettingsFile
   if (!path) return null;
   try {
     const parsed = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
-    return {
-      mediaProviders: decryptProviderMap(parsed.mediaProviders, env),
-      integrations: decryptProviderMap(parsed.integrations, env),
-    };
+    const mediaProviders = parsed.mediaProviders && typeof parsed.mediaProviders === "object"
+      ? Object.fromEntries(
+          Object.entries(parsed.mediaProviders as Record<string, unknown>)
+            .filter(([, value]) => value && typeof value === "object")
+            .map(([provider, value]) => {
+              const raw = value as Record<string, unknown>;
+              return [provider, {
+                apiKey: typeof raw.apiKey === "string" ? decryptDesktopSecret(raw.apiKey, env) : undefined,
+                baseUrl: typeof raw.baseUrl === "string" ? trim(raw.baseUrl) : undefined,
+              }];
+            }),
+        )
+      : undefined;
+    const profiles = Array.isArray(parsed.profiles)
+      ? parsed.profiles
+          .map((profile): DesktopLLMProfileSettings | null => {
+            if (!profile || typeof profile !== "object") return null;
+            const raw = profile as Record<string, unknown>;
+            const provider = typeof raw.provider === "string" ? trim(raw.provider)?.toLowerCase() : undefined;
+            if (!provider) return null;
+            return {
+              provider,
+              apiKey: typeof raw.apiKey === "string" ? decryptDesktopSecret(raw.apiKey, env) : undefined,
+              baseUrl: typeof raw.baseUrl === "string" ? trim(raw.baseUrl) : undefined,
+            };
+          })
+          .filter((profile): profile is DesktopLLMProfileSettings => Boolean(profile))
+      : undefined;
+    const integrations = parsed.integrations && typeof parsed.integrations === "object"
+      ? Object.fromEntries(
+          Object.entries(parsed.integrations as Record<string, unknown>)
+            .filter(([, value]) => value && typeof value === "object")
+            .map(([provider, value]) => {
+              const raw = value as Record<string, unknown>;
+              return [provider, {
+                apiKey: typeof raw.apiKey === "string" ? decryptDesktopSecret(raw.apiKey, env) : undefined,
+                baseUrl: typeof raw.baseUrl === "string" ? trim(raw.baseUrl) : undefined,
+              }];
+            }),
+        )
+      : undefined;
+    return { mediaProviders, integrations, profiles };
   } catch {
     return null;
   }
 }
 
-function decryptProviderMap(value: unknown, env: Env): Record<string, DesktopMediaProviderSettings> | undefined {
-  if (!value || typeof value !== "object") return undefined;
-  return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>)
-      .filter(([, entry]) => entry && typeof entry === "object")
-      .map(([provider, entry]) => {
-        const raw = entry as Record<string, unknown>;
-        return [provider, {
-          apiKey: typeof raw.apiKey === "string" ? decryptDesktopSecret(raw.apiKey, env) : undefined,
-          baseUrl: typeof raw.baseUrl === "string" ? trim(raw.baseUrl) : undefined,
-        }];
-      }),
-  );
+export function desktopIntegrationKey(integration: string, env: Env = process.env): string | undefined {
+  const settings = readDesktopSettings(env);
+  return settings?.integrations?.[integration]?.apiKey;
 }
 
 export function desktopMediaProvider(provider: string, env: Env = process.env): DesktopMediaProviderSettings | null {
   const settings = readDesktopSettings(env);
-  return settings?.mediaProviders?.[provider] ?? null;
-}
-
-/** Decrypted Gather connector key saved from the desktop settings UI, if any. */
-export function desktopIntegrationKey(integration: string, env: Env = process.env): string | undefined {
-  const settings = readDesktopSettings(env);
-  return trim(settings?.integrations?.[integration]?.apiKey);
+  const saved = settings?.mediaProviders?.[provider];
+  if (saved?.apiKey || saved?.baseUrl) return saved;
+  const profile = settings?.profiles?.find((item) => item.provider === provider && item.apiKey);
+  if (!profile) return null;
+  return {
+    apiKey: profile.apiKey,
+    baseUrl: profile.baseUrl,
+  };
 }

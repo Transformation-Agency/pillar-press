@@ -3,6 +3,12 @@ import {
   localStorageConfigured,
   writeLocalPublicFile,
 } from "@/lib/local/storage";
+import type { SessionUser } from "@/lib/auth";
+import {
+  releaseStorageReservation,
+  reserveStorageBytes,
+  type StorageReservation,
+} from "@/lib/billing/usage";
 
 /**
  * Public media storage (server-side).
@@ -37,6 +43,7 @@ export async function uploadPublicFile(
   name: string,
   contentType: string,
   prefix = "file",
+  options: { user?: SessionUser | null } = {},
 ): Promise<string> {
   const base = supaUrl();
   const key = supaKey();
@@ -47,26 +54,44 @@ export async function uploadPublicFile(
   const ct = contentType || "application/octet-stream";
   const safe = (name || "file").replace(/[^a-zA-Z0-9._-]/g, "-");
   const path = `${prefix}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safe}`;
-  const res = await fetch(`${base}/storage/v1/object/${BUCKET}/${path}`, {
-    method: "POST",
-    headers: {
-      apikey: key,
-      authorization: `Bearer ${key}`,
-      "content-type": ct,
-      "x-upsert": "true",
-    },
-    body: new Blob([new Uint8Array(bytes)], { type: ct }),
-  });
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`Upload failed (${res.status}): ${detail.slice(0, 160)}`);
+  const bodyBytes = new Uint8Array(bytes);
+  let storageReservation: StorageReservation = null;
+  try {
+    if (options.user) {
+      storageReservation = await reserveStorageBytes({
+        user: options.user,
+        bytes: bodyBytes.byteLength,
+        feature: `storage.${prefix}`,
+      });
+    }
+    const res = await fetch(`${base}/storage/v1/object/${BUCKET}/${path}`, {
+      method: "POST",
+      headers: {
+        apikey: key,
+        authorization: `Bearer ${key}`,
+        "content-type": ct,
+        "x-upsert": "true",
+      },
+      body: new Blob([bodyBytes], { type: ct }),
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      throw new Error(`Upload failed (${res.status}): ${detail.slice(0, 160)}`);
+    }
+  } catch (err) {
+    await releaseStorageReservation(storageReservation);
+    throw err;
   }
   return `${base}/storage/v1/object/public/${BUCKET}/${path}`;
 }
 
 /** Upload MP3 bytes to the public bucket; returns the public URL. */
-export async function uploadPublicAudio(bytes: Buffer | Uint8Array, name: string): Promise<string> {
-  return uploadPublicFile(bytes, name || "audio.mp3", "audio/mpeg", "voice");
+export async function uploadPublicAudio(
+  bytes: Buffer | Uint8Array,
+  name: string,
+  options: { user?: SessionUser | null } = {},
+): Promise<string> {
+  return uploadPublicFile(bytes, name || "audio.mp3", "audio/mpeg", "voice", options);
 }
 
 /**
@@ -79,6 +104,7 @@ async function persistRemote(
   srcUrl: string,
   baseName: string,
   accept: "image" | "video",
+  options: { user?: SessionUser | null } = {},
 ): Promise<string | null> {
   try {
     if (!srcUrl || isStoredUrl(srcUrl) || !storageConfigured()) return null;
@@ -94,18 +120,26 @@ async function persistRemote(
     } else {
       ext = /webp/i.test(ct) ? "webp" : /jpe?g/i.test(ct) ? "jpg" : /gif/i.test(ct) ? "gif" : "png";
     }
-    return await uploadPublicFile(buf, `${baseName}.${ext}`, ct, accept);
+    return await uploadPublicFile(buf, `${baseName}.${ext}`, ct, accept, options);
   } catch {
     return null;
   }
 }
 
 /** Persist a signed image URL to permanent storage (or null on failure). */
-export function persistRemoteImage(srcUrl: string, baseName: string): Promise<string | null> {
-  return persistRemote(srcUrl, baseName, "image");
+export function persistRemoteImage(
+  srcUrl: string,
+  baseName: string,
+  options: { user?: SessionUser | null } = {},
+): Promise<string | null> {
+  return persistRemote(srcUrl, baseName, "image", options);
 }
 
 /** Persist a signed video URL to permanent storage (or null on failure). */
-export function persistRemoteVideo(srcUrl: string, baseName: string): Promise<string | null> {
-  return persistRemote(srcUrl, baseName, "video");
+export function persistRemoteVideo(
+  srcUrl: string,
+  baseName: string,
+  options: { user?: SessionUser | null } = {},
+): Promise<string | null> {
+  return persistRemote(srcUrl, baseName, "video", options);
 }

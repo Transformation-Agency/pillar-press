@@ -211,29 +211,17 @@ function MediaPreview({ media }) {
   return <VideoPreview media={media} />;
 }
 
-function extForMedia(mime, kind) {
-  const map = {
-    "image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif", "image/svg+xml": ".svg",
-    "video/mp4": ".mp4", "video/webm": ".webm", "video/quicktime": ".mov",
-    "audio/mpeg": ".mp3", "audio/mp3": ".mp3", "audio/wav": ".wav",
-  };
-  const ct = (mime || "").split(";")[0].trim().toLowerCase();
-  if (map[ct]) return map[ct];
-  if (kind === "image") return ".png";
-  if (kind === "audio") return ".mp3";
-  return ".mp4";
-}
-
 function MediaCard({ media, pieces, audios, onAttach, onCombine, onRegen, onDuplicate, onDelete, onAnimate, onTuneStyle }) {
   const [attachOpen, setAttachOpen] = React.useState(false);
   const [combineOpen, setCombineOpen] = React.useState(false);
   const [driveState, setDriveState] = React.useState(null); // null | "saving" | "saved" | <error string>
-  const [dlState, setDlState] = React.useState(null); // null | "saving" | <error string>
-  // Only offer Drive when a Google Drive account is actually linked. The desktop
-  // build never links Drive (local-first reports linked:false) — there, the
-  // Download button saves through the native save panel instead.
-  const driveOn = !!(window.DRIVE && window.DRIVE.config && window.DRIVE.config().linked);
+  const driveOn = !!(window.DRIVE && window.DRIVE.isConfigured());
+  const driveDisabledByPlan = !!(window.DRIVE && window.DRIVE.isDriveEnabled && !window.DRIVE.isDriveEnabled());
   const saveToDrive = async () => {
+    if (driveDisabledByPlan) {
+      if (window.KP_BILLING && window.KP_BILLING.notifyDriveDisabled) window.KP_BILLING.notifyDriveDisabled();
+      return;
+    }
     setDriveState("saving");
     try { await window.DRIVE.uploadMediaFile(media.id); setDriveState("saved"); setTimeout(() => setDriveState(null), 2500); }
     catch (e) { setDriveState((e && e.message) || "Drive save failed."); setTimeout(() => setDriveState(null), 4500); }
@@ -241,31 +229,17 @@ function MediaCard({ media, pieces, audios, onAttach, onCombine, onRegen, onDupl
   const st = MEDIA_STATUS[media.status] || MEDIA_STATUS.queued;
   const model = window.STUDIO.getModel(media.modelId);
   const attached = media.pieceId && pieces && pieces.find((p) => p.id === media.pieceId);
-  const download = async () => {
+  const download = () => {
     const url = media.downloadUrl || media.outputUrl || media.posterUrl;
-    if (!url || dlState === "saving") return;
-    const base = window.EXPORT.safeName((media.prompt || media.kind).slice(0, 30));
-    setDlState("saving");
-    try {
-      if (url.startsWith("data:")) {
-        const blob = dataURItoBlob(url);
-        await window.EXPORT.downloadBlob(blob, base + extForMedia(blob.type, media.kind));
-      } else {
-        // Fetch the bytes and hand them to downloadBlob: native save panel on
-        // desktop (anchor downloads don't work in the desktop webview), anchor
-        // download in a regular browser.
-        const r = await fetch(url);
-        if (!r.ok) throw new Error("Couldn't fetch the file (" + r.status + ").");
-        const blob = await r.blob();
-        await window.EXPORT.downloadBlob(blob, base + extForMedia(blob.type, media.kind));
-      }
-      setDlState(null);
-    } catch (e) {
-      const msg = (e && e.message) || "";
-      if (/cancel/i.test(msg)) { setDlState(null); return; } // user closed the save panel
-      // Cross-origin fetch can fail for remote CDNs — fall back to opening it.
-      try { window.open(url, "_blank", "noopener"); setDlState(null); }
-      catch (e2) { setDlState(msg || "Download failed."); setTimeout(() => setDlState(null), 4500); }
+    if (!url) return;
+    if (url.startsWith("data:")) {
+      window.EXPORT.downloadBlob(dataURItoBlob(url), window.EXPORT.safeName((media.prompt || media.kind).slice(0, 30)) + ".svg");
+    } else {
+      // real remote asset (mp4/png/mp3) — open/download via the browser
+      const a = document.createElement("a");
+      a.href = url; a.target = "_blank"; a.rel = "noopener";
+      a.download = window.EXPORT.safeName((media.prompt || media.kind).slice(0, 30));
+      document.body.appendChild(a); a.click(); a.remove();
     }
   };
   return (
@@ -293,13 +267,16 @@ function MediaCard({ media, pieces, audios, onAttach, onCombine, onRegen, onDupl
             {onAttach && <button className="btn ghost sm" onClick={() => setAttachOpen((o) => !o)}><Icon name="book" size={13} /> Attach</button>}
             {onRegen && <button className="btn ghost sm" onClick={() => onRegen(media)} title="Regenerate"><Icon name="play" size={13} /></button>}
             {onDuplicate && <button className="btn ghost sm" onClick={() => onDuplicate(media)} title="Duplicate prompt"><Icon name="copy" size={13} /></button>}
-            {(media.downloadUrl || media.outputUrl || media.posterUrl) && <button className="btn ghost sm" onClick={download} disabled={dlState === "saving"} title="Save to file">{dlState === "saving" ? <Spinner size={13} /> : <Icon name="doc" size={13} />}</button>}
-            {driveOn && (media.downloadUrl || media.outputUrl) && (
+            {(media.downloadUrl || media.outputUrl || media.posterUrl) && <button className="btn ghost sm" onClick={download} title="Download"><Icon name="doc" size={13} /></button>}
+            {(driveOn || driveDisabledByPlan) && (media.downloadUrl || media.outputUrl) && (
               <button className="btn ghost sm" onClick={saveToDrive} disabled={driveState === "saving"} title="Save to Google Drive">
                 {driveState === "saving" ? <Spinner size={13} /> : <Icon name={driveState === "saved" ? "check" : "upload"} size={13} />} {driveState === "saved" ? "Saved" : "Drive"}
               </button>
             )}
-            {onDelete && <button className="btn ghost sm" onClick={() => onDelete(media)} title="Delete"><Icon name="trash" size={13} /></button>}
+            {onDelete && <button className="btn ghost sm" onClick={() => {
+              const label = media.title || media.prompt || "this media item";
+              if (window.confirm(`Delete "${String(label).slice(0, 80)}" from Studio? This can't be undone except by restoring a backup.`)) onDelete(media);
+            }} title="Delete"><Icon name="trash" size={13} /></button>}
             {attachOpen && onAttach && (
               <div className="card" style={{ position: "absolute", top: 32, left: 0, zIndex: 30, width: 220, maxHeight: 240, overflowY: "auto", padding: 6, boxShadow: "var(--shadow-lg)" }}>
                 <div className="eyebrow" style={{ padding: "4px 8px" }}>Attach to piece</div>
@@ -327,10 +304,9 @@ function MediaCard({ media, pieces, audios, onAttach, onCombine, onRegen, onDupl
         {media.status === "completed" && driveState && driveState !== "saving" && driveState !== "saved" && (
           <div style={{ fontSize: 12, color: "var(--sev-must)" }}>{driveState}</div>
         )}
-        {media.status === "completed" && dlState && dlState !== "saving" && (
-          <div style={{ fontSize: 12, color: "var(--sev-must)" }}>{dlState}</div>
-        )}
-        {media.status === "processing" && <button className="btn ghost sm" onClick={() => onDelete && onDelete(media)} style={{ alignSelf: "flex-start" }}>Cancel</button>}
+        {media.status === "processing" && <button className="btn ghost sm" onClick={() => {
+          if (onDelete && window.confirm("Cancel and remove this in-progress media item from Studio?")) onDelete(media);
+        }} style={{ alignSelf: "flex-start" }}>Cancel</button>}
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-import { LLMError } from "@/lib/llm/errors";
+import { LLMError, providerRequestError, providerResponseError } from "@/lib/llm/errors";
 import { PROVIDER_CAPABILITIES } from "@/lib/llm/config";
 import type { AIMessage, LLMAdapter, LLMConfig } from "@/lib/llm/types";
 
@@ -24,14 +24,15 @@ export function ollamaProvider(config: LLMConfig): LLMAdapter {
             model: config.model,
             messages,
             stream: false,
+            think: false,
             options: { num_predict: config.maxTokens },
           }),
         });
       } catch (err) {
-        throw new LLMError(502, "llm", "ollama request failed.", "ollama", (err as Error)?.message);
+        throw providerRequestError("ollama", err);
       }
       if (!res.ok) {
-        throw new LLMError(res.status, "llm", "ollama request failed.", "ollama");
+        throw await providerResponseError("ollama", res);
       }
       const json = (await res.json()) as OllamaResponse;
       const text = json.message?.content ?? "";

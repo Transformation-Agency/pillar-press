@@ -6,8 +6,9 @@ import { getLocalPiece, getLocalReferences } from "@/lib/local/database";
 import { isLocalFirstMode } from "@/lib/local/mode";
 import { buildRefContext, type ReferencesDoc } from "@/lib/refContext";
 import { craftTitle } from "@/lib/ai/titlePiece";
-import { getAIForTask } from "@/lib/llm";
+import { getAIForTaskForUser } from "@/lib/llm";
 import { toErrorResponse } from "@/lib/errors";
+import { completeUsageReservation, failUsageReservation, reserveUsage, type UsageReservation } from "@/lib/billing/usage";
 
 const notFound = () =>
   NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
@@ -32,6 +33,7 @@ async function resolvePiece(id: string, user: SessionUser): Promise<Piece | null
  * applies it. AI-only, no persistence here.
  */
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  let reservation: UsageReservation = null;
   try {
     const user = await requireUser();
     const { id } = await params;
@@ -48,11 +50,28 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
       : await db.query.references.findFirst({ where: eq(references.campaignId, piece.campaignId) });
     const refCtx = buildRefContext((ref?.doc as ReferencesDoc | undefined) ?? null);
 
-    const title = await craftTitle({ text, refContext: refCtx }, getAIForTask("draft"));
-    if (!title) return NextResponse.json({ error: "Couldn't generate a title.", code: "ai" }, { status: 502 });
+    const taskAI = await getAIForTaskForUser("draft", user);
+    reservation = await reserveUsage({
+      user,
+      task: "utility",
+      feature: "pieces.title",
+      campaignId: piece.campaignId,
+      pieceId: piece.id,
+      providerSource: taskAI.providerSource,
+      provider: taskAI.provider,
+      model: taskAI.model,
+      metadata: taskAI.profileId ? { profileId: taskAI.profileId } : {},
+    });
+    const title = await craftTitle({ text, refContext: refCtx }, taskAI.ai);
+    if (!title) {
+      await failUsageReservation(reservation, new Error("Title generation returned no title."));
+      return NextResponse.json({ error: "Couldn't generate a title.", code: "ai" }, { status: 502 });
+    }
 
+    await completeUsageReservation(reservation);
     return NextResponse.json({ title });
   } catch (err) {
+    await failUsageReservation(reservation, err);
     return toErrorResponse(err);
   }
 }

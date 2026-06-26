@@ -174,10 +174,31 @@ function RefsAIModal({ campaignId, onClose, onApply }) {
 function References({ refs, role, campaignName }) {
   const readOnly = role === "assistant";
   const [aiOpen, setAiOpen] = React.useState(false);
+  const [saveState, setSaveState] = React.useState({ status: "idle", message: "" });
   const campaignId = window.Store.getState().activeCampaignId;
+  const hasDesktopBridge = !!(window.PILLAR_DESKTOP && window.PILLAR_DESKTOP.isDesktop && window.PILLAR_DESKTOP.isDesktop());
   refs = Object.assign({}, window.Store.activeReferences ? window.Store.activeReferences() : {}, refs || {});
   const set = (key, value) => window.Store.setReferenceSection(key, value);
   const patch = (key, sub) => set(key, { ...refs[key], ...sub });
+
+  React.useEffect(() => {
+    const onPersist = (event) => {
+      const detail = (event && event.detail) || {};
+      if (!String(detail.label || "").startsWith("PUT references")) return;
+      if (detail.status === "saving") {
+        setSaveState({ status: "saving", message: "Saving Preferences locally..." });
+      } else if (detail.status === "saved") {
+        setSaveState({ status: "saved", message: "Saved locally to this Mac." });
+      } else if (detail.status === "failed") {
+        setSaveState({
+          status: "failed",
+          message: "Could not save Preferences. Your edit is still visible; try again or create a backup before quitting.",
+        });
+      }
+    };
+    window.addEventListener("pillarpress:store-persist", onPersist);
+    return () => window.removeEventListener("pillarpress:store-persist", onPersist);
+  }, []);
 
   return (
     <div className="scroll-y" style={{ flex: 1 }}>
@@ -193,7 +214,19 @@ function References({ refs, role, campaignName }) {
           <span style={{ fontSize: 14, color: readOnly ? "var(--ink-2)" : "var(--accent-ink)" }}>
             {readOnly ? "Read-only — switch to Author to edit. The assistant role can view but not change Preferences." : "Live — every gate and generator reads the current version, the moment you run."}
           </span>
+          {!readOnly && saveState.message && (
+            <span role={saveState.status === "failed" ? "alert" : "status"} className="mono" style={{
+              marginLeft: "auto",
+              color: saveState.status === "failed" ? "var(--sev-must)" : "var(--ink-3)",
+              fontSize: 11.5,
+              whiteSpace: "nowrap",
+            }}>
+              {saveState.message}
+            </span>
+          )}
         </div>
+
+        {hasDesktopBridge && typeof UpdatePanel === "function" && <UpdatePanel />}
 
         <RefSection icon="flag" title="Content Strategy">
           <div style={{ marginBottom: 16 }}>
@@ -235,6 +268,23 @@ function References({ refs, role, campaignName }) {
         <RefSection icon="gear" title="Gate Preferences">
           <AutoText value={refs.gateSpec.body} readOnly={readOnly} onCommit={(v) => patch("gateSpec", { body: v })} style={{ fontSize: 16, lineHeight: 1.7 }} />
         </RefSection>
+
+        {hasDesktopBridge && (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 12, marginTop: 18 }}>
+            <section className="card" style={{ padding: 18 }}>
+              <div className="eyebrow" style={{ marginBottom: 8 }}>Keyboard shortcuts</div>
+              <p className="muted" style={{ margin: 0, fontSize: 14, lineHeight: 1.55 }}>
+                Model setup: Cmd+, · Backup: Cmd+Shift+B · Data folder: Cmd+Shift+O · Reload: Cmd+R · Dialogs: Esc closes model setup.
+              </p>
+            </section>
+            <section className="card" style={{ padding: 18 }}>
+              <div className="eyebrow" style={{ marginBottom: 8 }}>Updates and backups</div>
+              <p className="muted" style={{ margin: 0, fontSize: 14, lineHeight: 1.55 }}>
+                Use Help → Check for Updates for the latest Pillar Press DMG. Use Backup in the top bar before big changes; backups are local and secrets are redacted.
+              </p>
+            </section>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -7,6 +7,7 @@ import { createLocalGatherSource, listLocalGatherSources } from "@/lib/local/dat
 import { isLocalFirstMode } from "@/lib/local/mode";
 import { createSourceSchema } from "@/lib/gather-validation";
 import { toErrorResponse } from "@/lib/errors";
+import { campaignInWorkspace, tenantNotFound } from "@/lib/tenant";
 
 // GET /api/gather/sources?campaignId=  — list (user + campaign scoped)
 export async function GET(req: Request) {
@@ -14,6 +15,7 @@ export async function GET(req: Request) {
     const user = await requireUser();
     const campaignId = new URL(req.url).searchParams.get("campaignId");
     if (!campaignId) return NextResponse.json({ error: "Missing campaignId.", code: "bad_request" }, { status: 400 });
+    if (!(await campaignInWorkspace(campaignId, user.workspaceId))) return tenantNotFound();
     if (isLocalFirstMode()) {
       const sources = listLocalGatherSources(campaignId, user.id, user.workspaceId);
       if (!sources) return NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
@@ -30,6 +32,7 @@ export async function POST(req: Request) {
   try {
     const user = await requireUser();
     const body = createSourceSchema.parse(await req.json());
+    if (!(await campaignInWorkspace(body.campaignId, user.workspaceId))) return tenantNotFound();
     if (isLocalFirstMode()) {
       const source = createLocalGatherSource(body, user.id, user.workspaceId);
       if (!source) return NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });

@@ -7,6 +7,7 @@ import { isLocalFirstMode } from "@/lib/local/mode";
 import { EMPTY_REFERENCES, slug, type SeedReferences } from "@/lib/seed";
 import { createCampaignSchema } from "@/lib/schemas-campaigns";
 import { toErrorResponse } from "@/lib/errors";
+import { requireCampaignCapacity } from "@/lib/billing/entitlements";
 
 // GET /api/campaigns
 // List the campaigns in the caller's workspace. Scoped by workspace; campaigns
@@ -53,6 +54,8 @@ export async function POST(req: Request) {
       const campaign = createLocalCampaign({ id: providedId, name, workspaceId: user.workspaceId, meta });
       return NextResponse.json({ campaign }, { status: 201 });
     }
+
+    await requireCampaignCapacity({ ...user, workspaceId: user.workspaceId });
 
     // Unique slug within the workspace (base, base-2, base-3, ...).
     const base = slug(name) || "campaign";

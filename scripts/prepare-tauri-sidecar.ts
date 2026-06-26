@@ -9,6 +9,11 @@ const publicDir = join(root, "public");
 const resourceDir = join(root, "src-tauri", "resources", "desktop-server");
 const nodeResourceDir = join(root, "src-tauri", "resources", "node");
 
+function optional(name: string) {
+  const value = process.env[name]?.trim();
+  return value ? value : null;
+}
+
 async function exists(path: string): Promise<boolean> {
   try {
     await stat(path);
@@ -93,8 +98,7 @@ function resolveBundledDylib(linkedPath: string, fromFile: string) {
 }
 
 async function copyNodeRuntime() {
-  const configuredNodePath = process.env.PILLAR_PRESS_NODE_SIDECAR_PATH?.trim();
-  const nodePath = await realpath(configuredNodePath || process.execPath);
+  const nodePath = await realpath(optional("PILLAR_PRESS_NODE_RUNTIME_PATH") || process.execPath);
   if (!(await exists(nodePath))) {
     throw new Error(`Could not find the build Node runtime at ${nodePath}.`);
   }
@@ -157,12 +161,48 @@ async function copyNodeRuntime() {
       copiedFrom: nodePath,
       sourceName: basename(nodePath),
       platform: process.platform,
-      arch: process.arch,
+      arch: optional("PILLAR_PRESS_NODE_RUNTIME_ARCH") || process.arch,
       version: process.version,
       bin: `bin/${binName}`,
       dylibs: [...bundledDylibs.values()].map((path) => `lib/${basename(path)}`),
     }, null, 2),
   );
+}
+
+async function copyIfExists(from: string, to: string) {
+  if (!(await exists(from))) {
+    throw new Error(`Missing native dependency at ${from}`);
+  }
+  await rm(to, { recursive: true, force: true });
+  await mkdir(dirname(to), { recursive: true });
+  await cp(from, to, { recursive: true });
+}
+
+async function replaceMacNativeDependenciesForTarget() {
+  const targetArch = optional("PILLAR_PRESS_NATIVE_TARGET_ARCH");
+  const depsRoot = optional("PILLAR_PRESS_NATIVE_DEPS_PATH");
+  if (!targetArch || !depsRoot) return;
+  if (targetArch !== "x64") {
+    throw new Error(`Unsupported PILLAR_PRESS_NATIVE_TARGET_ARCH: ${targetArch}`);
+  }
+
+  const sourceModules = join(depsRoot, "node_modules");
+  const targetModules = join(resourceDir, "node_modules");
+  await copyIfExists(
+    join(sourceModules, "better-sqlite3", "build", "Release", "better_sqlite3.node"),
+    join(targetModules, "better-sqlite3", "build", "Release", "better_sqlite3.node"),
+  );
+  await copyIfExists(
+    join(sourceModules, "@img", "sharp-darwin-x64"),
+    join(targetModules, "@img", "sharp-darwin-x64"),
+  );
+  await copyIfExists(
+    join(sourceModules, "@img", "sharp-libvips-darwin-x64"),
+    join(targetModules, "@img", "sharp-libvips-darwin-x64"),
+  );
+  await rm(join(targetModules, "@img", "sharp-darwin-arm64"), { recursive: true, force: true });
+  await rm(join(targetModules, "@img", "sharp-libvips-darwin-arm64"), { recursive: true, force: true });
+  console.log(`Replaced packaged macOS native dependencies for ${targetArch}.`);
 }
 
 async function pruneHostedOnlyPackages() {
@@ -193,6 +233,7 @@ await copyRequiredDir(standaloneDir, resourceDir, "Next standalone server");
 await copyRequiredDir(staticDir, join(resourceDir, ".next", "static"), "Next static assets");
 await copyRequiredDir(publicDir, join(resourceDir, "public"), "public assets");
 await pruneHostedOnlyPackages();
+await replaceMacNativeDependenciesForTarget();
 
 for (const name of await readdir(resourceDir)) {
   if (name === ".env" || name.startsWith(".env.")) {
@@ -201,13 +242,6 @@ for (const name of await readdir(resourceDir)) {
 }
 
 await copyNodeRuntime();
-
-try {
-  await run("npm", ["run", "desktop:prepare-whisper"]);
-} catch (error) {
-  console.warn("Whisper sidecar was not prepared. Voice transcription can still be configured later.");
-  console.warn(error instanceof Error ? error.message : String(error));
-}
 
 console.log(`Prepared Tauri desktop server resources at ${resourceDir}`);
 console.log(`Prepared bundled Node runtime at ${nodeResourceDir}`);

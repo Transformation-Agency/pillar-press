@@ -10,5 +10,9 @@
   <string>Pillar Press uses the microphone to transcribe your spoken setup answers locally.</string>
   <key>NSQuitAlwaysKeepsWindows</key>
   <false/>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Pillar Press uses the microphone only when you choose voice setup or dictation.</string>
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>Pillar Press uses speech recognition only when you choose voice setup or dictation.</string>
 </dict>
 </plist>

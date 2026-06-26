@@ -74,8 +74,8 @@ The release workflows run on:
 For a public release:
 
 ```bash
-git tag v0.1.1
-git push origin v0.1.1
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
 On a tag, the workflows upload these release assets:

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
-import { requireUser, type SessionUser } from "@/lib/auth";
+import { getOrCreateWorkspace, requireUser, type SessionUser } from "@/lib/auth";
 import { db, campaigns, pieces, settings, type Piece } from "@/lib/db";
 import {
   outputMarkdown,
@@ -12,9 +12,10 @@ import {
 import { uploadMany, DriveError } from "@/lib/drive";
 import { driveUploadSchema, driveUploadFilesSchema } from "@/lib/schemas-drive";
 import { toErrorResponse } from "@/lib/errors";
-import { getLocalPiece, getOrCreateLocalSettings } from "@/lib/local/database";
+import { getLocalPiece } from "@/lib/local/database";
 import { isLocalFirstMode } from "@/lib/local/mode";
 import { writeLocalPublicFile } from "@/lib/local/storage";
+import { requireDriveEnabled } from "@/lib/billing/entitlements";
 
 /**
  * POST /api/drive/upload — build platform-output markdown for a piece and upload
@@ -73,17 +74,26 @@ export async function POST(req: Request) {
     const user = await requireUser();
     const raw: unknown = await req.json();
 
-    // 1) Resolve Drive link for this caller. Local-first reads the local
-    //    settings row (linking works on desktop too); without a link, local
-    //    mode falls back to writing the files into the local exports folder.
-    const localSetting = isLocalFirstMode()
-      ? getOrCreateLocalSettings(user.id, user.workspaceId ?? "local-workspace")
-      : null;
+    if (isLocalFirstMode()) {
+      if (raw && typeof raw === "object" && "files" in raw) {
+        const { files } = driveUploadFilesSchema.parse(raw);
+        return NextResponse.json({ files: localUploadMany(files) }, { status: 201 });
+      }
+    }
+
+    let userWithWorkspace = user;
+    if (!isLocalFirstMode()) {
+      const workspaceId = user.workspaceId ?? (await getOrCreateWorkspace(user.id));
+      const hostedUser = { ...user, workspaceId };
+      await requireDriveEnabled(hostedUser);
+      userWithWorkspace = hostedUser;
+    }
+
+    // 1) Ensure Drive is linked for this caller. (Shared by both modes.)
     const [setting] = isLocalFirstMode()
       ? []
-      : await db.select().from(settings).where(settingsScope(user)).limit(1);
-    const driveRefreshToken = isLocalFirstMode() ? localSetting?.driveRefreshToken : setting?.driveRefreshToken;
-    const driveFolderId = isLocalFirstMode() ? localSetting?.driveFolderId : setting?.driveFolderId;
+      : await db.select().from(settings).where(settingsScope(userWithWorkspace)).limit(1);
+    const driveRefreshToken = setting?.driveRefreshToken;
     if (!isLocalFirstMode() && !driveRefreshToken) {
       throw new DriveError("Google Drive is not linked.", 400, "drive_not_linked");
     }
@@ -91,12 +101,9 @@ export async function POST(req: Request) {
     // Mode A — prebuilt files: { files:[{name,content,mime?}] } uploaded as-is.
     if (raw && typeof raw === "object" && "files" in raw) {
       const { files } = driveUploadFilesSchema.parse(raw);
-      if (isLocalFirstMode() && !driveRefreshToken) {
-        return NextResponse.json({ files: localUploadMany(files) }, { status: 201 });
-      }
       const uploaded = await uploadMany(
         driveRefreshToken!,
-        driveFolderId,
+        setting.driveFolderId,
         files,
       );
       return NextResponse.json({ files: uploaded }, { status: 201 });
@@ -106,7 +113,7 @@ export async function POST(req: Request) {
     const body = driveUploadSchema.parse(raw);
 
     // 2) Load the piece (ownership-scoped → 404 on miss).
-    const piece = await resolvePiece(body.pieceId, user);
+    const piece = await resolvePiece(body.pieceId, userWithWorkspace);
     if (!piece) return notFound();
 
     const outputs = (piece.outputs as Record<string, OutputObject> | null) ?? {};
@@ -141,14 +148,14 @@ export async function POST(req: Request) {
       });
     }
 
-    if (isLocalFirstMode() && !driveRefreshToken) {
+    if (isLocalFirstMode()) {
       return NextResponse.json({ files: localUploadMany(files) }, { status: 201 });
     }
 
     // 4) Upload to the linked folder (server-side OAuth).
     const uploaded = await uploadMany(
       driveRefreshToken!,
-      driveFolderId,
+      setting.driveFolderId,
       files,
     );
 

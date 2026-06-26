@@ -73,25 +73,38 @@ function outputToText(o) {
   ].join("\n");
 }
 
+function exportAllowed() {
+  const auth = window.KP_AUTH && window.KP_AUTH.snapshot ? window.KP_AUTH.snapshot() : null;
+  if (!auth || !auth.hosted) return true;
+  const billing = window.Store && window.Store.billingStatus ? window.Store.billingStatus() : null;
+  return !billing || !billing.entitlement || billing.entitlement.exportEnabled !== false;
+}
+
+function notifyExportBlocked() {
+  if (window.KP_BILLING && window.KP_BILLING.notifyExportDisabled) window.KP_BILLING.notifyExportDisabled();
+}
+
 function outputFilename(o) { return window.EXPORT.safeName(o.platform) + ".md"; }
-function downloadOutput(o) { window.EXPORT.downloadText(window.EXPORT.outputMarkdown(o), outputFilename(o)); }
+function downloadOutput(o) {
+  if (!exportAllowed()) { notifyExportBlocked(); return; }
+  window.EXPORT.downloadText(window.EXPORT.outputMarkdown(o), outputFilename(o));
+}
 function outputFiles(piece) {
   return (piece.outputOrder || []).map((pid) => piece.outputs[pid]).filter(Boolean)
     .map((o) => ({ name: outputFilename(o), content: window.EXPORT.outputMarkdown(o), mime: "text/markdown" }));
 }
-async function downloadAllOutputs(piece, setMsg) {
+function downloadAllOutputs(piece) {
+  if (!exportAllowed()) { notifyExportBlocked(); return; }
   const files = outputFiles(piece); if (!files.length) return;
-  try {
-    const result = await window.EXPORT.downloadBlob(window.EXPORT.zipBlob(files), window.EXPORT.safeName(piece.title) + "-outputs.zip");
-    if (setMsg && result && result.path && window.PILLAR_DESKTOP && window.PILLAR_DESKTOP.isDesktop && window.PILLAR_DESKTOP.isDesktop()) {
-      setMsg({ t: "ok", m: "Downloaded outputs.", link: "file://" + result.path });
-    }
-  } catch (e) {
-    if (setMsg) setMsg({ t: "err", m: (e && e.message) || "Download failed." });
-  }
+  window.EXPORT.downloadBlob(window.EXPORT.zipBlob(files), window.EXPORT.safeName(piece.title) + "-outputs.zip");
 }
 async function driveSave(files, setMsg) {
-  if (!window.DRIVE.isLinked || !window.DRIVE.isLinked()) { setMsg({ t: "link", m: "Link Google Drive first." }); return; }
+  if (window.DRIVE && window.DRIVE.isDriveEnabled && !window.DRIVE.isDriveEnabled()) {
+    if (window.KP_BILLING && window.KP_BILLING.notifyDriveDisabled) window.KP_BILLING.notifyDriveDisabled();
+    setMsg({ t: "err", m: "Google Drive export requires an upgrade." });
+    return;
+  }
+  if (!window.DRIVE.isConfigured()) { setMsg({ t: "link", m: "Link a Google Drive folder first." }); return; }
   try {
     setMsg({ t: "busy", m: files.length > 1 ? `Saving ${files.length} files to Drive…` : `Saving ${files[0].name} to Drive…` });
     const res = await window.DRIVE.uploadMany(files, (i, n, name) => setMsg({ t: "busy", m: `Saving ${i + 1}/${n}: ${name}` }));
@@ -100,122 +113,26 @@ async function driveSave(files, setMsg) {
   } catch (e) { setMsg({ t: "err", m: e.message || "Drive save failed." }); }
 }
 
-/* Google Drive connect card. Runs the real server-side OAuth flow:
-   /api/drive/auth → Google consent → callback persists the refresh token
-   (Postgres row hosted, local SQLite settings on desktop). On desktop the
-   consent page opens in the system browser — Google blocks OAuth inside
-   embedded webviews — and the card polls /api/drive/status until linked.
-   Shared by this Outputs dialog, the model-setup Integrations section, and
-   the onboarding Connect step. */
-function GoogleDriveIntegrationCard() {
-  const [status, setStatus] = React.useState(null); // null = loading
-  const [folderId, setFolderId] = React.useState("");
-  const [clientId, setClientId] = React.useState("");
-  const [clientSecret, setClientSecret] = React.useState("");
-  const [busy, setBusy] = React.useState(false);
-  const [linking, setLinking] = React.useState(false);
-  const [msg, setMsg] = React.useState("");
-  const pollRef = React.useRef(null);
-  const isDesktop = !!(window.PILLAR_DESKTOP && window.PILLAR_DESKTOP.isDesktop && window.PILLAR_DESKTOP.isDesktop());
-
-  const refresh = React.useCallback(async () => {
-    try {
-      const r = await fetch("/api/drive/status", { headers: { Accept: "application/json" }, cache: "no-store" });
-      const s = r.ok ? await r.json() : null;
-      if (s) { setStatus(s); if (s.folderId) setFolderId((f) => f || s.folderId); }
-      else setStatus({ linked: false, oauthConfigured: false });
-      return s;
-    } catch (e) { setStatus({ linked: false, oauthConfigured: false }); return null; }
-  }, []);
-  React.useEffect(() => { refresh(); return () => clearInterval(pollRef.current); }, [refresh]);
-
-  const saveCreds = async () => {
-    if (!isDesktop || !window.PILLAR_DESKTOP.saveIntegrationKey) { setMsg("On a hosted install, set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in the server environment."); return; }
-    if (!clientId.trim() || !clientSecret.trim()) { setMsg("Paste both the Client ID and the Client Secret."); return; }
-    setBusy(true); setMsg("");
-    try {
-      await window.PILLAR_DESKTOP.saveIntegrationKey("google", clientSecret.trim(), { baseUrl: clientId.trim() });
-      setClientSecret("");
-      setMsg("Credentials saved encrypted. Now connect your account.");
-      await refresh();
-    } catch (e) { setMsg((e && e.message) || "Could not save the credentials."); }
-    setBusy(false);
-  };
-
-  const startLink = () => {
-    const path = "/api/drive/auth" + (folderId.trim() ? "?folderId=" + encodeURIComponent(folderId.trim()) : "");
-    if (isDesktop && window.PILLAR_DESKTOP.openExternalUrl) {
-      // Google rejects OAuth in embedded webviews — use the system browser.
-      window.PILLAR_DESKTOP.openExternalUrl(window.location.origin + path);
-    } else {
-      window.open(path, "_blank", "width=520,height=680,noopener");
-    }
-    setLinking(true);
-    setMsg(isDesktop ? "Finish signing in with Google in your browser…" : "Finish signing in with Google in the popup…");
-    clearInterval(pollRef.current);
-    let ticks = 0;
-    pollRef.current = setInterval(async () => {
-      ticks += 1;
-      const s = await refresh();
-      if (s && s.linked) { clearInterval(pollRef.current); setLinking(false); setMsg("Google Drive linked."); }
-      else if (ticks > 90) { clearInterval(pollRef.current); setLinking(false); setMsg("Still not linked — try connecting again."); }
-    }, 2000);
-  };
-
-  const linked = !!(status && status.linked);
-  const oauthConfigured = !!(status && status.oauthConfigured);
-  const statusText = status == null ? "Checking…" : linked ? "Linked" + (status.folderName ? " · " + status.folderName : "") : "Not linked";
-
-  return (
-    <div style={{ border: "1.5px solid " + (linked ? "var(--st-approved)" : "var(--hair)"), borderRadius: 8, background: "var(--paper-2)", padding: 18 }}>
-      <div style={{ display: "grid", gridTemplateColumns: "44px 1fr auto", gap: 14, alignItems: "start" }}>
-        <span style={{ width: 42, height: 42, display: "grid", placeItems: "center", color: "var(--ink-2)" }}><GoogleIcon size={30} /></span>
-        <span style={{ display: "grid", gap: 5 }}>
-          <strong style={{ fontSize: 21, lineHeight: 1 }}>Google Drive</strong>
-          <em style={{ fontStyle: "normal", color: linked ? "var(--st-approved)" : "var(--accent-ink)", fontSize: 14 }}>{statusText}</em>
-          <span style={{ color: "var(--muted)", fontSize: 14.5, lineHeight: 1.35 }}>Save outputs and Studio media straight into a Drive folder. Optional — Download and local exports work without it.</span>
-        </span>
-        {oauthConfigured && (
-          <button className="btn sm" disabled={linking} onClick={startLink}>
-            {linking ? <Spinner size={13} /> : <Icon name="key" size={13} />} {linked ? "Re-link" : "Connect"}
-          </button>
-        )}
-      </div>
-      {!oauthConfigured && status != null && (
-        <div style={{ marginTop: 14 }}>
-          <p className="muted" style={{ fontSize: 12.5, margin: "0 0 8px", lineHeight: 1.5 }}>
-            Linking needs a Google OAuth client (console.cloud.google.com → Credentials → OAuth client ID, type <strong>Desktop app</strong>, with the Drive API enabled). Paste its Client ID and Client Secret — they're stored encrypted on this Mac. Files use the <span className="mono">drive.file</span> scope.
-          </p>
-          <div style={{ display: "grid", gap: 8 }}>
-            <input className="field" value={clientId} onChange={(e) => setClientId(e.target.value)} placeholder="Client ID — xxxxxx.apps.googleusercontent.com" style={{ fontSize: 13, fontFamily: "var(--font-mono)" }} />
-            <div style={{ display: "flex", gap: 8 }}>
-              <input className="field" type="password" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} placeholder="Client Secret" style={{ flex: 1, fontSize: 13 }} />
-              <button className="btn primary sm" disabled={busy || !clientId.trim() || !clientSecret.trim()} onClick={saveCreds}>
-                {busy ? <Spinner size={13} /> : <Icon name="check" size={13} />} Save
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      {oauthConfigured && !linked && (
-        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-          <input className="field" value={folderId} onChange={(e) => setFolderId(e.target.value)} placeholder="Destination folder ID (optional — blank = My Drive root)" style={{ flex: 1, fontSize: 13, fontFamily: "var(--font-mono)" }} />
-        </div>
-      )}
-      {msg && <p style={{ margin: "10px 0 0", fontSize: 13.5, color: "var(--accent-ink)" }}>{msg}</p>}
-    </div>
-  );
-}
-
 function DriveDialog({ onClose }) {
+  const cfg = window.Store.getSettings().drive || {};
+  const [clientId, setClientId] = React.useState(cfg.clientId || "");
+  const [folderId, setFolderId] = React.useState(cfg.folderId || "");
+  const save = () => { window.Store.setDriveConfig({ clientId: clientId.trim(), folderId: folderId.trim() }); onClose(); };
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "oklch(0 0 0 / 0.4)", display: "grid", placeItems: "center", zIndex: 80 }}>
-      <div className="card" onClick={(e) => e.stopPropagation()} style={{ width: 560, maxWidth: "92vw", padding: "26px 28px" }}>
+      <div className="card" onClick={(e) => e.stopPropagation()} style={{ width: 540, maxWidth: "92vw", padding: "26px 28px" }}>
         <div className="eyebrow" style={{ marginBottom: 6 }}>Connect</div>
-        <h2 style={{ fontSize: 24, marginBottom: 14 }}>Link Google Drive</h2>
-        <GoogleDriveIntegrationCard />
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 16 }}>
-          <button className="btn primary" onClick={onClose}>Done</button>
+        <h2 style={{ fontSize: 24, marginBottom: 10 }}>Link a Google Drive folder</h2>
+        <p className="muted" style={{ fontSize: 14, marginBottom: 18 }}>
+          Saving to your Drive needs your own Google OAuth <strong>Client ID</strong> (Web application, with this app's URL added as an authorized JavaScript origin) and the destination <strong>Folder ID</strong> (the long string at the end of the folder's URL). Files use the <span className="mono">drive.file</span> scope. If sign-in is blocked here, use Download instead — it produces the same files.
+        </p>
+        <label className="eyebrow" style={{ display: "block", marginBottom: 5 }}>OAuth Client ID</label>
+        <input className="field" value={clientId} onChange={(e) => setClientId(e.target.value)} placeholder="xxxxxx.apps.googleusercontent.com" style={{ marginBottom: 14, fontFamily: "var(--font-mono)", fontSize: 13 }} />
+        <label className="eyebrow" style={{ display: "block", marginBottom: 5 }}>Destination Folder ID <span style={{ textTransform: "none", letterSpacing: 0 }} className="muted">(optional — blank = My Drive root)</span></label>
+        <input className="field" value={folderId} onChange={(e) => setFolderId(e.target.value)} placeholder="1AbC…folderId" style={{ marginBottom: 22, fontFamily: "var(--font-mono)", fontSize: 13 }} />
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+          <button className="btn ghost" onClick={onClose}>Cancel</button>
+          <button className="btn primary" onClick={save}>Save link</button>
         </div>
       </div>
     </div>
@@ -232,10 +149,7 @@ function OutputCard({ o, derivation, pieceId, platform, onCondensed, onDrive, on
   const [condensing, setCondensing] = React.useState(false);
   const [cerr, setCerr] = React.useState(null);
   const [ratio, setRatio] = React.useState(0.4);
-  const [hist, setHist] = React.useState(Array.isArray(o._history) ? o._history.filter((x) => typeof x === "string") : []);
-  React.useEffect(() => {
-    setHist(Array.isArray(o._history) ? o._history.filter((x) => typeof x === "string") : []);
-  }, [o._history]);
+  const [hist, setHist] = React.useState([]); // stack of prior draftPost versions (multi-level undo)
   const pct = Math.round(ratio * 100);
   const wc = (s) => (s || "").trim().split(/\s+/).filter(Boolean).length;
   const wordCount = wc(o.draftPost);
@@ -246,18 +160,16 @@ function OutputCard({ o, derivation, pieceId, platform, onCondensed, onDrive, on
     setCondensing(true); setCerr(null);
     try {
       const r = await window.GEN.condenseOutput(pieceId, platform, ratio);
-      const nextHistory = Array.isArray(r.history) ? r.history.filter((x) => typeof x === "string") : hist.concat([before]);
-      setHist(nextHistory);
-      if (onCondensed) onCondensed(platform, r.draftPost, nextHistory);
+      setHist((h) => h.concat([before]));
+      if (onCondensed) onCondensed(platform, r.draftPost);
     } catch (e) { setCerr((e && e.message) || "Couldn't condense."); }
     setCondensing(false);
   };
   const undo = () => {
     if (!hist.length) return;
     const last = hist[hist.length - 1];
-    const nextHistory = hist.slice(0, -1);
-    setHist(nextHistory);
-    if (onCondensed) onCondensed(platform, last, nextHistory);
+    setHist((h) => h.slice(0, -1));
+    if (onCondensed) onCondensed(platform, last);
   };
   return (
     <div className="card fade-in" style={{ padding: "24px 26px" }}>
@@ -287,15 +199,15 @@ function OutputCard({ o, derivation, pieceId, platform, onCondensed, onDrive, on
       <div style={{ whiteSpace: "pre-wrap", fontSize: 16.5, lineHeight: 1.7, padding: "18px 20px", background: "var(--paper-sunk)", borderRadius: "var(--radius)", marginBottom: 12 }}>{o.draftPost}</div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 18, flexWrap: "wrap" }}>
+        <button className="btn ghost sm" onClick={condense} disabled={condensing} title="Rewrite this post shorter (post only — hooks, CTAs and metadata untouched)">
+          {condensing ? <><Spinner size={13} /> Condensing…</> : "Make " + pct + "% shorter"}
+        </button>
         <input type="range" min="20" max="60" step="5" value={pct} disabled={condensing}
           onChange={(e) => setRatio(Number(e.target.value) / 100)}
           aria-label="Reduction amount" title={"Reduce by " + pct + "%"} style={{ width: 110, accentColor: "var(--accent)" }} />
-        <button className="btn ghost sm" onClick={condense} disabled={condensing} title="Regenerate this post shorter (post only — hooks, CTAs and metadata untouched)">
-          {condensing ? <><Spinner size={13} /> Regenerating…</> : "Regenerate"}
-        </button>
         <span className="mono" style={{ fontSize: 11, color: "var(--ink-3)" }}>{pct}% · {wordCount} words{prevWords != null ? " (was " + prevWords + ")" : ""}</span>
         {hist.length > 0 && !condensing &&
-          <button className="btn ghost sm" onClick={undo} title="Restore the previous version of this post">Rollback{hist.length > 1 ? " (" + hist.length + ")" : ""}</button>}
+          <button className="btn ghost sm" onClick={undo} title="Restore the previous version of this post">Undo{hist.length > 1 ? " (" + hist.length + ")" : ""}</button>}
         {cerr && <span style={{ fontSize: 13, color: "var(--sev-must)" }}>{cerr}</span>}
       </div>
 
@@ -348,14 +260,18 @@ function OutputsTab({ piece, onUpdate, refCtx, onGoStudio }) {
   const [err, setErr] = React.useState(null);
   const [driveOpen, setDriveOpen] = React.useState(false);
   const [msg, setMsg] = React.useState(null);
-  const driveLinked = !!(window.DRIVE && window.DRIVE.isLinked && window.DRIVE.isLinked());
-  const onDriveOne = (o) => { if (!driveLinked) { setDriveOpen(true); return; } driveSave([{ name: outputFilename(o), content: window.EXPORT.outputMarkdown(o), mime: "text/markdown" }], setMsg); };
+  const onDriveOne = (o) => {
+    if (window.DRIVE && window.DRIVE.isDriveEnabled && !window.DRIVE.isDriveEnabled()) {
+      if (window.KP_BILLING && window.KP_BILLING.notifyDriveDisabled) window.KP_BILLING.notifyDriveDisabled();
+      return;
+    }
+    if (!window.DRIVE.isConfigured()) { setDriveOpen(true); return; }
+    driveSave([{ name: outputFilename(o), content: window.EXPORT.outputMarkdown(o), mime: "text/markdown" }], setMsg);
+  };
   const onVideo = (o) => { window.__studioPrefill = { type: "avatar", pieceId: piece.id, prompt: o.platform + " — " + (o.strategicPurpose || ""), script: o.draftPost || "" }; onGoStudio && onGoStudio(); };
   const onImage = (o) => { window.__studioPrefill = { type: "image", pieceId: piece.id, prompt: o.mediaRec || o.strategicPurpose || (o.platform + " post art") }; onGoStudio && onGoStudio(); };
-  const onCondensed = (platform, draftPost, history) => {
-    const nextOutput = Object.assign({}, piece.outputs[platform], { draftPost });
-    if (Array.isArray(history)) nextOutput._history = history;
-    const outputs = Object.assign({}, piece.outputs, { [platform]: nextOutput });
+  const onCondensed = (platform, draftPost) => {
+    const outputs = Object.assign({}, piece.outputs, { [platform]: Object.assign({}, piece.outputs[platform], { draftPost }) });
     onUpdate({ outputs });
   };
 
@@ -436,9 +352,16 @@ function OutputsTab({ piece, onUpdate, refCtx, onGoStudio }) {
         {(piece.outputOrder || []).length > 0 && (
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
             <div className="eyebrow" style={{ marginRight: "auto" }}>{piece.outputOrder.length} output{piece.outputOrder.length !== 1 ? "s" : ""}</div>
-            <button className="btn sm" onClick={() => downloadAllOutputs(piece, setMsg)}><Icon name="doc" size={14} /> Download all (.zip)</button>
-            <button className="btn sm" onClick={() => driveSave(outputFiles(piece), setMsg)} disabled={!driveLinked} title={driveLinked ? "Save all outputs to Google Drive" : "Link Google Drive first"}><GoogleIcon size={13} /> Save all to Drive</button>
-            <button className="btn ghost sm" onClick={() => setDriveOpen(true)} title="Link / change Google Drive folder"><Icon name="gear" size={14} /> {driveLinked ? "Drive linked" : "Link Drive"}</button>
+            <button className="btn sm" onClick={() => downloadAllOutputs(piece)}><Icon name="doc" size={14} /> Download all (.zip)</button>
+            <button className="btn sm" onClick={() => {
+              if (window.DRIVE && window.DRIVE.isDriveEnabled && !window.DRIVE.isDriveEnabled()) {
+                if (window.KP_BILLING && window.KP_BILLING.notifyDriveDisabled) window.KP_BILLING.notifyDriveDisabled();
+                return;
+              }
+              if (!window.DRIVE.isConfigured()) { setDriveOpen(true); return; }
+              driveSave(outputFiles(piece), setMsg);
+            }}><GoogleIcon size={13} /> Save all to Drive</button>
+            <button className="btn ghost sm" onClick={() => setDriveOpen(true)} title="Link / change Google Drive folder"><Icon name="gear" size={14} /> {window.DRIVE.isConfigured() ? "Drive linked" : "Link Drive"}</button>
           </div>
         )}
         {msg && (
@@ -449,7 +372,7 @@ function OutputsTab({ piece, onUpdate, refCtx, onGoStudio }) {
             {msg.t === "ok" && <Icon name="check" size={15} />}
             {msg.t === "err" && <Icon name="warn" size={15} />}
             <span>{msg.m}</span>
-            {msg.link && <a href={msg.link} target="_blank" rel="noopener" style={{ marginLeft: 4 }}>{String(msg.link).startsWith("file:") ? "Show file" : "Open in Drive"} →</a>}
+            {msg.link && <a href={msg.link} target="_blank" rel="noopener" style={{ marginLeft: 4 }}>Open in Drive →</a>}
             {(msg.t === "link") && <button className="btn ghost sm" onClick={() => setDriveOpen(true)} style={{ marginLeft: 4 }}>Link Drive</button>}
             <button className="btn ghost sm" style={{ marginLeft: "auto" }} onClick={() => setMsg(null)}>Dismiss</button>
           </div>
@@ -466,4 +389,4 @@ function OutputsTab({ piece, onUpdate, refCtx, onGoStudio }) {
   );
 }
 
-Object.assign(window, { OutputsTab, GoogleDriveIntegrationCard });
+Object.assign(window, { OutputsTab });

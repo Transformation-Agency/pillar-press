@@ -11,19 +11,25 @@
     try {
       if (window.crypto && typeof window.crypto.randomUUID === "function") return window.crypto.randomUUID();
     } catch (e) { /* fall through */ }
-    // Server schemas validate ids as UUIDs, so the fallback must be UUID-shaped
-    // (v4 format from Math.random) or background persistence 400s silently.
-    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-      const r = (Math.random() * 16) | 0;
-      return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
-    });
+    return "id-" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
   }
   function now() { return Date.now(); }
 
   /* ---- minimal REST helpers (same-origin, no auth headers) ---- */
+  async function throwApiError(response, label) {
+    let data = {};
+    try { data = await response.clone().json(); } catch { data = {}; }
+    const message = (data && data.error) || (label + " -> " + response.status);
+    const err = new Error(message);
+    err.status = response.status;
+    err.code = data && data.code;
+    err.body = data;
+    throw err;
+  }
+
   async function apiGet(path) {
     const r = await fetch("/api" + path, { headers: { Accept: "application/json" } });
-    if (!r.ok) throw new Error("GET " + path + " -> " + r.status);
+    if (!r.ok) await throwApiError(r, "GET " + path);
     return r.json();
   }
   async function apiSend(method, path, body) {
@@ -32,44 +38,80 @@
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: body == null ? undefined : JSON.stringify(body),
     });
-    if (!r.ok) throw new Error(method + " " + path + " -> " + r.status);
+    if (!r.ok) await throwApiError(r, method + " " + path);
     const ct = r.headers.get("content-type") || "";
     return ct.indexOf("application/json") >= 0 ? r.json() : null;
   }
+  function storeEvent(type, detail) {
+    try {
+      window.dispatchEvent(new CustomEvent(type, { detail: detail || {} }));
+    } catch (e) { /* ignore event failures */ }
+  }
+
+  function safeErrorMessage(error) {
+    const raw = error && error.message ? error.message : String(error || "Unknown persistence error.");
+    return raw.replace(/(sk-[A-Za-z0-9_-]{8,})/g, "[redacted]");
+  }
+
   // fire-and-forget background persist
   function bg(promise, label) {
-    Promise.resolve(promise).catch((e) => console.warn("[Store] " + (label || "persist") + " failed:", e && e.message ? e.message : e));
+    const id = uid();
+    const persistLabel = label || "persist";
+    storeEvent("pillarpress:store-persist", { id, label: persistLabel, status: "saving", startedAt: now() });
+    Promise.resolve(promise).then(
+      () => storeEvent("pillarpress:store-persist", { id, label: persistLabel, status: "saved", finishedAt: now() }),
+      (e) => {
+        const message = safeErrorMessage(e);
+        console.warn("[Store] " + persistLabel + " failed:", message);
+        storeEvent("pillarpress:store-persist", { id, label: persistLabel, status: "failed", message, finishedAt: now() });
+        storeEvent("pillarpress:store-warning", { id, label: persistLabel, message });
+      },
+    );
   }
 
   /* ---- minimal default state so getters never crash before hydrate ---- */
   const STATUSES = ["Draft", "Reviewed", "Revised", "Approved", "Formatted"];
 
-  let state = {
-    campaigns: [],
-    activeCampaignId: null,
-    settings: {
-      drive: { clientId: "", folderId: "", folderName: "" },
-      hedra: {},
-      eleven: {},
-    },
-    media: [],
-    gatherSources: [],
-    gatherItems: [],
-    gatherSummaries: [], // per-source research briefs from the last run (cache-only)
-    pieces: [],
-    activePieceId: null,
-    theme: "light",
-    role: "author",
-    hydrated: false,
-    weave: { sources: [], result: null },
-    desk: { threads: [], activeId: null },
-  };
+  function defaultState() {
+    return {
+      campaigns: [],
+      activeCampaignId: null,
+      settings: {
+        drive: { clientId: "", folderId: "", folderName: "" },
+        hedra: {},
+        eleven: {},
+      },
+      media: [],
+      billing: null,
+      gatherSources: [],
+      gatherItems: [],
+      gatherSummaries: [], // per-source research briefs from the last run (cache-only)
+      recipients: [],
+      letterWorkflows: [],
+      pieces: [],
+      activePieceId: null,
+      theme: "light",
+      role: "author",
+      weave: { sources: [], result: null },
+      desk: { threads: [], activeId: null },
+    };
+  }
+
+  let state = defaultState();
 
   // tracks which campaigns have had their per-campaign data hydrated
   const loadedCampaigns = new Set();
   const pendingCampaignCreates = new Map();
 
   function emit() { listeners.forEach((l) => l(state)); }
+
+  function resetState(shouldEmit) {
+    state = defaultState();
+    loadedCampaigns.clear();
+    pendingCampaignCreates.clear();
+    document.documentElement.setAttribute("data-theme", state.theme || "light");
+    if (shouldEmit !== false) emit();
+  }
 
   /* ---- normalization helpers ---- */
   function normSettings(raw) {
@@ -107,6 +149,7 @@
     (state.gatherSources || []).forEach((s) => { if (s.campaignId === tempId) s.campaignId = realId; });
     (state.gatherItems || []).forEach((i) => { if (i.campaignId === tempId) i.campaignId = realId; });
     (state.gatherSummaries || []).forEach((s) => { if (s.campaignId === tempId) s.campaignId = realId; });
+    (state.letterWorkflows || []).forEach((w) => { if (w.campaignId === tempId) w.campaignId = realId; });
     (state.media || []).forEach((m) => { if (m.campaignId === tempId) m.campaignId = realId; });
     if (loadedCampaigns.has(tempId)) {
       loadedCampaigns.delete(tempId);
@@ -121,6 +164,18 @@
     p.id = realId;
     if (state.activePieceId === tempId) state.activePieceId = realId;
     (state.media || []).forEach((m) => { if (m.pieceId === tempId) m.pieceId = realId; });
+    (state.letterWorkflows || []).forEach((w) => { if (w.pieceId === tempId) w.pieceId = realId; });
+  }
+
+  function removeOptimisticCampaign(id) {
+    state.campaigns = (state.campaigns || []).filter((c) => c.id !== id);
+    state.pieces = (state.pieces || []).filter((p) => p.campaignId !== id);
+    state.letterWorkflows = (state.letterWorkflows || []).filter((w) => w.campaignId !== id);
+    loadedCampaigns.delete(id);
+    if (state.activeCampaignId === id) {
+      state.activeCampaignId = state.campaigns[0] ? state.campaigns[0].id : null;
+      state.activePieceId = null;
+    }
   }
 
   /* ---- per-campaign hydration (references + pieces + gather + media) ---- */
@@ -135,10 +190,11 @@
         apiGet("/campaigns/" + id + "/pieces").catch(() => ({ pieces: [] })),
         apiGet("/gather/sources?campaignId=" + encodeURIComponent(id)).catch(() => ({ sources: [] })),
         apiGet("/gather/items?campaignId=" + encodeURIComponent(id)).catch(() => ({ items: [] })),
+        apiGet("/letter-workflows?campaignId=" + encodeURIComponent(id)).catch(() => ({ workflows: [] })),
         // media has no documented campaignId filter; fetch all and filter client-side.
         apiGet("/media").catch(() => ({})),
       ]);
-      const [refDoc, pieceRes, srcRes, itemRes, mediaRes] = results;
+      const [refDoc, pieceRes, srcRes, itemRes, workflowRes, mediaRes] = results;
 
       const cc = ensureCampaign(id);
       if (cc) {
@@ -151,6 +207,7 @@
       const pieces = (pieceRes && pieceRes.pieces) || [];
       // replace this campaign's pieces with server truth, keep other campaigns' cache
       state.pieces = (state.pieces || []).filter((p) => p.campaignId !== id).concat(pieces.map(normPiece));
+      if (cc) cc.pieceCount = pieces.length;
 
       const sources = (srcRes && srcRes.sources) || [];
       state.gatherSources = (state.gatherSources || []).filter((s) => s.campaignId !== id).concat(sources);
@@ -169,6 +226,9 @@
       const items = (itemRes && itemRes.items) || [];
       state.gatherItems = (state.gatherItems || []).filter((i) => i.campaignId !== id).concat(items);
 
+      const workflows = (workflowRes && workflowRes.workflows) || [];
+      state.letterWorkflows = (state.letterWorkflows || []).filter((w) => w.campaignId !== id).concat(workflows);
+
       const media = mediaArrayFrom(mediaRes);
       if (media) {
         const mine = media.filter((m) => m.campaignId === id).map(normMedia);
@@ -178,6 +238,34 @@
       console.warn("[Store] hydrateCampaign failed:", e && e.message);
     }
     emit();
+  }
+
+  async function hydrateLibraryPieces() {
+    const campaigns = state.campaigns || [];
+    const localCounts = {};
+    (state.pieces || []).forEach((p) => {
+      if (p && p.campaignId) localCounts[p.campaignId] = (localCounts[p.campaignId] || 0) + 1;
+    });
+    const ids = campaigns
+      .filter((c) => c && c.id && Number(c.pieceCount || 0) > 0 && !localCounts[c.id])
+      .map((c) => c.id);
+    if (!ids.length) return state.pieces;
+    const results = await Promise.all(ids.map((id) =>
+      apiGet("/campaigns/" + id + "/pieces")
+        .then((res) => ({ id, pieces: (res && res.pieces) || [] }))
+        .catch((e) => {
+          console.warn("[Store] hydrateLibraryPieces failed for " + id + ":", e && e.message);
+          return { id, pieces: null };
+        }),
+    ));
+    results.forEach(({ id, pieces }) => {
+      if (!Array.isArray(pieces)) return;
+      const cc = ensureCampaign(id);
+      state.pieces = (state.pieces || []).filter((p) => p.campaignId !== id).concat(pieces.map(normPiece));
+      if (cc) cc.pieceCount = pieces.length;
+    });
+    emit();
+    return state.pieces;
   }
 
   function mediaArrayFrom(res) {
@@ -199,99 +287,36 @@
   function normPiece(p) {
     return Object.assign({
       campaignId: state.activeCampaignId, status: "Draft",
+      category: "article", categoryContext: {},
       original: "", packet: null, revision: null, outputs: {}, outputOrder: [],
       createdAt: now(), updatedAt: now(),
     }, p);
   }
 
-  function setupHandoffThreadId(sessionId) {
-    const safe = String(sessionId || "setup")
-      .replace(/[^a-z0-9_-]+/gi, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 80) || "setup";
-    return "setup_handoff_" + safe;
-  }
-
-  function transcriptTurnToDeskMessage(turn, index) {
-    const role = turn && turn.role === "user" ? "user" : "assistant";
-    const content = String((turn && (turn.text || turn.content)) || "").trim();
-    if (!content) return null;
-    return {
-      id: "setup_msg_" + index,
-      role,
-      content,
-    };
-  }
-
-  function buildSetupHandoffThread(handoff, transcript) {
-    const turns = transcript && Array.isArray(transcript.turns) ? transcript.turns : [];
-    const messages = turns.map(transcriptTurnToDeskMessage).filter(Boolean);
-    const campaignName = (handoff && handoff.campaignName) || "your first focus";
-    const providerReady = !!(handoff && handoff.providerReady);
-    const at = Date.parse(handoff && handoff.createdAt) || now();
-    messages.push({
-      id: "setup_msg_ready",
-      role: "assistant",
-      content: providerReady
-        ? "Setup is ready for " + campaignName + ". I kept our setup transcript here, so you can continue by telling me what you want to draft, gather, or refine first."
-        : "Setup is saved for " + campaignName + ". Model setup is still deferred, but I kept our setup transcript here so the desk can continue once a provider is ready.",
-    });
-    return {
-      id: (handoff && handoff.deskThreadId) || setupHandoffThreadId(handoff && handoff.sessionId),
-      title: "Setup handoff",
-      titleSet: true,
-      source: "pillar_press_setup",
-      sessionId: handoff && handoff.sessionId,
-      campaignId: handoff && handoff.campaignId,
-      messages,
-      memory: {
-        note: "Onboarding captured the first focus, provider/voice decision, and essential writing preferences. Continue from this setup context.",
-        covered: turns.length,
-      },
-      createdAt: at,
-      updatedAt: at,
-    };
-  }
-
-  function repairDeskHandoffFromPrefs() {
-    const prefs = (state.settings && state.settings.prefs) || {};
-    const handoff = prefs.onboardingAssistantHandoffV1;
-    const transcriptKey = (handoff && handoff.transcriptPref) || "onboardingSetupTranscriptV1";
-    const transcript = prefs[transcriptKey] || prefs.onboardingSetupTranscriptV1;
-    const turns = transcript && Array.isArray(transcript.turns) ? transcript.turns : [];
-    if (!handoff || !turns.length) return false;
-
-    const desk = Object.assign({ threads: [], activeId: null }, state.desk || {});
-    const threads = Array.isArray(desk.threads) ? desk.threads.slice() : [];
-    const handoffId = handoff.deskThreadId || setupHandoffThreadId(handoff.sessionId);
-    if (threads.some((t) => t && (t.id === handoffId || t.source === "pillar_press_setup"))) return false;
-
-    const hasMeaningfulMessages = threads.some((t) => Array.isArray(t && t.messages) && t.messages.length > 0);
-    if (hasMeaningfulMessages) return false;
-
-    const handoffThread = buildSetupHandoffThread(Object.assign({}, handoff, { deskThreadId: handoffId }), transcript);
-    const nonBlankThreads = threads.filter((t) => {
-      const messages = Array.isArray(t && t.messages) ? t.messages : [];
-      const blankNewThread = !messages.length && !t.titleSet && (!t.title || t.title === "New thread");
-      return !blankNewThread;
-    });
-    state.desk = Object.assign({}, desk, {
-      threads: [handoffThread].concat(nonBlankThreads),
-      activeId: handoffThread.id,
-    });
-    return true;
-  }
-
   /* ---- top-level hydration ---- */
   async function hydrate() {
     try {
-      const [campRes, setRes] = await Promise.all([
+      let auth = null;
+      if (window.KP_AUTH && window.KP_AUTH.ready) {
+        await window.KP_AUTH.ready.catch(() => null);
+        auth = window.KP_AUTH.snapshot ? window.KP_AUTH.snapshot() : null;
+        if (auth && auth.requiresLogin && !auth.authenticated) {
+          resetState();
+          return;
+        }
+      }
+      const [campRes, setRes, recipientRes] = await Promise.all([
         apiGet("/campaigns").catch(() => ({ campaigns: [] })),
         apiGet("/settings").catch(() => ({ settings: {} })),
+        apiGet("/recipients").catch(() => ({ recipients: [] })),
       ]);
+      const billingPromise = auth && auth.hosted
+        ? apiGet("/billing/status").catch(() => null)
+        : Promise.resolve(null);
 
       const camps = (campRes && campRes.campaigns) || [];
-      state.campaigns = camps.map((c) => ({ id: c.id, name: c.name, slug: c.slug, references: null, meta: c.meta || null }));
+      state.campaigns = camps.map((c) => ({ id: c.id, name: c.name, slug: c.slug, pieceCount: Number(c.pieceCount || 0), references: null }));
+      state.recipients = (recipientRes && recipientRes.recipients) || [];
 
       normSettings((setRes && setRes.settings) || setRes || {});
 
@@ -304,21 +329,18 @@
       emit(); // render shell with campaign list + settings
 
       if (activeId) await hydrateCampaign(activeId);
+      // Preload restored/legacy pieces in other focuses so Library's default
+      // "All focuses" view does not appear empty after a database restore.
+      await hydrateLibraryPieces();
+      state.billing = await billingPromise;
       const deskRes = await apiGet("/desk/session").catch(() => ({ session: { state: {} } }));
       const deskState = deskRes && deskRes.session && deskRes.session.state;
       if (deskState && typeof deskState === "object") {
         state.desk = Object.assign({ threads: [], activeId: null }, deskState);
       }
-      if (repairDeskHandoffFromPrefs()) {
-        bg(apiSend("PUT", "/desk/session", {
-          activeId: state.desk.activeId || null,
-          state: state.desk,
-        }), "repair /desk/session");
-      }
     } catch (e) {
       console.warn("[Store] hydrate failed:", e && e.message);
     }
-    state.hydrated = true;
     document.documentElement.setAttribute("data-theme", state.theme || "light");
     emit();
   }
@@ -337,6 +359,29 @@
     STATUSES,
     getState: () => state,
     subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
+    reload() { resetState(); return hydrate(); },
+    resetForAuth() { resetState(); },
+    async refreshBilling() {
+      try {
+        state.billing = await apiGet("/billing/status");
+      } catch (e) {
+        console.warn("[Store] billing refresh failed:", e && e.message);
+        state.billing = Object.assign({}, state.billing || {}, { error: e && e.message ? e.message : "Billing unavailable" });
+      }
+      emit();
+      return state.billing;
+    },
+    billingStatus() { return state.billing || null; },
+    async startCheckout(planId) {
+      const res = await apiSend("POST", "/billing/checkout", { planId });
+      if (res && res.url) window.location.href = res.url;
+      return res;
+    },
+    async openBillingPortal() {
+      const res = await apiSend("POST", "/billing/portal", {});
+      if (res && res.url) window.location.href = res.url;
+      return res;
+    },
 
     setTheme(t) { state.theme = t; document.documentElement.setAttribute("data-theme", t); emit(); persistPrefs(); },
     toggleTheme() { api.setTheme(state.theme === "dark" ? "light" : "dark"); },
@@ -397,21 +442,29 @@
     // new book never hijacks the active article campaign ("Me").
     addCampaign(name, opts) {
       const activate = !opts || opts.activate !== false;
-      const meta = opts && opts.meta && typeof opts.meta === "object" ? opts.meta : null;
       const id = uid();
-      state.campaigns.push({ id, name: name || "New campaign", references: {}, meta });
+      state.campaigns.push({ id, name: name || "New campaign", pieceCount: 0, references: {} });
       loadedCampaigns.add(id); // brand-new, nothing to fetch
       if (activate) { state.activeCampaignId = id; state.activePieceId = null; }
       emit();
-      const created = apiSend("POST", "/campaigns", { name: name || "New campaign", ...(meta ? { meta } : {}) }).then((res) => {
+      const created = apiSend("POST", "/campaigns", { name: name || "New campaign" }).then((res) => {
         const serverCampaign = res && res.campaign;
         if (!serverCampaign || !serverCampaign.id) return ensureCampaign(id);
         replaceCampaignId(id, serverCampaign.id);
         const c = ensureCampaign(serverCampaign.id);
-        if (c) Object.assign(c, { name: serverCampaign.name || c.name, slug: serverCampaign.slug || c.slug, meta: serverCampaign.meta || c.meta || null });
+        if (c) Object.assign(c, {
+          name: serverCampaign.name || c.name,
+          slug: serverCampaign.slug || c.slug,
+          pieceCount: Number(serverCampaign.pieceCount || c.pieceCount || 0),
+        });
         emit();
         persistPrefs();
         return c || ensureCampaign(serverCampaign.id);
+      }).catch((err) => {
+        removeOptimisticCampaign(id);
+        emit();
+        persistPrefs();
+        throw err;
       });
       pendingCampaignCreates.set(id, created);
       created.then(() => pendingCampaignCreates.delete(id), () => pendingCampaignCreates.delete(id));
@@ -487,6 +540,98 @@
       if (m) { m.pieceId = pieceId; m.updatedAt = now(); emit(); }
       bg(apiSend("PATCH", "/media/" + id, { pieceId }), "PATCH /media/:id (attach)");
       return m;
+    },
+
+    /* ---- Saved recipients + letter workflows ---- */
+    getRecipients() { if (!Array.isArray(state.recipients)) state.recipients = []; return state.recipients; },
+    async refreshRecipients() {
+      const res = await apiGet("/recipients");
+      state.recipients = (res && res.recipients) || [];
+      emit();
+      return state.recipients;
+    },
+    async createRecipient(input) {
+      const res = await apiSend("POST", "/recipients", input || {});
+      const recipient = res && res.recipient;
+      if (recipient) {
+        state.recipients = api.getRecipients().filter((r) => r.id !== recipient.id).concat([recipient])
+          .sort((a, b) => String(a.displayName || "").localeCompare(String(b.displayName || "")));
+        emit();
+      }
+      return recipient;
+    },
+    async updateRecipient(id, patch) {
+      const res = await apiSend("PATCH", "/recipients/" + id, patch || {});
+      const recipient = res && res.recipient;
+      if (recipient) {
+        state.recipients = api.getRecipients().map((r) => r.id === id ? recipient : r);
+        emit();
+      }
+      return recipient;
+    },
+    async deleteRecipient(id) {
+      await apiSend("DELETE", "/recipients/" + id);
+      state.recipients = api.getRecipients().filter((r) => r.id !== id);
+      (state.letterWorkflows || []).forEach((w) => { if (w.recipientId === id) w.recipientId = null; });
+      emit();
+    },
+    getLetterWorkflows(campaignId) {
+      if (!Array.isArray(state.letterWorkflows)) state.letterWorkflows = [];
+      return state.letterWorkflows.filter((w) => w.campaignId === campaignId);
+    },
+    async refreshLetterWorkflows(campaignId) {
+      const res = await apiGet("/letter-workflows?campaignId=" + encodeURIComponent(campaignId));
+      const workflows = (res && res.workflows) || [];
+      state.letterWorkflows = (state.letterWorkflows || []).filter((w) => w.campaignId !== campaignId).concat(workflows);
+      emit();
+      return workflows;
+    },
+    async createLetterWorkflow(input) {
+      const res = await apiSend("POST", "/letter-workflows", input || {});
+      const workflow = res && res.workflow;
+      if (workflow) {
+        state.letterWorkflows = (state.letterWorkflows || []).filter((w) => w.id !== workflow.id).concat([workflow]);
+        emit();
+      }
+      return workflow;
+    },
+    async updateLetterWorkflow(id, patch) {
+      const res = await apiSend("PATCH", "/letter-workflows/" + id, patch || {});
+      const workflow = res && res.workflow;
+      if (workflow) {
+        state.letterWorkflows = (state.letterWorkflows || []).map((w) => w.id === id ? workflow : w);
+        emit();
+      }
+      return workflow;
+    },
+    async deleteLetterWorkflow(id) {
+      await apiSend("DELETE", "/letter-workflows/" + id);
+      state.letterWorkflows = (state.letterWorkflows || []).filter((w) => w.id !== id);
+      emit();
+    },
+    async draftLetterWorkflow(id) {
+      const res = await apiSend("POST", "/letter-workflows/" + id + "/draft", {});
+      const workflow = res && res.workflow;
+      const piece = res && res.piece;
+      if (workflow) {
+        state.letterWorkflows = (state.letterWorkflows || []).filter((w) => w.id !== workflow.id).concat([workflow]);
+      }
+      if (piece) {
+        const normalized = normPiece(piece);
+        state.pieces = (state.pieces || []).filter((p) => p.id !== piece.id).concat([normalized]);
+        state.activePieceId = piece.id;
+      }
+      emit();
+      return res;
+    },
+    openLetterPiece(workflowId) {
+      const workflow = (state.letterWorkflows || []).find((w) => w.id === workflowId);
+      if (workflow && workflow.pieceId) {
+        state.activePieceId = workflow.pieceId;
+        emit();
+        return workflow.pieceId;
+      }
+      return null;
     },
 
     /* ---- Gather (research ingestion) ---- */
@@ -575,25 +720,35 @@
     },
 
     /* ---- Pieces ---- */
+    hydrateLibraryPieces,
     getPiece(id) { return (state.pieces || []).find((p) => p.id === id) || null; },
     setActive(id) { state.activePieceId = id; emit(); },
 
     // campaignId (optional) targets a specific campaign — the Book Writer passes
     // the book's campaign so chapters land in the book, not the active campaign.
-    createPiece(title, campaignId, initial = {}) {
+    createPiece(title, campaignId, opts) {
+      opts = opts || {};
       const cid = campaignId || state.activeCampaignId;
-      const initialPatch = initial && typeof initial === "object" ? initial : {};
       const id = uid();
+      const initialOriginal = typeof opts.original === "string" ? opts.original : "";
       const p = {
         id, campaignId: cid, title: title || "Untitled piece", status: "Draft",
         createdAt: now(), updatedAt: now(),
-        original: "", packet: null, revision: null, outputs: {}, outputOrder: [],
-        ...initialPatch,
+        category: opts.category || "article",
+        categoryContext: opts.categoryContext || {},
+        original: initialOriginal, packet: null, revision: null, outputs: {}, outputOrder: [],
       };
       state.pieces.unshift(p);
+      const campaign = ensureCampaign(cid);
+      if (campaign) campaign.pieceCount = Math.max(Number(campaign.pieceCount || 0), state.pieces.filter((piece) => piece.campaignId === cid).length);
       state.activePieceId = p.id;
       emit();
-      bg(apiSend("POST", "/campaigns/" + cid + "/pieces", { title: p.title, original: p.original || "" }).then((res) => {
+      bg(apiSend("POST", "/campaigns/" + cid + "/pieces", {
+        title: p.title,
+        original: initialOriginal,
+        category: p.category,
+        categoryContext: p.categoryContext,
+      }).then((res) => {
         const serverPiece = res && res.piece;
         if (!serverPiece || !serverPiece.id) return;
         replacePieceId(id, serverPiece.id);
@@ -609,13 +764,18 @@
       Object.assign(p, patch, { updatedAt: now() });
       emit();
       const body = {};
-      ["title", "original", "status", "packet", "revision", "outputs", "outputOrder"].forEach((k) => {
+      ["title", "original", "status", "category", "categoryContext", "direction", "gateNotes", "packet", "revision", "outputs", "outputOrder"].forEach((k) => {
         if (Object.prototype.hasOwnProperty.call(patch, k)) body[k] = patch[k];
       });
       if (Object.keys(body).length) bg(apiSend("PATCH", "/pieces/" + id, body), "PATCH /pieces/:id");
     },
     deletePiece(id) {
+      const existing = api.getPiece(id);
       state.pieces = state.pieces.filter((p) => p.id !== id);
+      if (existing && existing.campaignId) {
+        const campaign = ensureCampaign(existing.campaignId);
+        if (campaign) campaign.pieceCount = Math.max(0, Number(campaign.pieceCount || 0) - 1);
+      }
       if (state.activePieceId === id) state.activePieceId = null;
       emit();
       bg(apiSend("DELETE", "/pieces/" + id), "DELETE /pieces/:id");

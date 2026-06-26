@@ -2,6 +2,7 @@ import { LLMError } from "@/lib/llm/errors";
 import { extractJSON, repairJSON } from "@/lib/llm/json";
 import {
   PROVIDER_CAPABILITIES,
+  DEFAULT_MAX_TOKENS,
   publicLLMStatus,
   resolveAnthropicFileFallback,
   resolveFileLLMConfig,
@@ -9,6 +10,10 @@ import {
   resolveProfileLLMConfig,
   resolveTaskLLMConfig,
 } from "@/lib/llm/config";
+import type { SessionUser } from "@/lib/auth";
+import { isLocalFirstMode } from "@/lib/local/mode";
+import { normalizeHostedProviderBaseUrl } from "@/lib/hostedProviderUrls";
+import { getHostedProviderProfile, getHostedProviderSettings } from "@/lib/providerSettings";
 import { anthropicProvider } from "@/lib/llm/providers/anthropic";
 import { geminiProvider } from "@/lib/llm/providers/gemini";
 import { openAICompatibleProvider, openAIProvider } from "@/lib/llm/providers/openaiCompatible";
@@ -29,8 +34,8 @@ export type {
 } from "@/lib/llm/types";
 export { LLMError } from "@/lib/llm/errors";
 export { extractJSON, repairJSON } from "@/lib/llm/json";
-export { sanitizeModelOutput } from "@/lib/llm/sanitize";
 export { LLM_TASK_LABELS, LLM_TASKS, publicLLMStatus, resolveMainLLMConfig, resolveTaskLLMConfig, resolveProfileLLMConfig, resolveFileLLMConfig } from "@/lib/llm/config";
+export { sanitizeModelOutput } from "@/lib/llm/sanitize";
 
 function createAdapter(config: LLMConfig): LLMAdapter {
   if (config.provider === "anthropic") return anthropicProvider(config);
@@ -54,8 +59,7 @@ function withSystemPreamble(messages: AIMessage[], system?: string): AIMessage[]
 
 export function createAI(adapter: LLMAdapter): AI {
   async function complete(messages: AIMessage[], system?: string, opts: AIOptions = {}): Promise<string> {
-    const text = await adapter.complete(withSystemPreamble(messages, system), opts);
-    return sanitizeModelOutput(text);
+    return sanitizeModelOutput(await adapter.complete(withSystemPreamble(messages, system), opts));
   }
 
   async function json<T = unknown>(prompt: string, { system }: AIOptions = {}): Promise<T> {
@@ -84,6 +88,14 @@ let mainAI: AI | null = null;
 let mainConfigKey: string | null = null;
 const taskAIs = new Map<LLMTask, { key: string; ai: AI }>();
 const profileAIs = new Map<string, { key: string; ai: AI }>();
+
+export type ResolvedTaskAI = {
+  ai: AI;
+  providerSource: "managed" | "byok";
+  provider?: string | null;
+  model?: string | null;
+  profileId?: string | null;
+};
 
 function configKey(config: LLMConfig): string {
   return JSON.stringify({
@@ -131,6 +143,39 @@ export function getAIForProfile(profileId: string): AI {
   return next;
 }
 
+export async function getAIForTaskForUser(task: LLMTask, user: SessionUser): Promise<ResolvedTaskAI> {
+  if (!isLocalFirstMode() && user.workspaceId) {
+    const hosted = await getHostedProviderSettings(user);
+    const profileId = hosted.taskDefaults?.[task] ?? hosted.defaultProfileId;
+    const profile = profileId ? await getHostedProviderProfile(user, profileId) : null;
+    if (profile && profile.provider && profile.model) {
+      const config: LLMConfig = {
+        provider: profile.provider,
+        model: profile.model,
+        baseUrl: normalizeHostedProviderBaseUrl(profile.baseUrl),
+        apiKey: profile.apiKey,
+        maxTokens: DEFAULT_MAX_TOKENS,
+      };
+      return {
+        ai: createAI(createAdapter(config)),
+        providerSource: "byok",
+        provider: profile.provider,
+        model: profile.model,
+        profileId: profile.id,
+      };
+    }
+  }
+
+  const config = resolveTaskLLMConfig(task);
+  return {
+    ai: createAI(createAdapter(config)),
+    providerSource: "managed",
+    provider: config.provider,
+    model: config.model,
+    profileId: null,
+  };
+}
+
 export function createAIFromConfig(config: LLMConfig): AI {
   return createAI(createAdapter(config));
 }
@@ -172,8 +217,8 @@ export function resetLLMForTests() {
 }
 
 export const ai: AI = {
-  complete(messages, system, opts) {
-    return getAI().complete(messages, system, opts);
+  complete(messages, system) {
+    return getAI().complete(messages, system);
   },
   json(prompt, opts) {
     return getAI().json(prompt, opts);

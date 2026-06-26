@@ -6,8 +6,9 @@ import { db, campaigns, references } from "@/lib/db";
 import { styleProfiles, styleFeedback } from "@/db/style-schema";
 import { refineStyleDirective, normalizeKnobs } from "@/lib/ai/style";
 import { buildRefContext, type ReferencesDoc } from "@/lib/refContext";
-import { getAIForTask } from "@/lib/llm";
+import { getAIForTaskForUser } from "@/lib/llm";
 import { toErrorResponse } from "@/lib/errors";
+import { completeUsageReservation, failUsageReservation, reserveUsage, type UsageReservation } from "@/lib/billing/usage";
 import {
   createLocalStyleFeedback,
   getLocalCampaign,
@@ -35,6 +36,7 @@ const bodySchema = z.object({
 // directive from the prior profile + this rating, upserts the profile (knobs +
 // directive, rounds+1), logs a feedback row, returns the updated profile.
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  let reservation: UsageReservation = null;
   try {
     const user = await assertAuthor();
     const { id } = await params;
@@ -59,11 +61,23 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       : await db.query.references.findFirst({ where: eq(references.campaignId, id) });
     const refCtx = buildRefContext((ref?.doc as ReferencesDoc | undefined) ?? null);
 
+    const taskAI = await getAIForTaskForUser("utility", user);
+    reservation = await reserveUsage({
+      user,
+      task: "utility",
+      feature: "style.feedback",
+      campaignId: id,
+      providerSource: taskAI.providerSource,
+      provider: taskAI.provider,
+      model: taskAI.model,
+      metadata: taskAI.profileId ? { profileId: taskAI.profileId } : {},
+      estimatedCredits: 1,
+    });
     const directive = await refineStyleDirective(
       current ? { directive: current.directive } : null,
       { rating: body.rating, knobs, working: body.working, notes: body.notes },
       refCtx,
-      getAIForTask("utility"),
+      taskAI.ai,
     );
     const rounds = (current?.rounds ?? 0) + 1;
 
@@ -103,9 +117,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       });
     }
 
-    if (!profile) return NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
+    if (!profile) {
+      await failUsageReservation(reservation, new Error("Style feedback profile was not created."));
+      return NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
+    }
+    await completeUsageReservation(reservation);
     return NextResponse.json({ knobs: profile.knobs, directive: profile.directive, rounds: profile.rounds });
   } catch (err) {
+    await failUsageReservation(reservation, err);
     return toErrorResponse(err);
   }
 }

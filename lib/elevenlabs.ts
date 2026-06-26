@@ -21,9 +21,8 @@ export class ElevenError extends Error {
 }
 
 function apiKey(override?: string): string {
-  // Settings-UI key first; env is a hosted/dev fallback and must not shadow it.
-  const k = override || desktopMediaProvider("elevenlabs")?.apiKey || process.env.ELEVENLABS_API_KEY;
-  if (!k) throw new ElevenError(500, "config", "ElevenLabs isn't connected. Add your key in Settings → Studio integrations to enable voiceovers.");
+  const k = override || process.env.ELEVENLABS_API_KEY || desktopMediaProvider("elevenlabs")?.apiKey;
+  if (!k) throw new ElevenError(500, "config", "Add an ElevenLabs API key in media provider settings before listing voices or generating speech.");
   return k;
 }
 
@@ -48,6 +47,7 @@ export async function listVoices(input?: { apiKey?: string }): Promise<ElevenVoi
 export interface TtsInput {
   text: string;
   voiceId: string;
+  apiKey?: string;
   modelId?: string;       // e.g. "eleven_multilingual_v2"
   stability?: number;
   similarityBoost?: number;
@@ -68,7 +68,7 @@ export async function textToSpeech(input: TtsInput): Promise<Blob> {
     `${ELEVEN_BASE}/text-to-speech/${encodeURIComponent(input.voiceId)}?output_format=${input.format ?? "mp3_44100_128"}`,
     {
       method: "POST",
-      headers: { "xi-api-key": apiKey(), "Content-Type": "application/json", Accept: "audio/mpeg" },
+      headers: { "xi-api-key": apiKey(input.apiKey), "Content-Type": "application/json", Accept: "audio/mpeg" },
       body: JSON.stringify({
         text: input.text,
         model_id: input.modelId ?? "eleven_multilingual_v2",

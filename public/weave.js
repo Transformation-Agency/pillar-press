@@ -2,32 +2,39 @@
    Weave — multi-file synthesis engine (map-reduce).
    Plain JS. Exposes window.WEAVE.
 
-   Server-side map-reduce synthesis. On desktop the browser kicks a
-   background job (?async=1) and polls it for real phase progress; in
-   hosted/browser mode it posts synchronously with coarse progress
-   (the in-memory job store isn't shared across serverless instances).
+   Server-side map-reduce synthesis. The browser only posts sources to
+   /api/weave and renders coarse progress.
    ============================================================ */
 (function () {
 
-  function isDesktop() {
-    return !!(window.PILLAR_DESKTOP && window.PILLAR_DESKTOP.isDesktop && window.PILLAR_DESKTOP.isDesktop());
-  }
+  async function runWeave(sources, refCtx, onProgress, options) {
+    const all = sources || [];
+    const usable = all.filter((s) => (s.text || "").trim().length > 20);
+    if (usable.length < 2) throw new Error("Add at least two sources with content to weave.");
 
-  async function postWeave(usable, asyncMode) {
-    const res = await fetch("/api/weave" + (asyncMode ? "?async=1" : ""), {
+    // Coarse progress for UI (the heavy map-reduce now runs server-side in one call).
+    if (onProgress) onProgress({ phase: "extract", i: 0, total: usable.length, name: usable[0].name });
+    if (onProgress) onProgress({ phase: "brief" });
+    if (onProgress) onProgress({ phase: "map" });
+    if (onProgress) onProgress({ phase: "draft", i: 0, total: 1, name: "draft" });
+
+    const res = await fetch("/api/weave", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sources: usable.map((s) => ({ name: s.name, text: s.text })) }),
+      body: JSON.stringify(Object.assign(
+        { sources: usable.map((s) => ({ name: s.name, text: s.text })) },
+        options && options.campaignId ? { campaignId: options.campaignId } : {},
+      )),
     });
     if (!res.ok) {
       let msg = "Weave failed.";
       try { const j = await res.json(); if (j && j.error) msg = j.error; } catch (e) {}
       throw new Error(msg);
     }
-    return res.json();
-  }
+    const data = await res.json();
 
-  function normalizeResult(data) {
+    if (onProgress) onProgress({ phase: "done" });
+
     return {
       extracts: data.extracts || [],
       brief: data.brief || {},
@@ -37,45 +44,29 @@
     };
   }
 
-  // Background job path: poll /api/weave/:id and forward the server's real
-  // WeaveProgress ({phase, i, total, name}) to onProgress.
-  async function runWeaveAsync(usable, onProgress) {
-    const started = await postWeave(usable, true);
-    const jobId = started && started.jobId;
-    if (!jobId) throw new Error("Weave failed to start.");
-    for (;;) {
-      await new Promise((r) => setTimeout(r, 1500));
-      const res = await fetch("/api/weave/" + encodeURIComponent(jobId), { headers: { Accept: "application/json" } });
-      if (!res.ok) throw new Error("Weave job was lost (did the app restart?). Run it again.");
-      const job = await res.json();
-      if (job.progress && onProgress) onProgress(job.progress);
-      if (job.status === "done") return normalizeResult(job.result || {});
-      if (job.status === "error") throw new Error(job.error || "Weave failed.");
-    }
+  function briefToText(result) {
+    const b = result.brief, m = result.mapping;
+    return [
+      `WEAVE BRIEF — ${b.workingTitle}`,
+      `\nCore message: ${b.coreMessage}`,
+      `\nConcept: ${b.concept}`,
+      `\nConnective thread: ${b.thread}`,
+      (b.tensions || []).length ? `\nTensions:\n` + b.tensions.map((t) => "• " + t).join("\n") : "",
+      `\nThroughlines: ` + (m.mapped || []).map((x) => `${x.tag} (${x.how})`).join("; "),
+      m.nearestAngle ? `Nearest angle: ${m.nearestAngle}` : "",
+      `Audience: ${m.audience || "—"}  ·  Register: ${m.register || "—"}`,
+      `\nStructure:\n` + b.structure.map((s, i) => `${i + 1}. ${s.section} — ${s.purpose}`).join("\n"),
+    ].filter(Boolean).join("\n");
   }
 
-  async function runWeave(sources, refCtx, onProgress) {
-    const all = sources || [];
-    const usable = all.filter((s) => (s.text || "").trim().length > 20);
-    if (usable.length < 2) throw new Error("Add at least two sources with content to weave.");
-
-    if (onProgress) onProgress({ phase: "extract", i: 0, total: usable.length, name: usable[0].name });
-
-    if (isDesktop()) {
-      const result = await runWeaveAsync(usable, onProgress);
-      if (onProgress) onProgress({ phase: "done" });
-      return result;
-    }
-
-    // Coarse progress for hosted mode (one synchronous server call).
-    if (onProgress) onProgress({ phase: "brief" });
-    if (onProgress) onProgress({ phase: "map" });
-    if (onProgress) onProgress({ phase: "draft", i: 0, total: 1, name: "draft" });
-
-    const data = await postWeave(usable, false);
-    if (onProgress) onProgress({ phase: "done" });
-    return normalizeResult(data);
+  function sendResultToLibrary(result, onOpenPiece) {
+    if (!result || !result.brief) throw new Error("Run Weave before sending a draft to Library.");
+    const p = window.Store.createPiece(result.brief.workingTitle, null, {
+      original: result.draft || "",
+    });
+    if (onOpenPiece && p && p.id) onOpenPiece(p.id);
+    return p;
   }
 
-  window.WEAVE = { runWeave };
+  window.WEAVE = { runWeave, briefToText, sendResultToLibrary };
 })();

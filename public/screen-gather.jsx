@@ -266,19 +266,12 @@ function Gather({ campaignId, refCtx, onGoWeave }) {
   const selected = items.filter((i) => i.selected);
   const usedKinds = [...new Set(items.map((i) => i.kind))];
 
-  const summaryTitle = (s) => {
-    const k = window.GATHER.SOURCE_KINDS[s.kind] || { label: s.kind };
-    return (s.label || (s.query ? `${k.label}: ${s.query}` : `${k.label} brief`)).slice(0, 60);
-  };
   const sendSummaryToWeave = (s) => {
-    window.Store.addWeaveSource(summaryTitle(s), s.text);
-    window.__weaveSourcesAdded = true;
-    window.Store.removeGatherSummary(s.id);
+    window.GATHER.sendGatherSummaryToWeave(s);
+    onGoWeave && onGoWeave();
   };
   const sendAllSummariesToWeave = () => {
-    summaries.forEach((s) => window.Store.addWeaveSource(summaryTitle(s), s.text));
-    window.__weaveSourcesAdded = true;
-    summaries.forEach((s) => window.Store.removeGatherSummary(s.id));
+    window.GATHER.sendGatherSummariesToWeave(summaries);
     onGoWeave && onGoWeave();
   };
 
@@ -309,8 +302,7 @@ function Gather({ campaignId, refCtx, onGoWeave }) {
   };
 
   const sendToWeave = () => {
-    selected.forEach((it) => window.Store.addWeaveSource((it.title || "Source").slice(0, 48), window.GATHER.itemToText(it)));
-    window.__weaveSourcesAdded = true;
+    window.GATHER.sendGatherItemsToWeave(selected);
     onGoWeave && onGoWeave();
   };
 

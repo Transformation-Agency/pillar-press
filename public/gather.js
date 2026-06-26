@@ -13,7 +13,7 @@
     web:      { id: "web",      label: "Web search",      icon: "globe", field: "query", placeholder: "search terms…",                          hint: "A web search query.", noun: "query" },
     database: { id: "database", label: "Database scrape", icon: "db",    field: "query", placeholder: "site or dataset + what to pull",          hint: "A database / site to query.", noun: "query" },
     journal:  { id: "journal",  label: "Journal library", icon: "book",  field: "query", placeholder: "topic, author, or DOI",                   hint: "Verified academic libraries (Crossref / PubMed / arXiv).", noun: "query" },
-    x:        { id: "x",        label: "X posts",         icon: "xLogo", field: "query", placeholder: "#topic or @handle",                       hint: "Recent popular posts for a topic or handle on X (needs a paid X API key).", noun: "topic" },
+    x:        { id: "x",        label: "X trending",      icon: "xLogo", field: "query", placeholder: "#topic or @handle",                       hint: "A trending topic or handle on X.", noun: "topic" },
     youtube:  { id: "youtube",  label: "YouTube transcript", icon: "film", field: "url", placeholder: "https://youtube.com/watch?v=…",          hint: "A video to transcribe.", noun: "video" },
     // Not a connector you add — used to render uploaded-document items.
     upload:   { id: "upload",   label: "Uploaded file",   icon: "doc",   field: "file",  placeholder: "",                                       hint: "An uploaded document.", noun: "file" },
@@ -30,17 +30,48 @@
     if (!r.ok) throw new Error("GET " + path + " -> " + r.status);
     return r.json();
   }
-  async function apiSend(method, path, body) {
+  async function apiPost(path, body) {
     const r = await fetch("/api" + path, {
-      method,
+      method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: body == null ? undefined : JSON.stringify(body),
     });
-    if (!r.ok) throw new Error(method + " " + path + " -> " + r.status);
+    if (!r.ok) throw new Error("POST " + path + " -> " + r.status);
     const ct = r.headers.get("content-type") || "";
     return ct.indexOf("application/json") >= 0 ? r.json() : null;
   }
-  function apiPost(path, body) { return apiSend("POST", path, body); }
+
+  function delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  async function waitForGatherJob(jobId, onProgress) {
+    if (!jobId) throw new Error("Gather job did not return an id.");
+    for (let attempt = 0; attempt < 60; attempt++) {
+      const res = await apiGet("/gather/run/" + encodeURIComponent(jobId));
+      const job = (res && res.job) || {};
+      if (onProgress) onProgress({ label: "background gather", i: Math.min(attempt + 1, 60), total: 60 });
+      if (job.status === "succeeded") return job;
+      if (job.status === "failed" || job.status === "canceled") {
+        throw new Error(job.errorMessage || "Gather job failed.");
+      }
+      await delay(2000);
+    }
+    throw new Error("Gather is still running. Check again in a moment.");
+  }
+
+  function sourceSummaries(sources) {
+    return (sources || [])
+      .filter((s) => s && s.summary)
+      .map((s) => ({
+        sourceId: s.id,
+        kind: s.kind,
+        label: s.label || null,
+        query: s.config || "",
+        itemCount: s.summaryItemCount || s.lastCount || 0,
+        text: s.summary,
+      }));
+  }
 
   const SCHEDULE_KEY = "pillarpress.gatherSchedules.v1";
   let schedulerStarted = false;
@@ -49,11 +80,7 @@
     try {
       if (window.crypto && typeof window.crypto.randomUUID === "function") return window.crypto.randomUUID();
     } catch (e) { /* fall through */ }
-    // UUID-shaped fallback so server id validation accepts it (see store.js).
-    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-      const r = (Math.random() * 16) | 0;
-      return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
-    });
+    return "sched-" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
   }
 
   function readSchedules() {
@@ -96,57 +123,38 @@
     }
   }
 
-  function isDesktop() {
-    return !!(window.PILLAR_DESKTOP && window.PILLAR_DESKTOP.isDesktop && window.PILLAR_DESKTOP.isDesktop());
-  }
-
-  function cacheSchedule(saved) {
+  function saveSchedule(input) {
     const schedules = readSchedules();
-    const idx = schedules.findIndex((s) => s.id === saved.id);
-    if (idx >= 0) schedules[idx] = Object.assign({}, schedules[idx], saved);
-    else schedules.push(saved);
+    const now = Date.now();
+    const next = normalizeSchedule(Object.assign({
+      id: uid(),
+      enabled: true,
+      createdAt: now,
+      lastRunAt: null,
+      lastStatus: null,
+    }, input, { timeOfDay: input.timeOfDay || input.time || null, updatedAt: now }));
+    const idx = schedules.findIndex((s) => s.id === next.id);
+    if (idx >= 0) schedules[idx] = Object.assign({}, schedules[idx], next);
+    else schedules.push(next);
     writeSchedules(schedules);
+    apiPost("/gather/schedules", {
+      id: next.id,
+      campaignId: next.campaignId,
+      cadence: next.cadence,
+      runAt: next.runAt || null,
+      timeOfDay: next.timeOfDay || next.time || null,
+      dayOfWeek: next.dayOfWeek == null ? null : Number(next.dayOfWeek),
+      enabled: next.enabled !== false,
+    }).catch(() => {});
+    return next;
   }
 
-  // Server-first: the desktop scheduler only sees SQLite, so a schedule that
-  // exists only in localStorage would never run. Persist first, cache second;
-  // on desktop a failed save throws so the UI can show it instead of a ghost
-  // schedule. Hosted/browser mode has no durable scheduler (the route refuses),
-  // so there we fall back to a tab-local schedule run by startScheduler().
-  async function saveSchedule(input) {
-    const id = input.id || uid();
-    let res = null;
-    try {
-      res = await apiPost("/gather/schedules", {
-        id,
-        campaignId: input.campaignId,
-        cadence: input.cadence,
-        runAt: input.runAt || null,
-        timeOfDay: input.timeOfDay || input.time || null,
-        dayOfWeek: input.dayOfWeek == null ? null : Number(input.dayOfWeek),
-        enabled: input.enabled !== false,
-      });
-    } catch (e) {
-      if (isDesktop()) throw e; // desktop persistence must not fail silently
-      res = { tabLocal: true }; // hosted: tab-local schedule only
-    }
-    const saved = normalizeSchedule(Object.assign(
-      { id, campaignId: input.campaignId, cadence: input.cadence, runAt: input.runAt || null, createdAt: Date.now(), lastRunAt: null, lastStatus: null, tabLocal: !!(res && res.tabLocal) },
-      (res && res.schedule) || {},
-      { updatedAt: Date.now() },
-    ));
-    cacheSchedule(saved);
-    return saved;
-  }
-
-  async function deleteSchedule(id) {
-    try {
-      await apiSend("DELETE", "/gather/schedules?id=" + encodeURIComponent(id));
-    } catch (e) {
-      if (isDesktop()) throw e;
-      // hosted: the schedule only ever existed in this browser
-    }
+  function deleteSchedule(id) {
     writeSchedules(readSchedules().filter((s) => s.id !== id));
+    fetch("/api/gather/schedules?id=" + encodeURIComponent(id), {
+      method: "DELETE",
+      headers: { Accept: "application/json" },
+    }).catch(() => {});
   }
 
   function parseTimeToday(time) {
@@ -225,69 +233,53 @@
     return [];
   }
 
-  // Repair drift between the client's source list and the server before a run.
-  // Store writes are fire-and-forget, so a failed background POST/PATCH would
-  // otherwise make the server silently run a stale or missing source.
-  async function syncSourcesToServer(campaignId, sources) {
-    let remote;
-    try {
-      const res = await apiGet("/gather/sources?campaignId=" + encodeURIComponent(campaignId));
-      remote = (res && res.sources) || [];
-    } catch (e) { return; } // server unreachable: the run itself will surface that
-    const byId = {};
-    remote.forEach((r) => { byId[r.id] = r; });
-    for (const s of sources || []) {
-      const r = byId[s.id];
-      try {
-        if (!r) {
-          await apiPost("/gather/sources", { id: s.id, campaignId, kind: s.kind, config: s.config || "", label: s.label, enabled: s.enabled !== false });
-        } else if ((r.config || "") !== (s.config || "") || (r.enabled !== false) !== (s.enabled !== false)) {
-          await apiSend("PATCH", "/gather/sources/" + s.id, { config: s.config || "", enabled: s.enabled !== false });
-        }
-      } catch (e) { /* best-effort repair; the run reports the real failure */ }
-    }
-  }
-
   async function runGather(sources, refCtx, onProgress) {
     const campaignId = window.Store.getState().activeCampaignId;
     if (!campaignId) throw new Error("Select a campaign first.");
     const enabled = (sources || []).filter((s) => s.enabled && (s.config || "").trim());
     if (!enabled.length) throw new Error("Add at least one source with a value, and enable it.");
 
-    await syncSourcesToServer(campaignId, sources);
+    if (onProgress) onProgress({ label: "all sources", i: 0, total: 1 });
 
-    // One request per source so progress and failures are per-source real.
-    // Each run persists its items and writes that source's research brief.
-    const summaries = [];
-    for (let i = 0; i < enabled.length; i++) {
-      const s = enabled[i];
-      const k = SOURCE_KINDS[s.kind] || { label: s.kind };
-      if (onProgress) onProgress({ label: k.label, i, total: enabled.length });
-      try {
-        const runRes = await apiPost("/gather/run", { campaignId, sourceIds: [s.id] });
-        const perSource = (runRes && runRes.perSource) || {};
-        const errors = (runRes && runRes.errors) || {};
-        window.Store.updateGatherSource(s.id, {
-          lastRun: Date.now(),
-          lastCount: perSource[s.id] != null ? perSource[s.id] : 0,
-          lastError: errors[s.id] || null,
-        });
-        ((runRes && runRes.summaries) || []).forEach((sum) => summaries.push(sum));
-      } catch (e) {
-        window.Store.updateGatherSource(s.id, { lastRun: Date.now(), lastCount: 0, lastError: (e && e.message) || "Source failed." });
-      }
+    // Server runs the campaign's enabled sources and persists items.
+    let runRes = await apiPost("/gather/run", { campaignId });
+    if (runRes && runRes.queued) {
+      if (onProgress) onProgress({ label: "queued", i: 0, total: 1 });
+      const job = await waitForGatherJob(runRes.job && runRes.job.id, onProgress);
+      runRes = Object.assign({}, runRes, { job });
     }
+    const perSource = (runRes && runRes.perSource) || null;
 
     // Refresh from server truth (the FULL list — fetched results, prior items,
     // and uploaded documents) so nothing drops out of the view after a run.
-    let items = [];
+    let items;
     try {
       const itemRes = await apiGet("/gather/items?campaignId=" + encodeURIComponent(campaignId));
       items = (itemRes && itemRes.items) || [];
-      refreshGatherItems(campaignId, items);
-    } catch (e) { /* keep the current view rather than clearing it */ }
+    } catch (e) {
+      items = (runRes && runRes.items) || [];
+    }
+
+    // best-effort: stamp lastRun / lastCount on each enabled source
+    enabled.forEach((s) => {
+      const count = perSource && perSource[s.id] != null
+        ? (Array.isArray(perSource[s.id]) ? perSource[s.id].length : perSource[s.id])
+        : items.filter((it) => it.sourceId === s.id).length;
+      window.Store.updateGatherSource(s.id, { lastRun: Date.now(), lastCount: count });
+    });
+
+    refreshGatherItems(campaignId, items);
 
     // Per-source research briefs (one independent LLM call each, server-side).
+    let summaries = (runRes && runRes.summaries) || [];
+    if (!summaries.length && runRes && runRes.queued) {
+      try {
+        const sourceRes = await apiGet("/gather/sources?campaignId=" + encodeURIComponent(campaignId));
+        summaries = sourceSummaries((sourceRes && sourceRes.sources) || []);
+      } catch (e) {
+        summaries = [];
+      }
+    }
     window.Store.setGatherSummaries(campaignId, summaries);
 
     if (onProgress) onProgress({ done: true });
@@ -304,5 +296,44 @@
     ].join("\n");
   }
 
-  window.GATHER = { SOURCE_KINDS, kindList, runGather, itemToText, listSchedules, syncSchedules, saveSchedule, deleteSchedule, startScheduler };
+  function summaryTitle(s) {
+    const k = SOURCE_KINDS[s.kind] || { label: s.kind };
+    return (s.label || (s.query ? `${k.label}: ${s.query}` : `${k.label} brief`)).slice(0, 60);
+  }
+
+  function sendGatherItemsToWeave(items) {
+    const created = (items || []).filter(Boolean).map((it) =>
+      window.Store.addWeaveSource((it.title || "Source").slice(0, 48), itemToText(it))
+    );
+    if (created.length) window.__weaveSourcesAdded = true;
+    return created;
+  }
+
+  function sendGatherSummaryToWeave(summary, options) {
+    if (!summary) return null;
+    const created = window.Store.addWeaveSource(summaryTitle(summary), summary.text || "");
+    window.__weaveSourcesAdded = true;
+    if (!options || options.remove !== false) window.Store.removeGatherSummary(summary.id);
+    return created;
+  }
+
+  function sendGatherSummariesToWeave(summaries, options) {
+    return (summaries || []).filter(Boolean).map((s) => sendGatherSummaryToWeave(s, options));
+  }
+
+  window.GATHER = {
+    SOURCE_KINDS,
+    kindList,
+    runGather,
+    itemToText,
+    summaryTitle,
+    sendGatherItemsToWeave,
+    sendGatherSummaryToWeave,
+    sendGatherSummariesToWeave,
+    listSchedules,
+    syncSchedules,
+    saveSchedule,
+    deleteSchedule,
+    startScheduler,
+  };
 })();

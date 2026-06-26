@@ -1,4 +1,5 @@
 /** Drizzle schema for Gather: sources + persisted items. Follows the media_jobs style. */
+import { sql } from "drizzle-orm";
 import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, index } from "drizzle-orm/pg-core";
 
 // "upload" = a document the user uploaded (not fetched by a connector).
@@ -52,5 +53,29 @@ export const gatherItems = pgTable(
   }),
 );
 
+export const gatherSchedules = pgTable(
+  "gather_schedules",
+  {
+    id: text("id").primaryKey().default(sql`gen_random_uuid()::text`),
+    userId: text("user_id").notNull(),
+    workspaceId: text("workspace_id").notNull(),
+    campaignId: text("campaign_id").notNull(),
+    cadence: text("cadence", { enum: ["once", "daily", "weekly"] }).notNull(),
+    runAt: text("run_at"),
+    timeOfDay: text("time_of_day"),
+    dayOfWeek: integer("day_of_week"),
+    enabled: boolean("enabled").notNull().default(true),
+    lastRunAt: text("last_run_at"),
+    lastStatus: text("last_status"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    byCampaign: index("gather_schedules_campaign_idx").on(t.workspaceId, t.campaignId, t.userId),
+    byDue: index("gather_schedules_due_idx").on(t.workspaceId, t.userId, t.enabled),
+  }),
+);
+
 export type GatherSource = typeof gatherSources.$inferSelect;
 export type GatherItemRow = typeof gatherItems.$inferSelect;
+export type GatherSchedule = typeof gatherSchedules.$inferSelect;

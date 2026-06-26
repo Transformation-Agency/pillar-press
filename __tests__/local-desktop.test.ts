@@ -240,6 +240,96 @@ describe("local desktop database", () => {
     expect(listLocalPieces(campaign.id)).toHaveLength(0);
   });
 
+  it("persists saved recipients and letter workflows locally with scoped lookups", async () => {
+    const {
+      createLocalCampaign,
+      createLocalLetterRecipient,
+      createLocalLetterWorkflow,
+      createLocalPiece,
+      deleteLocalLetterRecipient,
+      getLocalLetterWorkflow,
+      listLocalLetterRecipients,
+      listLocalLetterWorkflows,
+      updateLocalLetterWorkflow,
+    } = await import("@/lib/local/database");
+
+    const campaign = createLocalCampaign({ name: "Letters" });
+    const otherCampaign = createLocalCampaign({ name: "Other Letters" });
+    const recipient = createLocalLetterRecipient({
+      displayName: "Ada Lovelace",
+      organization: "Analytical Engine Society",
+      relationship: "Longtime collaborator",
+      defaultTone: "Warm, precise, and direct.",
+      notes: "Prefers a clear ask near the top.",
+      preferences: { structure: "short opening, context, ask" },
+    });
+
+    expect(listLocalLetterRecipients()).toHaveLength(1);
+    expect(listLocalLetterRecipients("someone-else")).toHaveLength(0);
+
+    const workflow = createLocalLetterWorkflow({
+      campaignId: campaign.id,
+      recipientId: recipient.id,
+      recipientSnapshot: {
+        displayName: recipient.displayName,
+        notes: recipient.notes,
+        preferences: recipient.preferences,
+      },
+      purpose: "Ask for feedback on a draft.",
+      desiredOutcome: "Schedule a review call.",
+      sourceContext: "The draft is ready for one final editorial read.",
+      uploads: [{ name: "example.txt", text: "A prior letter example." }],
+      dictationTranscript: "Mention gratitude for her earlier comments.",
+    });
+
+    expect(workflow).toMatchObject({
+      campaignId: campaign.id,
+      recipientId: recipient.id,
+      purpose: "Ask for feedback on a draft.",
+    });
+    expect(listLocalLetterWorkflows(campaign.id)).toHaveLength(1);
+    expect(listLocalLetterWorkflows(otherCampaign.id)).toHaveLength(0);
+    expect(listLocalLetterWorkflows(campaign.id, "someone-else")).toHaveLength(0);
+    expect(getLocalLetterWorkflow(workflow!.id, "someone-else")).toBeNull();
+
+    const piece = createLocalPiece({ campaignId: campaign.id, userId: "local-owner", title: "Letter draft" });
+    const updated = updateLocalLetterWorkflow(workflow!.id, "local-owner", "local-workspace", {
+      status: "drafted",
+      pieceId: piece!.id,
+    });
+    expect(updated).toMatchObject({ status: "drafted", pieceId: piece!.id });
+
+    expect(deleteLocalLetterRecipient(recipient.id)).toBe(true);
+    const preserved = getLocalLetterWorkflow(workflow!.id);
+    expect(preserved?.recipientId).toBeNull();
+    expect(preserved?.recipientSnapshot).toMatchObject({
+      displayName: "Ada Lovelace",
+      notes: "Prefers a clear ask near the top.",
+    });
+  });
+
+  it("builds a letter draft prompt from recipient context and campaign material", async () => {
+    const { buildLetterDraftPrompt } = await import("@/lib/letters/draft");
+    const prompt = buildLetterDraftPrompt({
+      refContext: "Campaign voice: spare and vivid.",
+      workflow: {
+        recipientSnapshot: { displayName: "Ada", defaultTone: "Warm" },
+        purpose: "Invite Ada to review the paper.",
+        desiredOutcome: "Get a yes or a suggested alternate reader.",
+        sourceContext: "The paper is about local-first software.",
+        uploads: [{ name: "prior-letter.md", text: "Dear Ada, thank you." }],
+        dictationTranscript: "Keep it brief.",
+      },
+    });
+
+    expect(prompt).toContain("Campaign voice: spare and vivid.");
+    expect(prompt).toContain('"displayName": "Ada"');
+    expect(prompt).toContain("Invite Ada to review the paper.");
+    expect(prompt).toContain("prior-letter.md");
+    expect(prompt).toContain("untrusted user content");
+    expect(prompt).toContain("Do not claim the letter has been sent");
+  });
+
   it("persists learned style profiles and feedback locally", async () => {
     const {
       createLocalCampaign,

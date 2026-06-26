@@ -1,0 +1,171 @@
+import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+
+const workbookPath = join(process.cwd(), "docs", "pillar-press-feature-status.xlsx");
+const sheetPath = "xl/worksheets/sheet1.xml";
+export const WAIVED_STATUS = "Waived by owner";
+const nonBlockingStatuses = new Set([
+  "Retest passed",
+  "Not independently verified (hosted; out of local-first scope)",
+]);
+
+function unzipText(path: string): string {
+  return execFileSync("unzip", ["-p", workbookPath, path], { encoding: "utf8", maxBuffer: 50 * 1024 * 1024 });
+}
+
+function decodeXml(value: string): string {
+  return value
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'");
+}
+
+function sharedStrings(): string[] {
+  let xml = "";
+  try {
+    xml = unzipText("xl/sharedStrings.xml");
+  } catch {
+    return [];
+  }
+  return Array.from(xml.matchAll(/<si>([\s\S]*?)<\/si>/g)).map((match) => {
+    return Array.from(match[1].matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g))
+      .map((textMatch) => decodeXml(textMatch[1]))
+      .join("");
+  });
+}
+
+function sheetCells(sheetXml: string, strings: string[]): Map<string, string> {
+  const cells = new Map<string, string>();
+  for (const match of sheetXml.matchAll(/<(?:\w+:)?c\b([^>]*)>([\s\S]*?)<\/(?:\w+:)?c>/g)) {
+    const attrs = match[1];
+    const body = match[2];
+    const ref = attrs.match(/\br="([^"]+)"/)?.[1];
+    if (!ref) continue;
+    const type = attrs.match(/\bt="([^"]+)"/)?.[1];
+    const raw = body.match(/<(?:\w+:)?v>([\s\S]*?)<\/(?:\w+:)?v>/)?.[1] ?? "";
+    const inline = Array.from(body.matchAll(/<(?:\w+:)?t[^>]*>([\s\S]*?)<\/(?:\w+:)?t>/g))
+      .map((textMatch) => decodeXml(textMatch[1]))
+      .join("");
+    if (inline) {
+      cells.set(ref, inline);
+      continue;
+    }
+    if (!raw) {
+      cells.set(ref, "");
+      continue;
+    }
+    cells.set(ref, type === "s" ? (strings[Number(raw)] ?? "") : decodeXml(raw));
+  }
+  return cells;
+}
+
+export type TrackerRow = {
+  row: number;
+  storyId: string;
+  featureArea: string;
+  feature: string;
+  testStatus: string;
+  evidenceStatus: string;
+  testEvidence: string;
+  priority: string;
+  errorsFound: string;
+};
+
+export function hasExplicitWaiverNote(row: Pick<TrackerRow, "testEvidence" | "errorsFound">): boolean {
+  const text = `${row.testEvidence}\n${row.errorsFound}`;
+  const notes = Array.from(text.matchAll(/\bWAIVER:\s*([^\n]+)/gi)).map((match) => match[1].trim());
+  return notes.some((note) => {
+    const hasDate = /\b20\d{2}-\d{2}-\d{2}\b/.test(note);
+    const hasOwner = /\b(owner|approved by|paul)\b/i.test(note);
+    const hasScope = /\b(scope|ship|shipping|release|provider|media|openai|hedra|elevenlabs|live)\b/i.test(note);
+    return note.length >= 40 && hasDate && hasOwner && hasScope;
+  });
+}
+
+export function isNonBlockingRow(row: Pick<TrackerRow, "testStatus" | "testEvidence" | "errorsFound">): boolean {
+  if (nonBlockingStatuses.has(row.testStatus)) return true;
+  if (row.testStatus !== WAIVED_STATUS) return false;
+  return hasExplicitWaiverNote(row);
+}
+
+export function trackerRows(): TrackerRow[] {
+  if (!existsSync(workbookPath)) return [];
+  const strings = sharedStrings();
+  const cells = sheetCells(unzipText(sheetPath), strings);
+  const rows: TrackerRow[] = [];
+  for (let row = 2; row <= 200; row += 1) {
+    const storyId = cells.get(`A${row}`)?.trim();
+    if (!storyId) continue;
+    rows.push({
+      row,
+      storyId,
+      featureArea: cells.get(`B${row}`)?.trim() ?? "",
+      feature: cells.get(`C${row}`)?.trim() ?? "",
+      evidenceStatus: cells.get(`G${row}`)?.trim() ?? "",
+      testStatus: cells.get(`I${row}`)?.trim() ?? "",
+      testEvidence: cells.get(`J${row}`)?.trim() ?? "",
+      errorsFound: cells.get(`K${row}`)?.trim() ?? "",
+      priority: cells.get(`L${row}`)?.trim() ?? "",
+    });
+  }
+  return rows;
+}
+
+export function checkReleaseReadiness(rows: TrackerRow[]) {
+  const counts = rows.reduce<Record<string, number>>((acc, row) => {
+    acc[row.testStatus] = (acc[row.testStatus] || 0) + 1;
+    return acc;
+  }, {});
+  const blocking = rows.filter((row) => !isNonBlockingRow(row));
+  return { totalStories: rows.length, statusCounts: counts, blocking };
+}
+
+export function releaseVerificationGuidance(row: Pick<TrackerRow, "storyId">): string[] {
+  if (row.storyId === "PROV-004") {
+    return [
+      "Required live evidence: set PILLAR_PRESS_LIVE_OPENAI_API_KEY for one command invocation or save a valid OpenAI key in desktop settings, then run npm run desktop:verify-live-providers.",
+      "This proves OpenAI model listing, /api/llm/test, and OpenAI LLM-to-media default seeding without printing the key.",
+    ];
+  }
+  if (row.storyId === "MEDIA-002") {
+    return [
+      "Required live evidence: set PILLAR_PRESS_LIVE_PROVIDER_VERIFY_SPEND_CREDITS=yes with the needed provider keys, then run npm run desktop:verify-live-providers.",
+      "Expected env vars by provider: PILLAR_PRESS_LIVE_OPENAI_API_KEY, PILLAR_PRESS_LIVE_XAI_API_KEY, PILLAR_PRESS_LIVE_ELEVENLABS_API_KEY, and/or PILLAR_PRESS_LIVE_HEDRA_API_KEY.",
+      "For credit-heavy Hedra video/avatar checks, record manual evidence in the tracker and issue #42 if the automated verifier is intentionally not run.",
+    ];
+  }
+  return [];
+}
+
+function main() {
+  const result = checkReleaseReadiness(trackerRows());
+
+  console.log(`Pillar Press release readiness from ${workbookPath}`);
+  console.log(JSON.stringify({ totalStories: result.totalStories, statusCounts: result.statusCounts }, null, 2));
+
+  if (result.blocking.length) {
+    console.error("\nRelease is not ready. Remaining blocking or unwaived tracker rows:");
+    for (const row of result.blocking) {
+      console.error(`- ${row.storyId} (${row.priority}) ${row.featureArea} / ${row.feature}: ${row.testStatus}`);
+      if (row.errorsFound) console.error(`  ${row.errorsFound}`);
+      for (const guidance of releaseVerificationGuidance(row)) {
+        console.error(`  ${guidance}`);
+      }
+      if (row.testStatus === WAIVED_STATUS && !hasExplicitWaiverNote(row)) {
+        console.error("  Waived rows must include a WAIVER: note with owner, YYYY-MM-DD date, and exact release scope.");
+      }
+    }
+    console.error("\nDo not build/notarize/upload final release DMGs until these rows pass or are explicitly waived in the tracker.");
+    process.exit(1);
+  }
+
+  console.log("Release readiness passed: no unwaived tracker blockers remain.");
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main();
+}

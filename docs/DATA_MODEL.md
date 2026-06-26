@@ -48,13 +48,24 @@ A server util must serialize this into prompt context **identically** to `ai.js`
 | title | text | |
 | status | text | `Draft\|Reviewed\|Revised\|Approved\|Formatted` (manual) |
 | original | text | the draft |
+| category | text | `article\|letter\|book\|other`, default `article` |
+| category_context | json/jsonb | bounded redacted-safe workflow context snapshot |
 | packet | json/jsonb | gate results, keyed by gate id (nullable) |
 | revision | json/jsonb | `{ text, changelog: [{change,finding,note}] }` (nullable) |
 | outputs | json/jsonb | `{ [platformId]: OutputObject }` (nullable) |
 | output_order | json/jsonb | `string[]` platform ids in generation order |
 
+`category_context` stores durable editorial workflow context. Article examples:
+`{ publicationGoal, targetPlatform, audienceId, editorialFit }`; letter:
+`{ recipientId, recipientName, relationshipNotes, toneGuidance, structureGuidance }`;
+book: `{ bookId, chapterNumber, chapterRole, continuityDigest }`; other
+communication: `{ communicationGoal, audience, constraints, callToAction }`.
+It must not contain provider keys, tokens, OAuth secrets, or raw private files.
+
 `packet[gateId]` shapes are gate-specific — see `gates.js` (strategy/audience/tone/rigor/
 stress/clarity/self). Each finding: `{ severity:'must'|'consider'|'note', title, detail, anchor }`.
+`packet.__trace` is reserved for review status metadata such as category, plan,
+chunk count, provider/model, stage statuses, and warnings.
 You may normalize packet/outputs into child tables instead of JSON; JSON remains
 the lowest-friction path and matches the prototype.
 

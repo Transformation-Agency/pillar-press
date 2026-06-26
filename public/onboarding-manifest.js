@@ -1,6 +1,6 @@
 /* Pillar Press conversational bootstrap manifest.
    This file is app-owned product data. It should be safe to swap for another
-   Pillar app without rewriting the shared onboarding runtime. */
+   PillarPress app without rewriting the shared onboarding runtime. */
 (function () {
   const copy = window.KP_ONBOARDING_COPY || {};
 
@@ -57,20 +57,6 @@
       motionState: "listening",
       primaryAction: "request_voice",
       secondaryAction: "skip_voice",
-    },
-    {
-      id: "connect",
-      label: "Connect",
-      title: "Let's set up your desk",
-      subtitle: "Choose the model and integrations Pillar Press can use. You can skip anything and change it later.",
-      hostMessages: [
-        "Now choose the model and any outside tools you want connected.",
-        "Anything you skip stays available later.",
-      ],
-      suggestions: ["Cloud API key", "Ollama", "Explore integrations"],
-      motionState: "idle",
-      primaryAction: "continue",
-      secondaryAction: "skip_setup",
     },
     {
       id: "focus",
@@ -135,10 +121,10 @@
     },
     [SLOT_IDS.VOICE_PROFILE]: {
       stepId: "preferences",
-      question: "Describe how Pillar Press should write for you.",
-      helper: "Paste a few notes about your voice, audience, tone, and what to avoid. I will turn them into editable settings below.",
-      placeholder: "e.g. Clear, useful, direct. I write for independent operators and want drafts that preserve my point of view without hype or jargon.",
-      actionLabel: "Save",
+      question: "Tell me how this desk should sound for you.",
+      helper: "Say who you are, who you write for, and how much polish you want.",
+      placeholder: "e.g. Clear, useful, direct. I write for independent operators and want drafts that preserve my point of view.",
+      actionLabel: "Use for defaults",
       answerKind: "voice_profile",
       expectedIntents: ["typed_answer", "spoken_answer", "correction", "skip", "unclear"],
       required: true,

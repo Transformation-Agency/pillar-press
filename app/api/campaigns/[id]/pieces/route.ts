@@ -74,6 +74,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
           userId: user.id,
           title: body.title,
           original: body.original ?? "",
+          category: body.category,
+          categoryContext: body.categoryContext,
         },
         user.workspaceId,
       );
@@ -90,6 +92,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         title: body.title,
         status: "Draft",
         original: body.original ?? "",
+        category: body.category,
+        categoryContext: body.categoryContext,
       })
       .returning();
 

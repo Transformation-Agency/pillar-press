@@ -1,10 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { isLocalFirstMode } from "@/lib/local/mode";
 import { localStorageDir } from "@/lib/local/paths";
 
 export function localStorageConfigured(): boolean {
-  return process.env.STORAGE_PROVIDER === "local" || process.env.PILLAR_PRESS_STORAGE === "local" || !process.env.SUPABASE_URL;
+  return (
+    isLocalFirstMode() &&
+    (process.env.STORAGE_PROVIDER === "local" ||
+      process.env.PILLAR_PRESS_STORAGE === "local" ||
+      !process.env.SUPABASE_URL)
+  );
 }
 
 export function isLocalStoredUrl(url: string | null | undefined): boolean {

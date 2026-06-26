@@ -1,14 +1,18 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireUser } from "@/lib/auth";
+import { desktopMediaProvider } from "@/lib/desktopSettings";
 import { toErrorResponse } from "@/lib/errors";
+import { normalizeHostedProviderBaseUrl } from "@/lib/hostedProviderUrls";
+import { isLocalFirstMode } from "@/lib/local/mode";
+import { getHostedProviderProfile } from "@/lib/providerSettings";
+import { requireByokProviderAccess } from "@/lib/billing/entitlements";
 import {
   DEFAULT_GEMINI_BASE_URL,
   DEFAULT_OLLAMA_BASE_URL,
   DEFAULT_OPENAI_BASE_URL,
   DEFAULT_XAI_BASE_URL,
   DEFAULT_MAX_TOKENS,
-  resolveInteractiveLLMConfig,
 } from "@/lib/llm/config";
 import { createAIFromConfig, LLMError } from "@/lib/llm";
 import type { LLMProvider } from "@/lib/llm";
@@ -18,7 +22,10 @@ const Body = z.object({
   model: z.string().trim().min(1).max(200),
   baseUrl: z.string().url().optional(),
   apiKey: z.string().optional(),
+  profileId: z.string().trim().optional(),
 });
+
+export const maxDuration = 120;
 
 function defaultBaseUrl(provider: LLMProvider): string | undefined {
   if (provider === "ollama") return DEFAULT_OLLAMA_BASE_URL;
@@ -30,30 +37,70 @@ function defaultBaseUrl(provider: LLMProvider): string | undefined {
 
 function normalizeConfig(body: z.infer<typeof Body>) {
   const provider = body.provider;
-  const baseUrl = body.baseUrl?.trim().replace(/\/+$/, "") || defaultBaseUrl(provider);
+  const rawBaseUrl = body.baseUrl?.trim() || defaultBaseUrl(provider);
+  const baseUrl = isLocalFirstMode()
+    ? rawBaseUrl?.replace(/\/+$/, "")
+    : normalizeHostedProviderBaseUrl(rawBaseUrl);
+  const apiKey = body.apiKey?.trim() || undefined;
 
   if (provider === "openai-compatible" && !baseUrl) {
     throw new LLMError(422, "validation", "Add a base URL before testing this provider.", provider);
   }
+  if (["anthropic", "openai", "xai", "gemini"].includes(provider) && !apiKey) {
+    throw new LLMError(422, "validation", "Add an API key before testing this provider.", provider);
+  }
 
-  return resolveInteractiveLLMConfig(provider, {
-    apiKey: body.apiKey,
+  return {
+    provider,
+    model: body.model.trim(),
     baseUrl,
-    model: body.model,
-    maxTokens: String(Math.min(DEFAULT_MAX_TOKENS, 32)),
-  });
+    apiKey,
+    maxTokens: Math.min(DEFAULT_MAX_TOKENS, 256),
+  };
+}
+
+function savedDesktopModelCredential(body: z.infer<typeof Body>) {
+  if (!isLocalFirstMode() || body.apiKey?.trim() || body.profileId) return null;
+  if (body.provider !== "openai" && body.provider !== "xai") return null;
+  const saved = desktopMediaProvider(body.provider);
+  const apiKey = saved?.apiKey?.trim();
+  if (!apiKey) return null;
+  return {
+    apiKey,
+    baseUrl: body.baseUrl || saved?.baseUrl,
+  };
 }
 
 export async function POST(req: Request) {
   try {
-    await requireUser();
+    const user = await requireUser();
     const body = Body.parse(await req.json());
-    const ai = createAIFromConfig(normalizeConfig(body));
+    if (!isLocalFirstMode()) {
+      if (!user.workspaceId) {
+        return NextResponse.json({ error: "Not found.", code: "not_found" }, { status: 404 });
+      }
+      await requireByokProviderAccess({ ...user, workspaceId: user.workspaceId });
+    }
+    const saved = body.profileId ? await getHostedProviderProfile(user, body.profileId) : null;
+    const savedDesktop = saved ? null : savedDesktopModelCredential(body);
+    const merged = saved
+      ? {
+          provider: saved.provider,
+          model: body.model || saved.model,
+          baseUrl: body.baseUrl || saved.baseUrl,
+          apiKey: body.apiKey || saved.apiKey,
+        }
+      : {
+          ...body,
+          baseUrl: body.baseUrl || savedDesktop?.baseUrl,
+          apiKey: body.apiKey || savedDesktop?.apiKey,
+        };
+    const ai = createAIFromConfig(normalizeConfig(merged));
     const text = await ai.text("Reply with exactly OK. No punctuation, no extra words.");
     return NextResponse.json({
       ok: true,
-      provider: body.provider,
-      model: body.model,
+      provider: merged.provider,
+      model: merged.model,
       sample: text.trim().slice(0, 80),
     });
   } catch (err) {

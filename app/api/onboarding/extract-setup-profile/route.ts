@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireUser } from "@/lib/auth";
 import { toErrorResponse } from "@/lib/errors";
-import { getAIForTask } from "@/lib/llm";
+import { getAIForTaskForUser } from "@/lib/llm";
+import { completeUsageReservation, failUsageReservation, reserveUsage, type UsageReservation } from "@/lib/billing/usage";
 import {
   buildSetupExtractionPrompt,
   setupBrandSchema,
@@ -17,11 +18,23 @@ const requestSchema = z.object({
 });
 
 export async function POST(req: Request) {
+  let reservation: UsageReservation = null;
   try {
-    await requireUser();
+    const user = await requireUser();
     const body = requestSchema.parse(await req.json());
     const prompt = buildSetupExtractionPrompt(body);
-    const raw = await getAIForTask("utility").json<unknown>(prompt, {
+    const taskAI = await getAIForTaskForUser("utility", user);
+    reservation = await reserveUsage({
+      user,
+      task: "utility",
+      feature: "onboarding.extract_setup_profile",
+      providerSource: taskAI.providerSource,
+      provider: taskAI.provider,
+      model: taskAI.model,
+      metadata: taskAI.profileId ? { profileId: taskAI.profileId } : {},
+      estimatedCredits: Math.max(1, Math.ceil(prompt.length / 12000)),
+    });
+    const raw = await taskAI.ai.json<unknown>(prompt, {
       system: [
         "You extract onboarding preferences for a local-first writing app.",
         "Return only JSON matching the requested schema.",
@@ -30,12 +43,14 @@ export async function POST(req: Request) {
       ].join(" "),
     });
     const parsed = setupProfileSchema.parse(raw);
+    await completeUsageReservation(reservation, { actualCredits: Math.max(1, Math.ceil((prompt.length + JSON.stringify(parsed).length) / 12000)) });
 
     return NextResponse.json({
       profileDraft: parsed,
       requiresUserApproval: true,
     });
   } catch (err) {
+    await failUsageReservation(reservation, err);
     return toErrorResponse(err);
   }
 }
