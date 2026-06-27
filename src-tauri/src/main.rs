@@ -899,7 +899,7 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
             }
         }
         MENU_CHECK_UPDATES => {
-            let _ = open_url("https://github.com/jedisherpa/pillar-press-releases/releases/latest");
+            let _ = open_url("https://github.com/Transformation-Agency/pillar-press/releases/latest");
         }
         _ => {}
     }

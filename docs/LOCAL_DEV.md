@@ -269,7 +269,7 @@ PILLAR_PRESS_STORAGE=supabase
 If you enable the built-in password gate, the hosted app accepts `SITE_USERS`
 as a comma-separated allow-list:
 ```bash
-SITE_USERS=king,pillar
+SITE_USERS=pillar
 SITE_PASSWORD=<strong-password>
 ```
 

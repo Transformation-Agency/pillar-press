@@ -74,7 +74,7 @@ artifacts.
 | `npm run build` | Pass | Next.js 15.5.19 production build completed; 48 static pages generated |
 | `npm run desktop:release-readiness` | Pass | 71 stories: 67 retest passed, 3 hosted out of local-first scope, 1 waived; no unwaived blockers |
 | `npm run onboarding:verify` | Pass | typed, voice, and provider-ready setup scenarios passed |
-| `npm run onboarding:verify:browser` | Initially failed | Puppeteer could not find Chrome `149.0.7827.22` in `/Users/paul/.cache/puppeteer` |
+| `npm run onboarding:verify:browser` | Initially failed | Puppeteer could not find Chrome `149.0.7827.22` in `the local Puppeteer cache` |
 | `npm run desktop:build` | Pass | Built `.app` and `Pillar Press_0.2.0_aarch64.dmg` |
 | `npm run desktop:verify-release` | Pass | App bundle, DMG, packaged server, bundled Node, no env files, local browser runtimes, codesign, DMG mount, and packaged server smoke passed |
 | `npm run desktop:verify-installed` | Pass | DMG mounted, copied app launched, local server started, onboarding completed |
@@ -85,7 +85,7 @@ artifacts.
 #### P1: Browser-based release verifiers depended only on Puppeteer's managed Chrome
 
 `npm run onboarding:verify:browser` failed because Puppeteer could not find the
-managed Chrome version in `/Users/paul/.cache/puppeteer`, even though system
+managed Chrome version in `the local Puppeteer cache`, even though system
 Chrome was installed at `/Applications/Google Chrome.app`.
 
 Fix applied:

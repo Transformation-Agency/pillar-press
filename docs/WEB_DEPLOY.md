@@ -161,12 +161,12 @@ For a temporary private preview without user accounts, set `AUTH_DISABLED=true`
 and add:
 
 ```bash
-SITE_USERS=king,pillar
+SITE_USERS=pillar
 SITE_PASSWORD=<strong-password>
 ```
 
 Set `SITE_USERS` to your own comma-separated usernames if you do not want the
-default `king,pillar` aliases. The password is the secret; usernames are only an
+default `pillar` alias. The password is the secret; usernames are only an
 allow-list. If the browser keeps sending old credentials, open a private window
 or fully close the browser tab.
 
@@ -234,7 +234,7 @@ call with:
 Install Node 22+ and run:
 
 ```bash
-git clone https://github.com/jedisherpa/pillar-press.git
+git clone https://github.com/Transformation-Agency/pillar-press.git
 cd pillar-press
 npm install
 cp .env.hosted.example .env

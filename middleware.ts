@@ -25,7 +25,7 @@ function configuredUsers(): string[] {
     .split(",")
     .map((user) => user.trim())
     .filter(Boolean);
-  return users.length ? users : ["king", "pillar"];
+  return users.length ? users : ["pillar"];
 }
 
 function truthyEnv(value: string | undefined): boolean {

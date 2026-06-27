@@ -2131,6 +2131,7 @@ function App() {
     <div className="app">
       <div className="topbar">
         <div className="brand" onClick={() => { setActiveDeskWorkflow(null); window.Store.setActive(null); setView("desk"); }}>
+          <img className="brand-icon" src="/brand/pillar-press-product-mark.png" alt="" aria-hidden="true" />
           <span className="mark">Pillar <span className="em">Press</span></span>
           <span className="sub">Editorial Desk</span>
         </div>

@@ -6,21 +6,21 @@ function basic(user: string, password: string) {
 }
 
 describe("hosted site basic auth", () => {
-  it("allows the current and legacy default usernames when only a password is configured", () => {
-    expect(isSiteBasicAuthAuthorized(basic("king", "secret"), "secret")).toBe(true);
+  it("allows the default Pillar username when only a password is configured", () => {
+    expect(isSiteBasicAuthAuthorized(basic("guest", "secret"), "secret")).toBe(false);
     expect(isSiteBasicAuthAuthorized(basic("pillar", "secret"), "secret")).toBe(true);
-    expect(isSiteBasicAuthAuthorized(basic("paul", "secret"), "secret")).toBe(false);
+    expect(isSiteBasicAuthAuthorized(basic("editor", "secret"), "secret")).toBe(false);
   });
 
   it("honors an explicit hosted username allow-list", () => {
-    expect(isSiteBasicAuthAuthorized(basic("paul", "secret"), "secret", ["paul", "editor"])).toBe(true);
-    expect(isSiteBasicAuthAuthorized(basic("editor", "secret"), "secret", ["paul", "editor"])).toBe(true);
-    expect(isSiteBasicAuthAuthorized(basic("king", "secret"), "secret", ["paul", "editor"])).toBe(false);
+    expect(isSiteBasicAuthAuthorized(basic("owner", "secret"), "secret", ["owner", "editor"])).toBe(true);
+    expect(isSiteBasicAuthAuthorized(basic("editor", "secret"), "secret", ["owner", "editor"])).toBe(true);
+    expect(isSiteBasicAuthAuthorized(basic("pillar", "secret"), "secret", ["owner", "editor"])).toBe(false);
   });
 
   it("rejects missing or wrong credentials", () => {
     expect(isSiteBasicAuthAuthorized(null, "secret")).toBe(false);
-    expect(isSiteBasicAuthAuthorized(basic("king", "wrong"), "secret")).toBe(false);
+    expect(isSiteBasicAuthAuthorized(basic("pillar", "wrong"), "secret")).toBe(false);
   });
 
   it("does not enable Basic Auth in hosted SaaS mode when account auth is active", () => {

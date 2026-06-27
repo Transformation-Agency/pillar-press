@@ -209,7 +209,7 @@ marked `Waived by owner` without a dated, owner-scoped `WAIVER:` note still bloc
 release. Example:
 
 ```text
-WAIVER: Paul approved release on 2026-06-23 for the exact scope of shipping
+WAIVER: Owner approved release on 2026-06-23 for the exact scope of shipping
 without live Hedra video generation evidence.
 ```
 

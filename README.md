@@ -15,13 +15,13 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Transformation-Agency/pillar-press/releases/download/v0.2.0/Pillar.Press_0.2.0_aarch64.dmg">
+  <a href="https://github.com/Transformation-Agency/pillar-press/releases/download/v0.2.1/Pillar.Press_0.2.1_aarch64.dmg">
     <img src="https://img.shields.io/badge/Download-M--series%20Macs-black?style=for-the-badge&logo=apple" alt="Download for M-series Macs" />
   </a>
-  <a href="https://github.com/Transformation-Agency/pillar-press/releases/download/v0.2.0/Pillar.Press_0.2.0_x64.dmg">
+  <a href="https://github.com/Transformation-Agency/pillar-press/releases/download/v0.2.1/Pillar.Press_0.2.1_x64.dmg">
     <img src="https://img.shields.io/badge/Download-Intel%20Macs-333333?style=for-the-badge&logo=apple" alt="Download for Intel Macs" />
   </a>
-  <a href="https://github.com/Transformation-Agency/pillar-press/releases/download/v0.2.0/Pillar.Press_0.2.0_x64-setup.exe">
+  <a href="https://github.com/Transformation-Agency/pillar-press/releases/download/v0.2.1/Pillar.Press_0.2.1_x64-setup.exe">
     <img src="https://img.shields.io/badge/Download-Windows-0078D4?style=for-the-badge" alt="Download for Windows" />
   </a>
 </p>
@@ -40,7 +40,7 @@
 
 ## Latest Release
 
-**v0.2.0** is the Pillar Press desktop release with Paul’s updated backend merged into the branded app.
+**v0.2.1** is the Pillar Press desktop release with the latest upstream backend merged into the branded app.
 
 It packages the local-first editorial desk with:
 

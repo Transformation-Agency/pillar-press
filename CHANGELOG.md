@@ -68,5 +68,5 @@ Initial local-first desktop release.
   Anthropic, Gemini, and xAI/Grok behind one prompt layer, with per-task model
   defaults.
 
-[Unreleased]: https://github.com/jedisherpa/pillar-press/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/jedisherpa/pillar-press/releases/tag/v0.1.0
+[Unreleased]: https://github.com/Transformation-Agency/pillar-press/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/Transformation-Agency/pillar-press/releases/tag/v0.1.0
