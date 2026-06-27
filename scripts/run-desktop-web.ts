@@ -6,6 +6,7 @@ import type { ChildProcess } from "node:child_process";
 
 const command = process.argv[2] === "build" ? "build" : "dev";
 const npmBin = process.platform === "win32" ? "npm.cmd" : "npm";
+const npmSpawnOptions = { shell: process.platform === "win32" };
 const desktopDevPort = process.env.PILLAR_PRESS_DESKTOP_DEV_PORT || "41739";
 const desktopDevHost = process.env.PILLAR_PRESS_DESKTOP_DEV_HOST || "127.0.0.1";
 const appDataDir =
@@ -34,13 +35,23 @@ const desktopEnv: NodeJS.ProcessEnv = {
   PILLAR_PRESS_DB_PATH: process.env.PILLAR_PRESS_DB_PATH || join(appDataDir, "pillar-press.sqlite3"),
   PILLAR_PRESS_STORAGE_DIR: storageDir,
   PILLAR_PRESS_LLM_SETTINGS_PATH: process.env.PILLAR_PRESS_LLM_SETTINGS_PATH || join(appDataDir, "desktop-settings.json"),
+  NODE_OPTIONS: process.env.NODE_OPTIONS || "--max-old-space-size=4096",
   STORAGE_PROVIDER: "local",
   PILLAR_PRESS_STORAGE: "local",
 };
 
+function cleanEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const cleaned: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (typeof value === "string") cleaned[key] = value;
+  }
+  return cleaned as NodeJS.ProcessEnv;
+}
+
 const compile: ChildProcess = spawn(npmBin, ["run", "desktop:build-static-shell"], {
   stdio: "inherit",
-  env: desktopEnv,
+  env: cleanEnv(desktopEnv),
+  ...npmSpawnOptions,
 });
 
 compile.on("exit", (compileCode: number | null, compileSignal: NodeJS.Signals | null) => {
@@ -55,7 +66,8 @@ compile.on("exit", (compileCode: number | null, compileSignal: NodeJS.Signals | 
 
   const child: ChildProcess = spawn(npmBin, args, {
     stdio: "inherit",
-    env: desktopEnv,
+    env: cleanEnv(desktopEnv),
+    ...npmSpawnOptions,
   });
 
   child.on("exit", (code: number | null, signal: NodeJS.Signals | null) => {
@@ -70,7 +82,8 @@ compile.on("exit", (compileCode: number | null, compileSignal: NodeJS.Signals | 
 
     const prepare = spawn(npmBin, ["run", "desktop:prepare-sidecar"], {
       stdio: "inherit",
-      env: process.env,
+      env: cleanEnv(process.env),
+      ...npmSpawnOptions,
     });
     prepare.on("exit", (prepareCode: number | null, prepareSignal: NodeJS.Signals | null) => {
       if (prepareSignal) {
