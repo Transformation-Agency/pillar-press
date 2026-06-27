@@ -102,18 +102,29 @@ async function typeInto(page: Page, selector: string, value: string) {
 
 async function typeIntoFirstTextarea(page: Page, value: string) {
   trace("type first textarea");
-  await page.evaluate((value) => {
-    const area = document.querySelector("textarea");
+  const selector = "textarea[data-onboarding-proof-active='true']";
+  await page.evaluate(() => {
+    document.querySelectorAll("textarea[data-onboarding-proof-active='true']")
+      .forEach((item) => item.removeAttribute("data-onboarding-proof-active"));
+    const areas = Array.from(document.querySelectorAll("textarea"));
+    const area = areas.find((item) => {
+      const rect = item.getBoundingClientRect();
+      return !item.disabled &&
+        rect.width > 0 &&
+        rect.height > 0 &&
+        item.placeholder.includes("independent operators");
+    });
     if (!(area instanceof HTMLTextAreaElement)) {
       throw new Error("No textarea was available for setup answer entry.");
     }
-    const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(area), "value")?.set;
-    area.focus();
-    if (setter) setter.call(area, value);
-    else area.value = value;
-    area.dispatchEvent(new Event("input", { bubbles: true }));
-    area.dispatchEvent(new Event("change", { bubbles: true }));
-  }, value);
+    area.setAttribute("data-onboarding-proof-active", "true");
+  });
+  await page.click(selector);
+  const modifier = process.platform === "darwin" ? "Meta" : "Control";
+  await page.keyboard.down(modifier);
+  await page.keyboard.press("A");
+  await page.keyboard.up(modifier);
+  await page.keyboard.type(value);
 }
 
 async function waitForText(page: Page, text: string) {
@@ -238,8 +249,25 @@ export async function driveOnboardingUiProof(page: Page, options?: OnboardingUiP
     await new Promise((resolve) => setTimeout(resolve, 100));
   } else {
     await typeIntoFirstTextarea(page, voiceAnswer);
+    await waitForPageState(
+      page,
+      () => {
+        const button = Array.from(document.querySelectorAll("button"))
+          .find((item) => item.textContent?.replace(/\s+/g, " ").trim().includes("Use for defaults"));
+        return button instanceof HTMLButtonElement && !button.disabled;
+      },
+      "Setup profile answer button did not become enabled.",
+    );
     await clickButton(page, "Use for defaults");
   }
+  await waitForPageState(
+    page,
+    () => {
+      const body = document.body.innerText;
+      return body.includes("Done: extract setup profile") || body.includes("Needs attention: extract setup profile");
+    },
+    "Setup profile interpretation did not finish.",
+  );
   await waitForText(page, "HERE IS WHAT I UNDERSTOOD");
   await clickButton(page, "Finish setup");
 

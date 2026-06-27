@@ -40,17 +40,17 @@ const desktopEnv: NodeJS.ProcessEnv = {
   PILLAR_PRESS_STORAGE: "local",
 };
 
-function cleanEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+function cleanEnv(env: Record<string, string | undefined>): Record<string, string> {
   const cleaned: Record<string, string> = {};
   for (const [key, value] of Object.entries(env)) {
     if (typeof value === "string") cleaned[key] = value;
   }
-  return cleaned as NodeJS.ProcessEnv;
+  return cleaned;
 }
 
 const compile: ChildProcess = spawn(npmBin, ["run", "desktop:build-static-shell"], {
   stdio: "inherit",
-  env: cleanEnv(desktopEnv),
+  env: cleanEnv(desktopEnv) as NodeJS.ProcessEnv,
   ...npmSpawnOptions,
 });
 
@@ -66,7 +66,7 @@ compile.on("exit", (compileCode: number | null, compileSignal: NodeJS.Signals | 
 
   const child: ChildProcess = spawn(npmBin, args, {
     stdio: "inherit",
-    env: cleanEnv(desktopEnv),
+    env: cleanEnv(desktopEnv) as NodeJS.ProcessEnv,
     ...npmSpawnOptions,
   });
 
@@ -82,7 +82,7 @@ compile.on("exit", (compileCode: number | null, compileSignal: NodeJS.Signals | 
 
     const prepare = spawn(npmBin, ["run", "desktop:prepare-sidecar"], {
       stdio: "inherit",
-      env: cleanEnv(process.env),
+      env: cleanEnv(process.env) as NodeJS.ProcessEnv,
       ...npmSpawnOptions,
     });
     prepare.on("exit", (prepareCode: number | null, prepareSignal: NodeJS.Signals | null) => {
