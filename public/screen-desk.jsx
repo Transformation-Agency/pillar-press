@@ -9,9 +9,11 @@ function deskUid(prefix) {
   return prefix + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 }
 
-function newDeskThread() {
+function newDeskThread(campaignId) {
   return {
     id: deskUid("thread_"),
+    campaignId: campaignId || null,
+    llmProfileId: null,
     title: "New thread",
     titleSet: false,
     messages: [],
@@ -25,14 +27,69 @@ function estimateTokens(text) {
   return Math.ceil(((text || "").length) / 4);
 }
 
-function contextWindowFor(status) {
-  const provider = status && status.provider;
-  const model = ((status && status.model) || "").toLowerCase();
+function effectiveLLMProfile(status, profileId) {
+  if (!status) return null;
+  const profiles = Array.isArray(status.profiles) ? status.profiles : [];
+  const explicit = profileId ? profiles.find((profile) => profile && profile.id === profileId) : null;
+  if (explicit) return explicit;
+  const taskProfileId = status.tasks && status.tasks.utility && status.tasks.utility.profileId;
+  const taskProfile = taskProfileId ? profiles.find((profile) => profile && profile.id === taskProfileId) : null;
+  if (taskProfile) return taskProfile;
+  const defaultProfile = status.defaultProfileId ? profiles.find((profile) => profile && profile.id === status.defaultProfileId) : null;
+  if (defaultProfile) return defaultProfile;
+  if (profiles.length) return profiles[0];
+  return status.provider && status.model ? { provider: status.provider, model: status.model } : null;
+}
+
+function effectiveLLMProfileId(status, profileId) {
+  if (!status) return profileId || null;
+  const profiles = Array.isArray(status.profiles) ? status.profiles : [];
+  if (profileId && profiles.some((profile) => profile && profile.id === profileId)) return profileId;
+  const profile = effectiveLLMProfile(status, null);
+  return profile && profile.id ? profile.id : null;
+}
+
+function profileProviderLabel(profile) {
+  if (!profile) return "";
+  const baseUrl = String(profile.baseUrl || "");
+  return {
+    anthropic: "Anthropic",
+    gemini: "Gemini",
+    openai: "OpenAI",
+    "openai-compatible": baseUrl.includes("1234")
+      ? "LM Studio"
+      : baseUrl.includes("12434")
+        ? "Docker Model Runner"
+        : "Compatible",
+    xai: "xAI",
+    ollama: "Ollama",
+  }[profile.provider] || profile.provider || "";
+}
+
+function modelLabelFor(status, thread) {
+  const profile = effectiveLLMProfile(status, thread && thread.llmProfileId);
+  if (!profile || !profile.model) return "Model setup";
+  const provider = profileProviderLabel(profile);
+  return provider ? provider + " · " + profile.model : profile.model;
+}
+
+function contextWindowFor(status, thread) {
+  const profile = effectiveLLMProfile(status, thread && thread.llmProfileId);
+  if (profile && profile.contextWindow > 0) return profile.contextWindow;
+  const provider = profile && profile.provider;
+  const model = ((profile && profile.model) || "").toLowerCase();
+  const explicit = model.match(/(?:^|[^0-9])(\d{1,4})k(?:[^a-z0-9]|$)/i);
+  if (explicit) return Number(explicit[1]) * 1000;
+  if (provider === "openai") {
+    if (/^(gpt-5|gpt-4\.1|gpt-4o|o1|o3|o4)(?:[.-]|$)/.test(model)) return 128000;
+    if (/^gpt-4-32k(?:-|$)/.test(model)) return 32000;
+    if (/^gpt-4(?:-|$)/.test(model)) return 8192;
+  }
   if (provider === "anthropic") return 200000;
-  if (provider === "gemini") return model.includes("pro") ? 1000000 : 128000;
-  if (provider === "openai" || provider === "xai") return 128000;
-  if (model.includes("70b") || model.includes("128k")) return 128000;
-  if (model.includes("32k")) return 32000;
+  if (provider === "gemini") return /gemini-(1\.5|2|2\.5|3|3\.5)/.test(model) ? 1000000 : 128000;
+  if (provider === "xai") return /grok-(4|4\.)/.test(model) ? 256000 : 131000;
+  if ((provider === "ollama" || provider === "openai-compatible") && (model.includes("70b") || model.includes("128k"))) return 128000;
+  if ((provider === "ollama" || provider === "openai-compatible") && model.includes("32k")) return 32000;
   return 8192;
 }
 
@@ -42,7 +99,8 @@ function deskUsedTokens(thread) {
   return 320 + live + memory;
 }
 
-async function deskChatComplete(thread, campaignId) {
+async function deskChatComplete(thread, campaignId, status) {
+  const llmProfileId = effectiveLLMProfileId(status, thread && thread.llmProfileId);
   const res = await fetch("/api/desk/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -50,6 +108,7 @@ async function deskChatComplete(thread, campaignId) {
       mode: "desk",
       task: "utility",
       campaignId,
+      llmProfileId,
       messages: (thread.messages || []).map((m) => ({ role: m.role, content: m.content })),
       memory: thread.memory && thread.memory.note,
     }),
@@ -92,80 +151,247 @@ async function compressDeskThread(thread, windowSize) {
   });
 }
 
-function DeskBubble({ msg }) {
-  const mine = msg.role === "user";
+function safeHref(href) {
+  const value = String(href || "").trim();
+  return /^https?:\/\//i.test(value) || /^mailto:/i.test(value) ? value : "";
+}
+
+function renderInlineMarkdown(text, keyPrefix) {
+  const source = String(text || "");
+  const parts = [];
+  const pattern = /(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`|\[[^\]]+\]\([^)]+\))/g;
+  let last = 0;
+  let match;
+  while ((match = pattern.exec(source))) {
+    if (match.index > last) parts.push(source.slice(last, match.index));
+    const token = match[0];
+    const key = keyPrefix + "-" + parts.length;
+    if (token.startsWith("**")) parts.push(<strong key={key}>{token.slice(2, -2)}</strong>);
+    else if (token.startsWith("*")) parts.push(<em key={key}>{token.slice(1, -1)}</em>);
+    else if (token.startsWith("`")) parts.push(<code key={key}>{token.slice(1, -1)}</code>);
+    else {
+      const link = token.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+      const href = link ? safeHref(link[2]) : "";
+      parts.push(href ? <a key={key} href={href} target="_blank" rel="noreferrer">{link[1]}</a> : token);
+    }
+    last = pattern.lastIndex;
+  }
+  if (last < source.length) parts.push(source.slice(last));
+  return parts;
+}
+
+function MarkdownText({ text }) {
+  const lines = String(text || "").split(/\r?\n/);
+  const blocks = [];
+  let paragraph = [];
+  let list = null;
+  function flushParagraph() {
+    if (!paragraph.length) return;
+    const content = paragraph.join(" ").trim();
+    if (content) blocks.push({ type: "p", text: content });
+    paragraph = [];
+  }
+  function flushList() {
+    if (!list) return;
+    blocks.push(list);
+    list = null;
+  }
+  lines.forEach((line) => {
+    const clean = line.trim();
+    if (!clean) { flushParagraph(); flushList(); return; }
+    const heading = clean.match(/^(#{1,3})\s+(.+)$/);
+    if (heading) { flushParagraph(); flushList(); blocks.push({ type: "heading", level: heading[1].length, text: heading[2] }); return; }
+    const bullet = clean.match(/^[-*]\s+(.+)$/);
+    const numbered = clean.match(/^\d+[.)]\s+(.+)$/);
+    if (bullet || numbered) {
+      flushParagraph();
+      const type = numbered ? "ol" : "ul";
+      if (!list || list.type !== type) { flushList(); list = { type, items: [] }; }
+      list.items.push((bullet || numbered)[1]);
+      return;
+    }
+    flushList();
+    paragraph.push(clean);
+  });
+  flushParagraph();
+  flushList();
   return (
-    <div style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start" }}>
-      <div style={{
-        maxWidth: "min(760px, 86%)",
-        whiteSpace: "pre-wrap",
-        lineHeight: 1.6,
-        fontSize: 16,
-        padding: "11px 14px",
-        borderRadius: 14,
-        borderTopLeftRadius: mine ? 14 : 4,
-        borderTopRightRadius: mine ? 4 : 14,
-        background: mine ? "var(--accent-soft)" : "var(--paper-2)",
-        border: "1px solid " + (mine ? "color-mix(in oklab, var(--accent) 26%, transparent)" : "var(--hair)"),
-      }}>
-        {msg.content}
+    <div className="desk-markdown">
+      {blocks.map((block, index) => {
+        if (block.type === "heading") {
+          const Tag = block.level === 1 ? "h3" : block.level === 2 ? "h4" : "h5";
+          return <Tag key={index}>{renderInlineMarkdown(block.text, "h" + index)}</Tag>;
+        }
+        if (block.type === "ul" || block.type === "ol") {
+          const Tag = block.type;
+          return <Tag key={index}>{block.items.map((item, i) => <li key={i}>{renderInlineMarkdown(item, "li" + index + "-" + i)}</li>)}</Tag>;
+        }
+        return <p key={index}>{renderInlineMarkdown(block.text, "p" + index)}</p>;
+      })}
+    </div>
+  );
+}
+
+function titleFromDraft(text, fallback) {
+  const firstLine = String(text || "").trim().split("\n").map((line) => line.trim()).find(Boolean);
+  if (!firstLine) return fallback || "Desk draft";
+  return firstLine.replace(/^#+\s*/, "").replace(/[*_`>#-]/g, "").trim().slice(0, 72) || fallback || "Desk draft";
+}
+
+function DeskBubble({ msg, onSendToLibrary, latest }) {
+  const mine = msg.role === "user";
+  const [saved, setSaved] = React.useState(false);
+  const saveDraft = () => {
+    if (!onSendToLibrary || !msg.content) return;
+    onSendToLibrary(msg.content);
+    setSaved(true);
+    window.setTimeout(() => setSaved(false), 1800);
+  };
+  return (
+    <div className={"desk-turn " + (mine ? "desk-turn-user" : "desk-turn-assistant") + (latest ? " desk-turn-latest" : "")} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start" }}>
+      <div style={{ maxWidth: "min(760px, 86%)", display: "grid", gap: 7, justifyItems: mine ? "end" : "start" }}>
+        <div style={{
+          width: "100%",
+          boxSizing: "border-box",
+          whiteSpace: mine ? "pre-wrap" : "normal",
+          lineHeight: 1.6,
+          fontSize: 16,
+          padding: "11px 14px",
+          borderRadius: 14,
+          borderTopLeftRadius: mine ? 14 : 4,
+          borderTopRightRadius: mine ? 4 : 14,
+          background: mine ? "var(--accent-soft)" : "var(--paper-2)",
+          border: "1px solid " + (mine ? "color-mix(in oklab, var(--accent) 26%, transparent)" : "var(--hair)"),
+        }}>
+          {mine ? msg.content : <MarkdownText text={msg.content} />}
+        </div>
+        {!mine && (
+          <button className="btn sm ghost desk-draft-action" onClick={saveDraft} style={{ fontSize: 12, padding: "6px 9px" }}>
+            <Icon name={saved ? "check" : "doc"} size={12} /> {saved ? "Saved to Library" : "Send to Library as Draft"}
+          </button>
+        )}
       </div>
     </div>
   );
 }
 
-function Desk({ campaignId, onOpenPiece }) {
+function Desk({ campaignId, onOpenPiece, hydrated }) {
   const desk = window.Store.getDesk();
   const isMobile = window.useIsMobile();
   const [text, setText] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState(null);
   const [status, setStatus] = React.useState(null);
+  const [confirmDeleteId, setConfirmDeleteId] = React.useState(null);
+  const [modelMenuOpen, setModelMenuOpen] = React.useState(false);
   const streamRef = React.useRef(null);
   const taRef = React.useRef(null);
 
+  const allThreads = desk.threads || [];
+  const belongsToCurrentCampaign = (thread) => {
+    const threadCampaignId = thread && thread.campaignId;
+    if (campaignId) return threadCampaignId === campaignId;
+    return !threadCampaignId;
+  };
+  const threads = allThreads.filter(belongsToCurrentCampaign);
+  const active = threads.find((t) => t.id === desk.activeId) || threads[0] || null;
+  const isSetupHandoff = !!(active && active.source === "pillar_press_setup");
+  const win = contextWindowFor(status, active);
+  const used = active ? deskUsedTokens(active) : 0;
+  const pct = Math.min(1, used / win);
+  const availableProfiles = Array.isArray(status && status.profiles) ? status.profiles.filter((profile) => profile && profile.id && profile.model) : [];
+  const profileGroups = availableProfiles.reduce((groups, profile) => {
+    const label = profileProviderLabel(profile) || "Other";
+    if (!groups[label]) groups[label] = [];
+    groups[label].push(profile);
+    return groups;
+  }, {});
+  const currentProfile = effectiveLLMProfile(status, active && active.llmProfileId);
+  const currentProfileId = (currentProfile && currentProfile.id) || null;
+
   React.useEffect(() => {
     let alive = true;
-    fetch("/api/llm/status", { headers: { Accept: "application/json" } })
+    const refresh = () => fetch("/api/llm/status", { headers: { Accept: "application/json" }, cache: "no-store" })
       .then((r) => r.ok ? r.json() : null)
       .then((s) => { if (alive && s) setStatus(s); })
       .catch(() => {});
-    return () => { alive = false; };
+    refresh();
+    window.addEventListener("pillarpress:llm-settings-changed", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      alive = false;
+      window.removeEventListener("pillarpress:llm-settings-changed", refresh);
+      window.removeEventListener("focus", refresh);
+    };
   }, []);
 
   React.useEffect(() => {
-    if ((desk.threads || []).length) return;
-    const t = newDeskThread();
-    window.Store.setDesk({ threads: [t], activeId: t.id });
-  }, [desk.threads && desk.threads.length]);
+    if (!hydrated || !campaignId || !allThreads.some((thread) => thread && !thread.campaignId)) return;
+    window.Store.setDesk({
+      threads: allThreads.map((thread) => thread && !thread.campaignId ? Object.assign({}, thread, { campaignId }) : thread),
+      activeId: desk.activeId,
+    });
+  }, [hydrated, campaignId, allThreads.length, desk.activeId]);
+
+  React.useEffect(() => {
+    if (!hydrated) return;
+    if (threads.length) return;
+    if (campaignId && allThreads.some((thread) => thread && !thread.campaignId)) return;
+    const t = newDeskThread(campaignId);
+    window.Store.setDesk({ threads: [t].concat(allThreads), activeId: t.id });
+  }, [hydrated, campaignId, threads.length, allThreads.length]);
+
+  React.useEffect(() => {
+    if (!hydrated || !active || active.id === desk.activeId) return;
+    window.Store.setDesk({ threads: allThreads, activeId: active.id });
+  }, [hydrated, campaignId, desk.activeId, active && active.id, threads.length, allThreads.length]);
 
   React.useEffect(() => {
     const el = streamRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [desk.activeId, busy, desk.threads && desk.threads.map((t) => (t.messages || []).length).join(",")]);
+  }, [desk.activeId, busy, threads.map((t) => (t.messages || []).length).join(",")]);
 
-  const threads = desk.threads || [];
-  const active = threads.find((t) => t.id === desk.activeId) || threads[0];
-  const isSetupHandoff = !!(active && active.source === "pillar_press_setup");
-  const win = contextWindowFor(status);
-  const used = active ? deskUsedTokens(active) : 0;
-  const pct = Math.min(1, used / win);
+  React.useEffect(() => {
+    const onProfileSelected = (event) => {
+      const detail = (event && event.detail) || {};
+      const context = detail.context || {};
+      if (!active || context.scope !== "desk-thread" || context.threadId !== active.id || !detail.profileId) return;
+      updateThread(Object.assign({}, active, { llmProfileId: detail.profileId, updatedAt: Date.now() }));
+    };
+    window.addEventListener("pillarpress:llm-profile-selected", onProfileSelected);
+    return () => window.removeEventListener("pillarpress:llm-profile-selected", onProfileSelected);
+  }, [active && active.id, active && active.llmProfileId, threads.length]);
 
-  const saveThreads = (nextThreads, activeId) => window.Store.setDesk({ threads: nextThreads, activeId: activeId || (active && active.id) || null });
-  const updateThread = (next) => saveThreads(threads.map((t) => t.id === next.id ? next : t), next.id);
+  const saveThreads = (nextThreads, activeId) => {
+    const otherThreads = allThreads.filter((thread) => !belongsToCurrentCampaign(thread));
+    window.Store.setDesk({
+      threads: nextThreads.concat(otherThreads),
+      activeId: activeId || (active && active.id) || (nextThreads[0] && nextThreads[0].id) || null,
+    });
+  };
+  const updateThread = (next) => {
+    const scoped = Object.assign({}, next, { campaignId: next.campaignId || campaignId || null });
+    saveThreads(threads.map((t) => t.id === scoped.id ? scoped : t), scoped.id);
+  };
   const addThread = () => {
-    const t = newDeskThread();
+    const t = newDeskThread(campaignId);
     saveThreads([t].concat(threads), t.id);
+  };
+  const performDeleteThread = (id) => {
+    const rest = threads.filter((t) => t.id !== id);
+    const next = rest.length ? rest : [newDeskThread(campaignId)];
+    saveThreads(next, desk.activeId === id ? next[0].id : desk.activeId);
+    setConfirmDeleteId(null);
   };
   const deleteThread = (id) => {
     const target = threads.find((t) => t.id === id);
-    if (target && (target.messages || []).length) {
-      const label = target.title || "this Desk thread";
-      if (!window.confirm(`Delete "${label}" from Desk? This can't be undone except by restoring a backup.`)) return;
-    }
-    const rest = threads.filter((t) => t.id !== id);
-    const next = rest.length ? rest : [newDeskThread()];
-    saveThreads(next, desk.activeId === id ? next[0].id : desk.activeId);
+    if (target && (target.messages || []).length) setConfirmDeleteId(id);
+    else performDeleteThread(id);
+  };
+  const selectThreadProfile = (profileId) => {
+    if (!active) return;
+    setModelMenuOpen(false);
+    updateThread(Object.assign({}, active, { llmProfileId: profileId || null, updatedAt: Date.now() }));
   };
 
   async function send() {
@@ -174,13 +400,14 @@ function Desk({ campaignId, onOpenPiece }) {
     setText(""); setBusy(true); setErr(null);
     if (taRef.current) taRef.current.style.height = "auto";
     let t = Object.assign({}, active, {
+      campaignId: active.campaignId || campaignId || null,
       title: active.titleSet ? active.title : body.slice(0, 48),
       messages: (active.messages || []).concat([{ id: deskUid("msg_"), role: "user", content: body }]),
       updatedAt: Date.now(),
     });
     updateThread(t);
     try {
-      const answer = await deskChatComplete(t, campaignId);
+      const answer = await deskChatComplete(t, campaignId, status);
       t = Object.assign({}, t, {
         messages: t.messages.concat([{ id: deskUid("msg_"), role: "assistant", content: answer || "(No response returned.)" }]),
         updatedAt: Date.now(),
@@ -214,7 +441,18 @@ function Desk({ campaignId, onOpenPiece }) {
     onOpenPiece && onOpenPiece(piece.id);
   }
 
+  function sendDraftToLibrary(content) {
+    const title = titleFromDraft(content, active && active.title);
+    const piece = window.Store.createPiece(title, campaignId, {
+      category: "other",
+      original: content,
+      categoryContext: { communicationGoal: title },
+    });
+    onOpenPiece && onOpenPiece(piece.id);
+  }
+
   return (
+    <>
     <div style={{ flex: 1, display: "grid", gridTemplateColumns: isMobile ? "1fr" : "270px 1fr", minHeight: 0 }}>
       <div style={{ borderRight: isMobile ? "none" : "1px solid var(--hair)", borderBottom: isMobile ? "1px solid var(--hair)" : "none", background: "var(--paper-sunk)", minHeight: 0, display: "flex", flexDirection: "column" }}>
         <div style={{ padding: 14 }}>
@@ -227,7 +465,7 @@ function Desk({ campaignId, onOpenPiece }) {
             return (
               <div key={t.id}
                 style={{ boxSizing: "border-box", display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 8, width: "100%", padding: "6px 7px 6px 11px", borderRadius: "var(--radius)", marginBottom: 3, background: on ? "var(--paper-2)" : "transparent", border: "1px solid " + (on ? "var(--hair)" : "transparent") }}>
-                <button type="button" onClick={() => window.Store.setDesk({ threads, activeId: t.id })}
+                <button type="button" onClick={() => window.Store.setDesk({ threads: allThreads, activeId: t.id })}
                   style={{ all: "unset", cursor: "pointer", minWidth: 0 }}>
                   <span style={{ display: "block", fontFamily: "var(--font-display)", fontSize: 15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.title || "New thread"}</span>
                   <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)" }}>
@@ -250,8 +488,36 @@ function Desk({ campaignId, onOpenPiece }) {
             </div>
           </div>
           <span className="mono" style={{ fontSize: 11, color: "var(--ink-3)" }}>{Math.round(used / 1000 * 10) / 10}k / {Math.round(win / 1000)}k</span>
-          <button className="btn sm" onClick={() => window.dispatchEvent(new Event("pillarpress:open-model-setup"))}><Icon name="key" size={13} /> {(status && status.model) || "Model setup"}</button>
-          <button className="btn sm" onClick={promote} disabled={!active || !(active.messages || []).length}><Icon name="doc" size={13} /> Send to Library</button>
+          <div style={{ position: "relative" }}>
+            <button className="btn sm" onClick={() => availableProfiles.length ? setModelMenuOpen((open) => !open) : window.dispatchEvent(new CustomEvent("pillarpress:open-model-setup", { detail: { scope: "desk-thread", threadId: active && active.id } }))}>
+              <Icon name="key" size={13} /> {modelLabelFor(status, active)}
+            </button>
+            {modelMenuOpen && (
+              <div className="card" style={{ position: "absolute", right: 0, top: 40, width: 330, padding: 8, zIndex: 70, boxShadow: "var(--shadow-lg)", maxHeight: "65vh", overflowY: "auto" }}>
+                <div className="eyebrow" style={{ padding: "5px 8px 8px" }}>Thread model</div>
+                {Object.entries(profileGroups).map(([label, profiles]) => (
+                  <div key={label} style={{ marginBottom: 8 }}>
+                    <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-3)", padding: "4px 8px" }}>{label}</div>
+                    {profiles.map((profile) => {
+                      const on = profile.id === currentProfileId;
+                      return (
+                        <button key={profile.id} onClick={() => selectThreadProfile(profile.id)}
+                          style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, border: "none", borderRadius: 8, padding: "8px 9px", cursor: "pointer", textAlign: "left", background: on ? "var(--accent-soft)" : "transparent", color: on ? "var(--accent-ink)" : "var(--ink)" }}>
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{profile.label || profile.model}</span>
+                          <span className="mono" style={{ fontSize: 10, color: on ? "var(--accent-ink)" : "var(--ink-3)" }}>{profile.model}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ))}
+                <hr className="rule" style={{ margin: "6px 4px" }} />
+                <button className="btn sm ghost" style={{ width: "100%", justifyContent: "center" }} onClick={() => { setModelMenuOpen(false); window.dispatchEvent(new CustomEvent("pillarpress:open-model-setup", { detail: { scope: "desk-thread", threadId: active && active.id } })); }}>
+                  <Icon name="gear" size={13} /> Setup models
+                </button>
+              </div>
+            )}
+          </div>
+          <button className="btn sm" onClick={promote} disabled={!active || !(active.messages || []).length}><Icon name="doc" size={13} /> Send thread to Library</button>
         </div>
 
         <div ref={streamRef} className="scroll-y" style={{ flex: 1, minHeight: 0, padding: "24px 22px", display: "flex", flexDirection: "column", gap: 14 }}>
@@ -277,7 +543,7 @@ function Desk({ campaignId, onOpenPiece }) {
                 <p className="muted" style={{ maxWidth: "48ch", margin: "8px auto 0", fontSize: 15.5 }}>Think out loud here. When a thread becomes useful, send it to the Library as a real piece.</p>
               </div>
             )}
-            {active && (active.messages || []).map((m) => <DeskBubble key={m.id} msg={m} />)}
+            {active && (active.messages || []).map((m, index, arr) => <DeskBubble key={m.id} msg={m} latest={m.role === "assistant" && index === arr.length - 1} onSendToLibrary={sendDraftToLibrary} />)}
             {busy && <div style={{ display: "flex", justifyContent: "flex-start" }}><div className="card" style={{ padding: "11px 14px" }}><Spinner size={14} /> Thinking…</div></div>}
             {err && <p style={{ color: "var(--sev-must)", fontSize: 13.5 }}>{err}</p>}
           </div>
@@ -297,6 +563,20 @@ function Desk({ campaignId, onOpenPiece }) {
         </div>
       </div>
     </div>
+    {confirmDeleteId && (
+      <div style={{ position: "fixed", inset: 0, zIndex: 220, background: "oklch(0 0 0 / 0.32)", display: "grid", placeItems: "center", padding: 20 }}>
+        <div role="dialog" aria-modal="true" className="card" style={{ width: "min(440px, 100%)", padding: 22, boxShadow: "var(--shadow-lg)" }}>
+          <div className="eyebrow" style={{ marginBottom: 8 }}>Delete thread</div>
+          <h2 style={{ fontSize: 24, margin: "0 0 10px" }}>Delete this Desk thread?</h2>
+          <p className="muted" style={{ margin: "0 0 18px", fontSize: 14.5, lineHeight: 1.5 }}>This removes the thread from the current campaign. It cannot be undone except by restoring a backup.</p>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+            <button className="btn ghost" onClick={() => setConfirmDeleteId(null)}>Cancel</button>
+            <button className="btn primary" onClick={() => performDeleteThread(confirmDeleteId)}><Icon name="trash" size={14} /> Delete</button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }
 

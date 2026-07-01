@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -25,6 +26,29 @@ const args =
     ? ["run", command, "--", "--hostname", desktopDevHost, "--port", desktopDevPort]
     : ["run", command];
 
+function desktopSettingsKeyFromKeychain(): string | undefined {
+  if (process.platform !== "darwin") return undefined;
+  try {
+    const keychain = execFileSync("security", ["default-keychain", "-d", "user"], { encoding: "utf8" })
+      .trim()
+      .replace(/^"|"$/g, "");
+    const secret = execFileSync("security", [
+      "find-generic-password",
+      "-w",
+      "-s",
+      "Pillar Press Desktop Settings",
+      "-a",
+      "llm-settings",
+      keychain,
+    ], { encoding: "utf8" }).trim();
+    return Buffer.from(secret, "base64").length === 32 ? secret : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const desktopSettingsKey = process.env.PILLAR_PRESS_DESKTOP_SETTINGS_KEY || desktopSettingsKeyFromKeychain();
+
 const desktopEnv: NodeJS.ProcessEnv = {
   ...process.env,
   ...(command === "dev" ? { NODE_ENV: "development" } : {}),
@@ -35,6 +59,7 @@ const desktopEnv: NodeJS.ProcessEnv = {
   PILLAR_PRESS_DB_PATH: process.env.PILLAR_PRESS_DB_PATH || join(appDataDir, "pillar-press.sqlite3"),
   PILLAR_PRESS_STORAGE_DIR: storageDir,
   PILLAR_PRESS_LLM_SETTINGS_PATH: process.env.PILLAR_PRESS_LLM_SETTINGS_PATH || join(appDataDir, "desktop-settings.json"),
+  ...(desktopSettingsKey ? { PILLAR_PRESS_DESKTOP_SETTINGS_KEY: desktopSettingsKey } : {}),
   NODE_OPTIONS: process.env.NODE_OPTIONS || "--max-old-space-size=4096",
   STORAGE_PROVIDER: "local",
   PILLAR_PRESS_STORAGE: "local",

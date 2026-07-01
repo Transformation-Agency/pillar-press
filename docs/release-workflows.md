@@ -64,6 +64,23 @@ Windows also needs:
 - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: optional password for the updater key,
   if the key was generated with one.
 
+## Feedback Configuration
+
+The in-app feedback widget submits to the shared Transformation Agency feedback
+server. Add this optional repository variable for release builds:
+
+- `VITE_PILLAR_PRESS_FEEDBACK_API_BASE`: defaults to
+  `https://project-cw1bz.vercel.app` when unset.
+
+The feedback server must also have an enabled app configuration:
+
+- App id / product: `pillar-press`
+- GitHub owner: `Transformation-Agency`
+- GitHub repo: `pillar-press`
+
+If the server enforces allowed origins, include the packaged desktop origins and
+any local development origins used for smoke testing.
+
 ## Release Flow
 
 The release workflows run on:

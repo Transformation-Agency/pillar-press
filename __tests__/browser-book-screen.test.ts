@@ -18,7 +18,7 @@ describe("browser Book Writer screen", () => {
     expect(screen).toContain("window.BOOK.createBookChapter(bookId, bookCampaign, t, chapters.length)");
   });
 
-  it("wires chapter editing, status, uploaded draft merge, and full-desk handoff", () => {
+  it("wires chapter editing, status, uploaded draft merge, library handoff, and chapter management", () => {
     const screen = screenSource();
 
     expect(screen).toContain("window.BOOK.chapterEditorState(p)");
@@ -28,9 +28,12 @@ describe("browser Book Writer screen", () => {
     expect(screen).toContain("const text = await window.extractFileText(f)");
     expect(screen).toContain("window.BOOK.mergeUploadedDraft(draft, text)");
     expect(screen).toContain("window.Store.setStatus(p.id, s)");
-    expect(screen).toContain("Desk ↗");
+    expect(screen).toContain("Show in Library");
     expect(screen).toContain("onActivateCampaign(bookId)");
-    expect(screen).toContain("onOpenPiece(piece.id)");
+    expect(screen).toContain("onShowLibrary(piece.id)");
+    expect(screen).toContain("const reorderChapters =");
+    expect(screen).toContain("const deleteChapter =");
+    expect(screen).toContain("Delete chapter");
   });
 
   it("saves latest chapter text before review, revision, outputs, weave, and export flows", () => {

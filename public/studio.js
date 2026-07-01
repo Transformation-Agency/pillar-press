@@ -74,7 +74,10 @@
   let _creditsCache = null;     // last known credits value (number)
   let _creditsPromise = null;
 
-  function currentModels() { return _catalog || MODELS; }
+  function visibleModel(m) {
+    return m && !String(m.id || "").startsWith("fallback-") && !/\bfallback\b/i.test(String(m.name || ""));
+  }
+  function currentModels() { return (_catalog || MODELS).filter(visibleModel); }
 
   async function apiGet(path) {
     const r = await fetch("/api" + path, { headers: { Accept: "application/json" } });

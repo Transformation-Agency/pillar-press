@@ -249,7 +249,7 @@ describe("desktop OpenAI media provider setup wiring", () => {
     const helperSource = readFileSync(new URL("../public/setup-helper.jsx", import.meta.url), "utf8");
 
     for (const source of [appSource, helperSource]) {
-      expect(source).toContain('openai: ["gpt-4o-mini", "gpt-4.1-mini", "gpt-4o"]');
+      expect(source).toContain('openai: ["gpt-5.2", "gpt-4o-mini", "gpt-4.1-mini", "gpt-4o"]');
       expect(source).toContain('const fallbackOllamaModels = ["gemma4:26b-mlx", "llama3.2", "qwen2.5:latest", "mistral"]');
       expect(source).toContain('openai: "OpenAI / ChatGPT"');
       expect(source).toContain('/^gemma4/i.test');
@@ -258,14 +258,27 @@ describe("desktop OpenAI media provider setup wiring", () => {
     }
 
     expect(appSource).toContain("const modelOptionsForSetup = () =>");
+    expect(appSource).toContain('const [setupSource, setSetupSource] = React.useState("local")');
+    expect(appSource).toContain('const modelSource = isHostedSetup ? "cloud" : setupSource');
     expect(appSource).toContain("visibleModelOptions.map");
-    expect(appSource).toContain("Showing \" + providerLabel(cloudProvider) + \" defaults until you list models.");
+    expect(appSource).toContain("const cloudProviderOptions = [");
+    expect(appSource).toContain("const localProviderOptions = [");
+    expect(appSource).toContain('name: "LM Studio"');
+    expect(appSource).toContain("const refreshLocalSetup = async (nextMode) =>");
+    expect(appSource).toContain('refreshLocalSetup("ollama").catch');
+    expect(appSource).toContain('setSetupSource("local")');
+    expect(appSource).toContain('setSetupSource("cloud")');
+    expect(appSource).toContain("setLocalCompatibleModels([])");
+    expect(appSource).toContain("return modelOptionsFor(cloudProvider, listed);");
+    expect(appSource).toContain("Use model");
     expect(appSource).toContain('const canUseSavedDesktopKey = !isHostedSetup && (config.provider === "openai" || config.provider === "xai")');
+    expect(appSource).toContain("const savedProfile = savedCloudProfileFor(cloudProvider)");
     expect(appSource).toContain("if (!canUseSavedDesktopKey && config.provider !== \"openai-compatible\" && config.provider !== \"ollama\" && !config.apiKey && !config.profileId)");
+    expect(appSource).toContain("if (!key && !canUseSavedDesktopKey && !profileHasApiKey(savedProfile)) throw new Error(\"Add an API key for the selected cloud provider.\");");
 
     expect(helperSource).toContain('const options = uniqueModelOptions(mode === "ollama" ? listedModels.concat(ollamaSuggestions) : (listedModels.length ? listedModels : (cloudModels[provider] || [])));');
     expect(helperSource).toContain('setModel(localModels[0] || "gemma4:26b-mlx")');
-    expect(helperSource).toContain('setModel("gpt-4o-mini")');
+    expect(helperSource).toContain('setModel("gpt-5.2")');
     expect(helperSource).toContain("Available models");
     expect(helperSource).toContain('if (!(hasDesktop && ["openai", "xai"].includes(config.provider)) && ["openai", "anthropic", "gemini", "xai"].includes(config.provider) && !config.apiKey)');
     expect(helperSource).not.toContain('list="kp-inline-model-options"');

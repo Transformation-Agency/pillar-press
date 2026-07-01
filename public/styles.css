@@ -321,6 +321,163 @@ a { color: var(--accent-ink); text-decoration: none; }
   text-underline-offset: 3px;
 }
 
+/* ---- Shared feedback widget ---- */
+.feedback-fab {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 170;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--hair-2);
+  border-radius: 999px;
+  padding: 10px 14px;
+  background: var(--paper-2);
+  color: var(--accent-ink);
+  box-shadow: var(--shadow-lg);
+  cursor: pointer;
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 600;
+}
+.feedback-fab:hover { border-color: var(--accent); color: var(--accent); }
+.feedback-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 230;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background: oklch(0 0 0 / 0.38);
+}
+.feedback-modal {
+  width: min(680px, 100%);
+  max-height: calc(100vh - 56px);
+  overflow: auto;
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-lg);
+  background: var(--paper-2);
+  color: var(--ink);
+  box-shadow: var(--shadow-lg);
+  padding: 24px;
+}
+.feedback-modal-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: flex-start;
+  margin-bottom: 18px;
+}
+.feedback-modal h2 {
+  margin: 4px 0 6px;
+  font-size: 28px;
+}
+.feedback-modal p { margin: 0; line-height: 1.5; }
+.feedback-form {
+  display: grid;
+  gap: 14px;
+}
+.feedback-form label {
+  display: grid;
+  gap: 6px;
+}
+.feedback-form label > span,
+.feedback-screenshot strong {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--ink-2);
+}
+.feedback-form label em {
+  font-style: normal;
+  color: var(--ink-3);
+  font-weight: 400;
+}
+.feedback-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.feedback-grid button,
+.feedback-small-button {
+  border: 1px solid var(--hair);
+  border-radius: var(--radius);
+  background: var(--paper-sunk);
+  color: var(--ink-2);
+  cursor: pointer;
+  padding: 9px 11px;
+  font-family: var(--font-body);
+  font-size: 14px;
+}
+.feedback-grid button.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-weight: 650;
+}
+.feedback-screenshot {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--hair);
+  border-radius: var(--radius);
+  background: var(--paper-sunk);
+  padding: 13px;
+}
+.feedback-screenshot-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.feedback-small-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  background: var(--paper-2);
+}
+.feedback-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.feedback-preview {
+  display: grid;
+  gap: 6px;
+  color: var(--ink-3);
+  font-size: 12.5px;
+}
+.feedback-preview img {
+  max-width: 100%;
+  max-height: 200px;
+  object-fit: contain;
+  border: 1px solid var(--hair);
+  border-radius: var(--radius);
+  background: var(--paper-2);
+}
+.feedback-message {
+  border-radius: var(--radius);
+  padding: 9px 11px;
+  font-size: 13.5px;
+}
+.feedback-message.success {
+  border: 1px solid color-mix(in oklab, var(--sev-nice) 35%, var(--hair));
+  color: var(--sev-nice);
+  background: color-mix(in oklab, var(--sev-nice) 8%, transparent);
+}
+.feedback-message.error {
+  border: 1px solid color-mix(in oklab, var(--sev-must) 35%, var(--hair));
+  color: var(--sev-must);
+  background: color-mix(in oklab, var(--sev-must) 8%, transparent);
+}
+.feedback-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 /* ---- Inputs ---- */
 textarea.field, input.field, .field {
   font-family: var(--font-body); font-size: 16px; color: var(--ink);
@@ -366,6 +523,12 @@ hr.rule { border: none; border-top: 1px solid var(--hair); margin: 0; }
   }
   .topnav::-webkit-scrollbar { display: none; }
   .topnav > button, .topnav > div > button { padding: 7px 11px; flex: 0 0 auto; }
+  .feedback-backdrop { padding: 14px; align-items: end; }
+  .feedback-modal { max-height: calc(100vh - 28px); padding: 18px; }
+  .feedback-grid { grid-template-columns: 1fr; }
+  .feedback-actions { flex-direction: column-reverse; }
+  .feedback-actions .btn { width: 100%; }
+  .feedback-fab { right: 14px; bottom: 14px; }
 
   /* Comfortable tap targets. */
   .btn { padding: 10px 15px; }

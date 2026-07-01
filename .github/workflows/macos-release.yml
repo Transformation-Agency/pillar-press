@@ -41,6 +41,7 @@ jobs:
       MACOSX_DEPLOYMENT_TARGET: "12.0"
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      VITE_PILLAR_PRESS_FEEDBACK_API_BASE: ${{ vars.VITE_PILLAR_PRESS_FEEDBACK_API_BASE }}
       npm_config_arch: ${{ matrix.node_arch }}
 
     steps:
@@ -119,6 +120,18 @@ jobs:
 
       - name: Build signed DMG
         run: npm run desktop:build -- --target "${{ matrix.target }}" --config src-tauri/tauri.ci.conf.json
+
+      - name: Verify bundled Node sidecar architecture
+        run: |
+          set -euo pipefail
+          node_bin="$(find "src-tauri/target/${{ matrix.target }}/release/bundle/macos" -path '*/Resources/resources/node/bin/node' -print -quit)"
+          test -n "$node_bin"
+          file "$node_bin"
+          if [ "${{ matrix.target }}" = "x86_64-apple-darwin" ]; then
+            file -b "$node_bin" | grep -q "x86_64"
+          else
+            file -b "$node_bin" | grep -q "arm64"
+          fi
 
       - name: Notarize and staple DMG
         env:

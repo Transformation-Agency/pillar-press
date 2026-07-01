@@ -518,7 +518,7 @@ function InlineModelSetup({ status, onSaved }) {
   const [provider, setProvider] = React.useState((status && status.provider && status.provider !== "ollama") ? status.provider : "openai");
   const [baseUrl, setBaseUrl] = React.useState("");
   const [apiKey, setApiKey] = React.useState("");
-  const [model, setModel] = React.useState((status && status.model) || "gpt-4o-mini");
+  const [model, setModel] = React.useState((status && status.model) || "gpt-5.2");
   const [profileName, setProfileName] = React.useState("");
   const [listedModels, setListedModels] = React.useState([]);
   const [ollamaStatus, setOllamaStatus] = React.useState(null);
@@ -526,7 +526,7 @@ function InlineModelSetup({ status, onSaved }) {
   const [busy, setBusy] = React.useState(false);
 
   const cloudModels = {
-    openai: ["gpt-4o-mini", "gpt-4.1-mini", "gpt-4o"],
+    openai: ["gpt-5.2", "gpt-4o-mini", "gpt-4.1-mini", "gpt-4o"],
     anthropic: ["claude-haiku-4-5", "claude-sonnet-4-5"],
     gemini: ["gemini-2.5-flash", "gemini-2.5-pro"],
     xai: ["grok-4.3", "grok-3-mini"],
@@ -574,7 +574,7 @@ function InlineModelSetup({ status, onSaved }) {
         .then((items) => {
           const localModels = preferGemma(items || []);
           setListedModels(localModels);
-          if (localModels[0] && (!model.trim() || model === "gpt-4o-mini")) setModel(localModels[0]);
+          if (localModels[0] && (!model.trim() || model === "gpt-5.2" || model === "gpt-4o-mini")) setModel(localModels[0]);
         })
         .catch(() => {});
     }
@@ -597,7 +597,7 @@ function InlineModelSetup({ status, onSaved }) {
     }
     setProvider("openai");
     setBaseUrl("");
-    setModel("gpt-4o-mini");
+    setModel("gpt-5.2");
   }
 
   function currentConfig() {

@@ -98,7 +98,11 @@ function resolveBundledDylib(linkedPath: string, fromFile: string) {
 }
 
 async function copyNodeRuntime() {
-  const nodePath = await realpath(optional("PILLAR_PRESS_NODE_RUNTIME_PATH") || process.execPath);
+  const nodePath = await realpath(
+    optional("PILLAR_PRESS_NODE_SIDECAR_PATH") ||
+    optional("PILLAR_PRESS_NODE_RUNTIME_PATH") ||
+    process.execPath,
+  );
   if (!(await exists(nodePath))) {
     throw new Error(`Could not find the build Node runtime at ${nodePath}.`);
   }
@@ -161,7 +165,7 @@ async function copyNodeRuntime() {
       copiedFrom: nodePath,
       sourceName: basename(nodePath),
       platform: process.platform,
-      arch: optional("PILLAR_PRESS_NODE_RUNTIME_ARCH") || process.arch,
+      arch: optional("PILLAR_PRESS_NODE_RUNTIME_ARCH") || optional("PILLAR_PRESS_NODE_SIDECAR_ARCH") || process.arch,
       version: process.version,
       bin: `bin/${binName}`,
       dylibs: [...bundledDylibs.values()].map((path) => `lib/${basename(path)}`),
